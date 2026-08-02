@@ -196,8 +196,13 @@ source $USER_DATA/ssl/le.conf
 if [ "$aliases" = "*.$domain" ]; then
 	wildcard='yes'
 	proto="dns-01"
-	if [ ! -e "$HESTIA/data/users/$user/dns/$domain.conf" ]; then
-		check_result "$E_NOTEXIST" "DNS domain $domain doesn't exist"
+	# When DNS is delegated to Cloudflare (DNS_API_PROVIDER=cloudflare), the LE
+	# _acme-challenge TXT record is published via the Cloudflare API, so a local
+	# Hestia DNS zone is not required.
+	if [ "$DNS_API_PROVIDER" != "cloudflare" ]; then
+		if [ ! -e "$HESTIA/data/users/$user/dns/$domain.conf" ]; then
+			check_result "$E_NOTEXIST" "DNS domain $domain doesn't exist"
+		fi
 	fi
 else
 	proto="http-01"
@@ -319,13 +324,22 @@ for auth in $authz; do
 	if [ "$wildcard" = 'yes' ]; then
 		record=$(printf "%s" "$token.$THUMB" \
 			| openssl dgst -sha256 -binary | encode_base64)
-		old_records=$($BIN/v-list-dns-records "$user" "$domain" plain | grep 'TXT')
-		old_records=$(echo "$old_records" | grep _acme-challenge | cut -f 1)
-		for old_record in $old_records; do
-			$BIN/v-delete-dns-record "$user" "$domain" "$old_record"
-		done
-		$BIN/v-add-dns-record "$user" "$domain" "_acme-challenge" "TXT" "$record"
-		check_result $? "DNS _acme-challenge record wasn't created ($domain)"
+		if [ "$DNS_API_PROVIDER" = "cloudflare" ]; then
+			# Publish the _acme-challenge TXT record via the Cloudflare API.
+			# The returned record id is stored for cleanup after validation.
+			cf_record_id=$($BIN/v-add-remote-dns-record-cloudflare "$domain" "$record")
+			check_result $? "Cloudflare _acme-challenge record wasn't created ($domain)"
+			# Give Cloudflare's edge a moment to propagate the record.
+			sleep 5
+		else
+			old_records=$($BIN/v-list-dns-records "$user" "$domain" plain | grep 'TXT')
+			old_records=$(echo "$old_records" | grep _acme-challenge | cut -f 1)
+			for old_record in $old_records; do
+				$BIN/v-delete-dns-record "$user" "$domain" "$old_record"
+			done
+			$BIN/v-add-dns-record "$user" "$domain" "_acme-challenge" "TXT" "$record"
+			check_result $? "DNS _acme-challenge record wasn't created ($domain)"
+		fi
 	else
 		if [ -z "$mail" ]; then
 			if [ "$WEB_SYSTEM" = 'nginx' ] || [ "$PROXY_SYSTEM" = 'nginx' ]; then
@@ -652,6 +666,11 @@ fi
 # Remove challenge folder if exist
 if [ -n "$well_known" ]; then
 	rm -fr $well_known
+fi
+
+# Clean up the Cloudflare _acme-challenge TXT record now that validation is done.
+if [ -n "$cf_record_id" ]; then
+	$BIN/v-delete-remote-dns-record-cloudflare "$domain" "$cf_record_id"
 fi
 
 # Remove temporary SSL folder

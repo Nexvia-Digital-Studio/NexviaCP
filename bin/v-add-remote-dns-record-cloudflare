@@ -1,0 +1,89 @@
+#!/bin/bash
+# info: create a DNS TXT record in Cloudflare (for LE dns-01 wildcard)
+# options: DOMAIN RECORD
+#
+# example: v-add-remote-dns-record-cloudflare example.com "challenge-value"
+#
+# Uses the Cloudflare API v4 to create a _acme-challenge TXT record. The newly
+# created record ID is printed to stdout (the last line) so the caller can
+# delete it later with v-delete-remote-dns-record-cloudflare.
+# Requires DNS_API_PROVIDER=cloudflare, CF_API_TOKEN and CF_ZONE_ID in hestia.conf.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+domain=$1
+record=$2
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'DOMAIN RECORD'
+is_format_valid 'domain' 'record'
+check_hestia_demo_mode
+
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "Error: Script can be run executed only by root"
+	exit 10
+fi
+
+if [ "$DNS_API_PROVIDER" != "cloudflare" ]; then
+	check_result "$E_INVALID" "DNS_API_PROVIDER is not set to cloudflare"
+fi
+if [ -z "$CF_API_TOKEN" ]; then
+	check_result "$E_NOTEXIST" "CF_API_TOKEN is not configured"
+fi
+if [ -z "$CF_ZONE_ID" ]; then
+	check_result "$E_NOTEXIST" "CF_ZONE_ID is not configured"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Cloudflare API v4 endpoint for DNS records.
+api_url="https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records"
+
+# Build the JSON payload. The record content may contain characters that need
+# escaping, so assemble it with jq to stay JSON-safe.
+payload=$(jq -nc \
+	--arg name "_acme-challenge.$domain" \
+	--arg content "$record" \
+	'{type:"TXT", name:$name, content:$content, ttl:120}')
+
+answer=$(curl --silent --show-error --max-time 30 \
+	--request POST "$api_url" \
+	--header "Authorization: Bearer $CF_API_TOKEN" \
+	--header "Content-Type: application/json" \
+	--data "$payload")
+
+# Parse the response.
+success=$(echo "$answer" | jq -r '.success // false')
+if [ "$success" != "true" ]; then
+	err_msg=$(echo "$answer" | jq -r '.errors[0].message // "unknown Cloudflare API error"')
+	check_result "$E_CONNECT" "Cloudflare API request failed for $domain: $err_msg"
+fi
+
+# Extract the newly created record id (printed to stdout for the caller).
+record_id=$(echo "$answer" | jq -r '.result.id')
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-log-action "system" "Info" "DNS" "Created Cloudflare TXT record for _acme-challenge.$domain (id: $record_id)."
+log_event "$OK" "$ARGUMENTS"
+
+echo "$record_id"
+exit

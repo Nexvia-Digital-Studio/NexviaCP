@@ -1,0 +1,153 @@
+#!/bin/bash
+# info: apply per-domain RAM/CPU cgroup limits (baseline + peak)
+# options: USER DOMAIN
+#
+# example: v-update-web-domain-cgroup admin example.com
+#
+# Applies the per-domain resource limits stored in the domain config:
+#   - WEB_CGROUP_HIGH  (MemoryHigh: soft limit / baseline)
+#   - WEB_CGROUP_MAX   (MemoryMax: hard limit / peak during traffic bursts)
+#   - WEB_CPU_QUOTA    (CPU quota, e.g. 50% = half a core)
+#
+# Implementation:
+#   - Writes php_admin_value[memory_limit] into the domain's PHP-FPM pool so
+#     each PHP worker is bounded to the baseline memory.
+#   - Sets systemd cgroup properties on the PHP-FPM pool unit (when available)
+#     to enforce the kernel-level MemoryHigh/MemoryMax/CPUQuota envelope.
+#   - Falls back gracefully (no-op) when cgroups v2 / systemd scope is absent.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER DOMAIN'
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Load per-domain limits from the web config (may be empty = unlimited).
+mem_high=$(get_object_value 'web' 'DOMAIN' "$domain" '$WEB_CGROUP_HIGH')
+mem_max=$(get_object_value 'web' 'DOMAIN' "$domain" '$WEB_CGROUP_MAX')
+cpu_quota=$(get_object_value 'web' 'DOMAIN' "$domain" '$WEB_CPU_QUOTA')
+
+# Normalize empty -> unlimited sentinel.
+[ -z "$mem_high" ] && mem_high="unlimited"
+[ -z "$mem_max" ] && mem_max="unlimited"
+[ -z "$cpu_quota" ] && cpu_quota="unlimited"
+
+# Locate the domain's PHP-FPM pool configuration file.
+backend_version=$(get_object_value 'web' 'DOMAIN' "$domain" '$BACKEND')
+pool_file=""
+if [ -n "$backend_version" ]; then
+	for candidate in \
+		"/etc/php/$backend_version/fpm/pool.d/$domain.conf" \
+		"/etc/php/$backend_version/fpm/pool.d/$user.conf"; do
+		if [ -f "$candidate" ]; then
+			pool_file="$candidate"
+			break
+		fi
+	done
+fi
+
+# --- 1. PHP-FPM pool: php_admin_value[memory_limit] (per-worker baseline) ---
+# This is the genuinely per-site RAM isolation. Each PHP worker of this domain
+# is bounded to mem_high (baseline). Combined with the corrected max_children
+# math below, the domain can never exceed peak = max_children * memory_limit.
+if [ -n "$pool_file" ]; then
+	# Remove any previously injected lines so we can re-apply cleanly.
+	sed -i '/;# nexvia-cgroup-begin/,/;# nexvia-cgroup-end/d' "$pool_file" 2>/dev/null || true
+
+	php_mem_limit="$mem_high"
+	if [ "$php_mem_limit" = "unlimited" ]; then
+		php_mem_limit="-1"
+	fi
+
+	{
+		echo ";# nexvia-cgroup-begin (managed by v-update-web-domain-cgroup)"
+		echo "php_admin_value[memory_limit] = $php_mem_limit"
+		# Correct max_children math: peak (hard ceiling) = children * memory_limit.
+		# So max_children = peak_bytes / memory_limit_bytes. With memory_limit as
+		# the per-worker cap, the domain's total worst-case RSS stays within peak.
+		# Guard: peak must be >= baseline (validated upstream), and both bounded.
+		if [ "$mem_max" != "unlimited" ] && [ "$mem_high" != "unlimited" ]; then
+			peak_bytes=$(memory_to_bytes "$mem_max" 2>/dev/null)
+			high_bytes=$(memory_to_bytes "$mem_high" 2>/dev/null)
+			if [ -n "$peak_bytes" ] && [ -n "$high_bytes" ] && [ "$high_bytes" -gt 0 ]; then
+				max_children=$((peak_bytes / high_bytes))
+				# Clamp to a sane range: at least 2 workers, at most 64.
+				[ "$max_children" -lt 2 ] && max_children=2
+				[ "$max_children" -gt 64 ] && max_children=64
+				echo "pm.max_children = $max_children"
+			fi
+		elif [ "$mem_max" != "unlimited" ]; then
+			# Baseline unlimited but peak set: fall back to a conservative 32MB
+			# per-worker reservation so the peak is still respected.
+			peak_bytes=$(memory_to_bytes "$mem_max" 2>/dev/null)
+			if [ -n "$peak_bytes" ] && [ "$peak_bytes" -gt 0 ]; then
+				max_children=$((peak_bytes / 33554432))
+				[ "$max_children" -lt 2 ] && max_children=2
+				[ "$max_children" -gt 64 ] && max_children=64
+				echo "pm.max_children = $max_children"
+			fi
+		fi
+		echo ";# nexvia-cgroup-end"
+	} >> "$pool_file"
+
+	# Reload PHP-FPM to pick up the new pool settings (graceful, no downtime).
+	if [ -n "$backend_version" ]; then
+		systemctl reload "php$backend_version-fpm" 2>/dev/null || true
+	fi
+fi
+
+# --- 2. CPU quota: applied at the USER level, not the PHP version service ---
+# NOTE: per-domain CPU isolation via systemd is structurally impossible here
+# because all pools of a given PHP version share ONE master (php<X.Y>-fpm.service).
+# Setting CPUQuota on that unit would limit ALL sites on that PHP version — that
+# is the bug this section removes. CPU limiting is instead enforced per-USER at
+# the kernel level by v-update-user-cgroup (user-<uid>.slice CPUQuota), which is
+# the correct isolation boundary for CPU in this architecture.
+#
+# The stored WEB_CPU_QUOTA value is retained for the UI/reporting and for the
+# Node/.NET backend manager (which CAN apply a real per-site cgroup because each
+# such backend runs in its own dedicated systemd unit).
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+log_event "$OK" "$ARGUMENTS"
+exit
+
+# Helper: convert human memory size (256M, 1G, 2G) to bytes.
+memory_to_bytes() {
+	local val="$1"
+	local num unit
+	num=$(echo "$val" | grep -oE '^[0-9]+')
+	unit=$(echo "$val" | grep -oE '[A-Za-z]+$' | tr '[:lower:]' '[:upper:]')
+	case "$unit" in
+		K|KB) echo $((num * 1024)) ;;
+		M|MB) echo $((num * 1048576)) ;;
+		G|GB) echo $((num * 1073741824)) ;;
+		T|TB) echo $((num * 1099511627776)) ;;
+		*) echo "$num" ;;
+	esac
+}

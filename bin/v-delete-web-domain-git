@@ -1,0 +1,69 @@
+#!/bin/bash
+# info: disable automatic git deployment for a web domain
+# options: USER DOMAIN
+#
+# example: v-delete-web-domain-git admin example.com
+#
+# This script removes the git deployment configuration for a domain:
+#   - clears GIT_REPO, GIT_BRANCH from the domain config
+#   - rotates (regenerates) the GIT_DEPLOY_SECRET so old webhooks stop working
+#   - leaves the checked-out code in public_html untouched
+# Note: the .git directory and deploy.sh are NOT removed; run rm manually if
+# you want a full teardown.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER DOMAIN'
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Clear repo metadata in domain config.
+update_object_value 'web' 'DOMAIN' "$domain" '$GIT_REPO' ''
+update_object_value 'web' 'DOMAIN' "$domain" '$GIT_BRANCH' ''
+
+# Rotate the deploy secret so any existing GitHub/GitLab webhook stops working.
+new_secret=$(generate_password 'a-z0-9' 64)
+if [ -z "$new_secret" ]; then
+	new_secret=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+fi
+update_object_value 'web' 'DOMAIN' "$domain" '$GIT_DEPLOY_SECRET' "$new_secret"
+
+# Push the rotated secret into the webhook receiver so it stays self-consistent.
+deploy_php="$HOMEDIR/$user/web/$domain/public_html/deploy.php"
+if [ -f "$deploy_php" ]; then
+	# Replace any existing secret literal on the $DEPLOY_SECRET line.
+	sed -i "s|^\$DEPLOY_SECRET = '.*';|\\$DEPLOY_SECRET = '$new_secret';|" "$deploy_php"
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+# Logging
+$BIN/v-log-action "system" "Info" "Web" "Git auto-deploy disabled for domain (Domain: $domain, User: $user)."
+log_event "$OK" "$ARGUMENTS"
+
+echo "[+] Git auto-deploy disabled for $domain. Webhook secret rotated."
+exit

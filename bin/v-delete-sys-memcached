@@ -1,0 +1,64 @@
+#!/bin/bash
+# info: disable Memcached server and PHP memcached extension
+# options: NONE
+#
+# example: v-delete-sys-memcached
+#
+# Stops and disables the Memcached service, removes the PHP memcached extension
+# for every installed PHP-FPM version, and flips MEMCACHED_SUPPORT=no.
+# The memcached package itself is NOT purged (so data is retained).
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_hestia_demo_mode
+
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "Error: Script can be run executed only by root"
+	exit 10
+fi
+
+if [ "$MEMCACHED_SUPPORT" != "yes" ]; then
+	echo "[+] Memcached is not enabled."
+	exit 0
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Stop + disable the service (keep the package + data intact).
+systemctl stop memcached >/dev/null 2>&1 || true
+systemctl disable memcached >/dev/null 2>&1 || true
+
+# Disable the PHP memcached extension for every installed PHP version.
+for phpver in $(ls /etc/php/ 2>/dev/null); do
+	if [ -d "/etc/php/$phpver/fpm" ]; then
+		phpdismod -v "$phpver" memcached >/dev/null 2>&1 || true
+		systemctl reload "php$phpver-fpm" >/dev/null 2>&1 || true
+	fi
+done
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-change-sys-config-value 'MEMCACHED_SUPPORT' 'no'
+$BIN/v-log-action "system" "Info" "Plugins" "Memcached server disabled and PHP memcached extension removed."
+log_event "$OK" "$ARGUMENTS"
+
+echo "[+] Memcached disabled."
+exit

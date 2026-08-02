@@ -358,10 +358,51 @@
 									disabled
 								>
 							</div>
-						<?php } } ?>
+							<?php } } ?>
+						<div class="u-mt15 u-mb10">
+							<label for="v_dns_api_provider" class="form-label">
+								<?= tohtml( _("DNS API for Wildcard SSL")) ?>
+								<span class="hint">
+									<?= tohtml( _("Publish the Let's Encrypt _acme-challenge TXT record through the Cloudflare API instead of a local DNS zone.")) ?>
+								</span>
+							</label>
+							<select class="form-select" name="v_dns_api_provider" id="v_dns_api_provider">
+								<option value="">
+									<?= tohtml( _("Disabled (use local DNS)")) ?>
+								</option>
+								<option value="cloudflare" <?= tohtml(($_SESSION["DNS_API_PROVIDER"] ?? "") == "cloudflare" ? "selected" : "") ?>>
+									<?= tohtml( _("Cloudflare API")) ?>
+								</option>
+							</select>
+						</div>
+						<div class="u-mb10">
+							<label for="v_cf_api_token" class="form-label">
+								<?= tohtml( _("Cloudflare API Token")) ?>
+								<span class="hint">(<?= tohtml( _("Bearer token with Zone:Edit permission")) ?>)</span>
+							</label>
+							<input
+								type="text"
+								class="form-control js-password-input"
+								name="v_cf_api_token"
+								id="v_cf_api_token"
+								value="<?= tohtml($_SESSION["CF_API_TOKEN"] ?? "") ?>"
+							>
+						</div>
+						<div class="u-mb10">
+							<label for="v_cf_zone_id" class="form-label">
+								<?= tohtml( _("Cloudflare Zone ID")) ?>
+							</label>
+							<input
+								type="text"
+								class="form-control"
+								name="v_cf_zone_id"
+								id="v_cf_zone_id"
+								value="<?= tohtml($_SESSION["CF_ZONE_ID"] ?? "") ?>"
+							>
+						</div>
 					</div>
 				</details>
-			<?php } ?>
+				<?php } ?>
 
 			<!-- Mail Server section -->
 			<?php if (!empty($_SESSION["MAIL_SYSTEM"])) { ?>
@@ -645,6 +686,27 @@
 								</label>
 								<input type="text" class="form-control" name="v_pgsql_url" id="v_pgsql_url" value="<?= tohtml($_SESSION["DB_PGA_ALIAS"]) ?>">
 							</div>
+							<div class="u-mb10">
+								<label for="v_phppgadmin_key" class="form-label">
+									<?= tohtml( _("phpPgAdmin Single Sign On")) ?>
+									<span class="hint">
+										<?= tohtml( _("Creates a short-lived PostgreSQL role per click so users can open phpPgAdmin without typing a database password.")) ?>
+									</span>
+								</label>
+								<select
+									class="form-select"
+									name="v_phppgadmin_key"
+									id="v_phppgadmin_key"
+									<?php $_SESSION["API"] != "yes" ? "disabled" : ""; ?>
+								>
+									<option value="no">
+										<?= tohtml( _("Disabled")) ?>
+									</option>
+									<option value="yes" <?= tohtml(($_SESSION["PGA_SSO_KEY"] ?? "") != "" ? "selected" : "") ?>>
+										<?= tohtml( _("Enabled")) ?>
+									</option>
+								</select>
+							</div>
 						<?php } ?>
 						<?php if ($v_pgsql == "yes") {
 							$i = 0;
@@ -673,6 +735,49 @@
 					</div>
 				</details>
 			<?php } ?>
+
+			<!-- Cache section (NexviaCP: Redis & Memcached) -->
+			<details class="box-collapse u-mb10">
+				<summary class="box-collapse-header">
+					<i class="fas fa-bolt u-mr10"></i><?= tohtml( _("In-Memory Cache")) ?>
+				</summary>
+				<div class="box-collapse-content">
+					<div class="alert alert-info u-mb10" role="alert">
+						<i class="fas fa-info"></i>
+						<p>
+							<?= tohtml( _("Enabling a cache server installs the service and the matching PHP extension for all PHP versions. This may take a minute.")) ?>
+						</p>
+					</div>
+					<div class="u-mb10">
+						<label for="v_redis" class="form-label">
+							<?= tohtml( _("Redis Server")) ?>
+							<span class="hint">(127.0.0.1:6379)</span>
+						</label>
+						<select class="form-select" name="v_redis" id="v_redis">
+							<option value="no">
+								<?= tohtml( _("Disabled")) ?>
+							</option>
+							<option value="yes" <?= tohtml(($_SESSION["REDIS_SUPPORT"] ?? "") == "yes" ? "selected" : "") ?>>
+								<?= tohtml( _("Enabled")) ?>
+							</option>
+						</select>
+					</div>
+					<div class="u-mb10">
+						<label for="v_memcached" class="form-label">
+							<?= tohtml( _("Memcached Server")) ?>
+							<span class="hint">(127.0.0.1:11211)</span>
+						</label>
+						<select class="form-select" name="v_memcached" id="v_memcached">
+							<option value="no">
+								<?= tohtml( _("Disabled")) ?>
+							</option>
+							<option value="yes" <?= tohtml(($_SESSION["MEMCACHED_SUPPORT"] ?? "") == "yes" ? "selected" : "") ?>>
+								<?= tohtml( _("Enabled")) ?>
+							</option>
+						</select>
+					</div>
+				</div>
+			</details>
 
 			<!-- Backups section -->
 			<details class="box-collapse u-mb10">
@@ -796,7 +901,7 @@
 									Backblaze
 								</option>
 								<option value="rclone">
-									Rclone
+									Google Drive / Rclone (S3, R2, Wasabi)
 								</option>
 							</select>
 						</div>

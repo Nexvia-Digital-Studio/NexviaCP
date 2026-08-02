@@ -1,0 +1,190 @@
+#!/bin/bash
+# info: provision an isolated backend process for a Node.js / .NET domain
+# options: USER DOMAIN APP_TYPE [START_CMD]
+#
+# example: v-add-web-domain-app admin acme.com node "npm start"
+# example: v-add-web-domain-app admin api.acme.com dotnet "dotnet run --no-launch-profile --project App.csproj"
+#
+# This script gives Node.js / .NET / Next.js / NestJS / WebSocket apps REAL
+# per-site isolation that Hestia did not provide before:
+#
+#   1. A unique dynamic port (9100-9999) is allocated per domain and stored in
+#      the domain config ($APP_BACKEND_PORT). The node-js / dotnet / websocket
+#      nginx templates reference it via %app_port%, so multiple apps can run on
+#      the same server WITHOUT the old fixed-port collision (3000/5000).
+#
+#   2. A dedicated systemd unit (hestia-app-<user>-<domain>.service) runs the
+#      app AS the domain user. Because it is its own unit, we can attach a REAL
+#      per-site cgroup: MemoryMax + CPUQuota are enforced at the KERNEL level,
+#      so a runaway app cannot starve the other 50 sites. This is the isolation
+#      layer that PHP-FPM cannot get (shared master) but app backends CAN.
+#
+#   3. deploy.sh calls v-restart-web-domain-app after git pull, so code updates
+#      trigger a zero-downtime reload of the app on the same port.
+#
+# APP_TYPE accepts: node, dotnet, websocket, custom.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '3' "$#" 'USER DOMAIN APP_TYPE [START_CMD]'
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+is_object_unsuspended 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
+
+case "${3:-}" in
+	node|dotnet|websocket|custom) : ;;
+	*) check_result "$E_INVALID" "invalid APP_TYPE (use node|dotnet|websocket|custom)" ;;
+esac
+
+check_hestia_demo_mode
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+app_type="$3"
+start_cmd="${4:-}"
+
+docroot="$HOMEDIR/$user/web/$domain/public_html"
+domain_home="$HOMEDIR/$user/web/$domain"
+unit_name="hestia-app-${user}-${domain}"
+# systemd unit names must be filename-safe; strip dots.
+unit_file="/etc/systemd/system/${unit_name}.service"
+
+# --- 1. Allocate a unique dynamic port (9100-9999) ---
+existing_port=$(get_object_value 'web' 'DOMAIN' "$domain" '$APP_BACKEND_PORT')
+if [ -n "$existing_port" ] && [ "$existing_port" != "%app_port%" ]; then
+	app_port="$existing_port"
+else
+	app_port=""
+	# Pick the first free port in the app range not used by any other domain.
+	for candidate in $(seq 9100 9999); do
+		if ss -ltn 2>/dev/null | awk '{print $4}' | grep -q ":${candidate}$"; then
+			continue # in use by a listening socket
+		fi
+		# Also avoid ports already claimed in other domains' config.
+		if grep -rq "APP_BACKEND_PORT='${candidate}'" "$HESTIA/data/users/" 2>/dev/null; then
+			continue
+		fi
+		app_port="$candidate"
+		break
+	done
+	if [ -z "$app_port" ]; then
+		check_result "$E_NOTEXIST" "no free app port in range 9100-9999"
+	fi
+fi
+
+# --- 2. Determine the start command if not provided ---
+if [ -z "$start_cmd" ]; then
+	case "$app_type" in
+		node|websocket)
+			if [ -f "$docroot/package.json" ]; then
+				# Prefer scripts.start, then fall back to "node server.js".
+				start_cmd="npm start"
+				# If no "start" script, use a sane default.
+				if ! grep -q '"start"' "$docroot/package.json" 2>/dev/null; then
+					start_cmd="node server.js"
+				fi
+			else
+				start_cmd="node server.js"
+			fi
+			;;
+		dotnet)
+			# Find the first .csproj in the docroot.
+			csproj=$(ls "$docroot"/*.csproj 2>/dev/null | head -1)
+			if [ -n "$csproj" ]; then
+				# Bind explicitly to the allocated port via ASPNETCORE_URLS.
+				start_cmd="dotnet run --no-launch-profile --urls http://127.0.0.1:${app_port} --project \"${csproj}\""
+			else
+				start_cmd="dotnet run --urls http://127.0.0.1:${app_port}"
+			fi
+			;;
+		custom)
+			check_result "$E_INVALID" "APP_TYPE=custom requires an explicit START_CMD"
+			;;
+	esac
+fi
+
+# For Node/websocket we expose the port to the app via the PORT env var so the
+# app can listen on it (Express/Next/Nest all honor process.env.PORT). For .NET
+# we already baked the port into the --urls argument above.
+env_port_line=""
+if [ "$app_type" = "node" ] || [ "$app_type" = "websocket" ]; then
+	env_port_line="Environment=\"PORT=${app_port}\"\nEnvironment=\"NODE_ENV=production\""
+fi
+
+# --- 3. Load cgroup limits (per-domain, if set) for the unit ---
+mem_high=$(get_object_value 'web' 'DOMAIN' "$domain" '$WEB_CGROUP_HIGH')
+mem_max=$(get_object_value 'web' 'DOMAIN' "$domain" '$WEB_CGROUP_MAX')
+cpu_quota=$(get_object_value 'web' 'DOMAIN' "$domain" '$WEB_CPU_QUOTA')
+
+cgroup_lines=""
+[ -n "$mem_max" ] && cgroup_lines="${cgroup_lines}MemoryMax=${mem_max}\n"
+[ -n "$mem_high" ] && cgroup_lines="${cgroup_lines}MemoryHigh=${mem_high}\n"
+[ -n "$cpu_quota" ] && cgroup_lines="${cgroup_lines}CPUQuota=${cpu_quota}\n"
+
+# --- 4. Write the systemd unit ---
+# Runs as the domain user (never root), in the domain's docroot, bound to the
+# allocated port. The cgroup limits above are enforced at the kernel level for
+# THIS unit only — true per-site isolation.
+printf '[Unit]\nDescription=NexviaCP app backend for %s (%s)\nAfter=network.target\n\n' "$domain" "$app_type" > "$unit_file"
+printf '[Service]\n' >> "$unit_file"
+printf 'Type=simple\n' >> "$unit_file"
+printf 'User=%s\n' "$user" >> "$unit_file"
+printf 'Group=%s\n' "$user" >> "$unit_file"
+printf 'WorkingDirectory=%s\n' "$docroot" >> "$unit_file"
+if [ -n "$env_port_line" ]; then
+	printf '%b' "$env_port_line\n" >> "$unit_file"
+fi
+printf 'ExecStart=%s\n' "$start_cmd" >> "$unit_file"
+printf 'Restart=on-failure\nRestartSec=5\n' >> "$unit_file"
+# Bind the listener to loopback only — nginx reverse-proxies to it; never expose.
+printf 'IPAddressDeny=any\nIPAddressAllow=localhost\n' >> "$unit_file"
+if [ -n "$cgroup_lines" ]; then
+	printf '\n# Per-site resource limits (kernel-enforced cgroup)\n' >> "$unit_file"
+	printf '%b' "$cgroup_lines" >> "$unit_file"
+fi
+printf '\n[Install]\nWantedBy=multi-user.target\n' >> "$unit_file"
+
+chmod 644 "$unit_file"
+systemctl daemon-reload
+systemctl enable "$unit_name" >/dev/null 2>&1
+systemctl restart "$unit_name" >/dev/null 2>&1 || true
+
+# --- 5. Persist the port + app type in domain config ---
+add_object_key 'web' 'DOMAIN' "$domain" '$APP_BACKEND_PORT' '$TIME'
+update_object_value 'web' 'DOMAIN' "$domain" '$APP_BACKEND_PORT' "$app_port"
+add_object_key 'web' 'DOMAIN' "$domain" '$APP_TYPE' '$TIME'
+update_object_value 'web' 'DOMAIN' "$domain" '$APP_TYPE' "$app_type"
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-log-action "system" "Info" "Web" "App backend provisioned (Domain: $domain, Type: $app_type, Port: $app_port, User: $user)."
+log_event "$OK" "$ARGUMENTS"
+
+echo "[+] App backend provisioned for $domain"
+echo "    Type:     $app_type"
+echo "    Port:     $app_port (loopback only)"
+echo "    Unit:     $unit_name"
+echo "    StartCmd: $start_cmd"
+echo ""
+echo "    Next: rebuild the web config for this domain so nginx proxies to"
+echo "    the new %app_port%, e.g.: v-rebuild-web-domain $user $domain"
+exit

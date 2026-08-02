@@ -1,0 +1,55 @@
+#!/bin/bash
+# info: restart the isolated backend process for a domain (zero-downtime reload)
+# options: USER DOMAIN
+#
+# example: v-restart-web-domain-app admin acme.com
+#
+# Called by deploy.sh after a successful git pull to reload the app on the same
+# allocated port (no port change, so nginx keeps proxying without reconfiguration).
+# If no app unit exists for the domain, this is a safe no-op.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER DOMAIN'
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+unit_name="hestia-app-${user}-${domain}"
+
+# No-op if there is no managed app for this domain.
+if [ ! -f "/etc/systemd/system/${unit_name}.service" ]; then
+	# Not an app-backed domain (e.g. plain PHP). Silently do nothing.
+	exit 0
+fi
+
+systemctl restart "$unit_name" >/dev/null 2>&1
+rc=$?
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+if [ $rc -eq 0 ]; then
+	$BIN/v-log-action "system" "Info" "Web" "App backend restarted after deploy (Domain: $domain, Unit: $unit_name)."
+fi
+log_event "$OK" "$ARGUMENTS"
+exit $rc

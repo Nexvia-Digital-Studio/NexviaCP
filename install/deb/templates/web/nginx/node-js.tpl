@@ -16,7 +16,10 @@ server {
 	}
 
 	location / {
-		proxy_pass http://127.0.0.1:3000;
+		# %app_port% is the per-domain dynamic port assigned by the Node/.NET
+		# app manager. Each app gets a unique port so multiple Node sites can
+		# coexist on the same server without collision.
+		proxy_pass http://127.0.0.1:%app_port%;
 		proxy_http_version 1.1;
 		proxy_set_header Upgrade $http_upgrade;
 		proxy_set_header Connection 'upgrade';

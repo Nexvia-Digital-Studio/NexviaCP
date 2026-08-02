@@ -48,3 +48,6 @@ web/src/vendor/
 # Node
 **/node_modules/
 npm-debug.log
+
+# ZCode agent workspace
+.zcode/

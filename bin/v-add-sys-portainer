@@ -1,12 +1,32 @@
 #!/bin/bash
-# info: install official Portainer CE Docker Management engine
+# info: install official Portainer CE Docker Management engine (hardened)
 # options: NONE
 #
-# This script installs official Portainer CE on the server for NexviaCP
+# example: v-add-sys-portainer
+#
+# This script installs official Portainer CE on the server for NexviaCP.
+# Security model:
+#   1. Docker userns-remap hardening is enabled first (container breakout prevention)
+#   2. Portainer Agent (portainer/agent) runs on port 9001 and owns /var/run/docker.sock
+#   3. Portainer CE UI (portainer/portainer-ce) connects to the Agent over TCP
+#      instead of mounting the host docker.sock directly.
+# This way a compromised Portainer UI container cannot reach the host docker.sock.
 
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
 source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
 source $HESTIA/func/main.sh
+# load config file
 source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
 
 # Ensure root user
 if [ "x$(id -u)" != 'x0' ]; then
@@ -14,28 +34,132 @@ if [ "x$(id -u)" != 'x0' ]; then
 	exit 10
 fi
 
-echo "[*] Installing official Portainer CE Docker Manager..."
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+echo "[*] Installing official Portainer CE Docker Manager (hardened)..."
 
 # Install Docker if not installed
 if ! command -v docker &> /dev/null; then
-    echo "[*] Installing Docker engine..."
-    curl -fsSL https://get.docker.com -o get-docker.sh
-    sh get-docker.sh
-    rm -f get-docker.sh
+	echo "[*] Installing Docker engine..."
+	curl -fsSL https://get.docker.com -o get-docker.sh
+	sh get-docker.sh
+	rm -f get-docker.sh
 fi
 
-# Create Portainer data volume
+# Enable Docker userns-remap hardening BEFORE starting any container.
+# This guarantees the Portainer containers start under remapped UID/GID ranges.
+if [ "$DOCKER_HARDENING" != "yes" ]; then
+	echo "[*] Enabling Docker userns-remap hardening (security layer 1)..."
+	$BIN/v-add-sys-docker-hardening
+fi
+
+# Create Portainer data volume (only if missing)
 docker volume create portainer_data &> /dev/null || true
 
-# Remove old container if exists
-docker rm -f portainer &> /dev/null || true
+# Remove old containers if exists (idempotent re-install)
+docker rm -f portainer portainer-agent &> /dev/null || true
 
-# Run official Portainer CE Container
-docker run -d -p 9000:9000 -p 9443:9443 --name portainer --restart=always -v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data portainer/portainer-ce:latest
+# Create a dedicated Docker network so the CE UI can reach the Agent over TCP.
+docker network create portainer-agent-net &> /dev/null || true
+
+echo "[*] Starting Portainer Agent (owns the docker.sock)..."
+# The Agent is the ONLY container that touches /var/run/docker.sock.
+# It exposes the Portainer Edge/API protocol on TCP port 9001.
+# SECURITY: ports are bound to 127.0.0.1 ONLY so the agent socket is never
+# reachable from the public internet. The CE UI reaches it over the internal
+# portainer-agent-net Docker network, never over the host's loopback publish.
+docker run -d \
+	--name portainer-agent \
+	--restart=always \
+	--network portainer-agent-net \
+	-p 127.0.0.1:9001:9001 \
+	-v /var/run/docker.sock:/var/run/docker.sock \
+	-v /var/lib/docker/volumes:/var/lib/docker/volumes \
+	portainer/agent:latest
+
+echo "[*] Starting Portainer CE UI (connects to Agent, no direct docker.sock)..."
+# The CE UI container does NOT mount /var/run/docker.sock. Instead it talks to
+# the Agent over the shared Docker network (portainer-agent:9001).
+# SECURITY: ports are bound to 127.0.0.1 ONLY. Portainer is therefore NOT
+# reachable directly on the server IP. The ONLY way in is through the
+# docker-ui nginx vhost, which enforces an auth_basic password gate (defense
+# layer 2) on top of Portainer's own login. Customers cannot reach Portainer.
+docker run -d \
+	--name portainer \
+	--restart=always \
+	--network portainer-agent-net \
+	-p 127.0.0.1:9000:9000 \
+	-p 127.0.0.1:9443:9443 \
+	-v portainer_data:/data \
+	portainer/portainer-ce:latest \
+	--host tcp://portainer-agent:9001
+
+#----------------------------------------------------------#
+#       Defense layer 2: nginx auth_basic gate             #
+#----------------------------------------------------------#
+# Generate a strong admin password (unless an admin already set one) and write
+# it to an htpasswd file that the docker-ui nginx templates reference. The file
+# lives outside every tenant's home directory so no customer can read it.
+SECURITY_DIR="/usr/local/hestia/.security"
+HTPASSWD_FILE="$SECURITY_DIR/portainer.htpasswd"
+mkdir -p "$SECURITY_DIR"
+chmod 755 "$SECURITY_DIR"
+
+PORTAINER_AUTH_USER="${PORTAINER_AUTH_USER:-portainer-admin}"
+
+# (Re)generate the htpasswd entry. We always rewrite so re-running the script
+# rotates the password; the new credentials are printed at the end.
+portainer_auth_pass=$(generate_password 'a-zA-Z0-9' 24 2>/dev/null || openssl rand -base64 18 2>/dev/null | tr -d '/+=' | head -c 24)
+if [ -z "$portainer_auth_pass" ]; then
+	portainer_auth_pass="$(head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c 24)"
+fi
+
+# Build the bcrypt hash. Prefer htpasswd(1) (apache2-utils), fall back to openssl.
+if command -v htpasswd &> /dev/null; then
+	htpasswd -bcB "$HTPASSWD_FILE" "$PORTAINER_AUTH_USER" "$portainer_auth_pass" >/dev/null 2>&1
+elif command -v openssl &> /dev/null; then
+	# apr1 (MD5) crypt — understood by nginx auth_basic.
+	salt="$(head -c 6 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c 8)"
+	hash="$(openssl passwd -apr1 -salt "$salt" "$portainer_auth_pass" 2>/dev/null)"
+	printf '%s:%s\n' "$PORTAINER_AUTH_USER" "$hash" > "$HTPASSWD_FILE"
+else
+	echo "WARNING: neither htpasswd nor openssl available; skipping auth_basic file."
+fi
+
+# Restrict the htpasswd file: nginx (running as www-data / its master user)
+# must read it, but no tenant may. Ownership root:www-data, mode 640.
+if command -v getent &> /dev/null && getent group www-data &> /dev/null; then
+	chown root:www-data "$HTPASSWD_FILE"
+else
+	chown root:root "$HTPASSWD_FILE"
+fi
+chmod 640 "$HTPASSWD_FILE"
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
 
 # Set configuration value
 $BIN/v-change-sys-config-value "PORTAINER_SUPPORT" "yes"
 
 log_event "$OK" "$ARGUMENTS"
-echo "[+] Official Portainer CE successfully installed and running on port 9000!"
+echo "[+] Official Portainer CE successfully installed (admin-only, locked down):"
+echo "    - Ports are bound to 127.0.0.1 ONLY (no direct public access)"
+echo "    - The ONLY entry path is the 'docker-ui' nginx vhost with auth_basic"
+echo "    - userns-remap hardening: enabled (no real root inside containers)"
+echo ""
+if [ -f "$HTPASSWD_FILE" ]; then
+	echo "    ============================================"
+	echo "    NGINX AUTH (defense layer 2) — SAVE THESE:"
+	echo "      User:     $PORTAINER_AUTH_USER"
+	echo "      Password: $portainer_auth_pass"
+	echo "    ============================================"
+	echo "    File: $HTPASSWD_FILE"
+	echo "    To rotate later: re-run v-add-sys-portainer"
+fi
+echo ""
+echo "    Next: add 'portainer.<your-domain>' via WEB and pick the"
+echo "    'docker-ui' proxy template (admin-only in the panel)."
 exit 0

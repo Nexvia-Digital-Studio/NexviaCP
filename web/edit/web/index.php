@@ -84,6 +84,16 @@ $v_proxy = $data[$v_domain]["PROXY"];
 $v_proxy_template = $data[$v_domain]["PROXY"];
 $v_proxy_ext = str_replace(",", ", ", $data[$v_domain]["PROXY_EXT"]);
 $v_stats = $data[$v_domain]["STATS"];
+
+// NexviaCP Git Auto-Deploy fields (may be empty on older domains).
+$v_git_repo = $data[$v_domain]["GIT_REPO"] ?? "";
+$v_git_branch = $data[$v_domain]["GIT_BRANCH"] ?? "";
+$v_git_secret = $data[$v_domain]["GIT_DEPLOY_SECRET"] ?? "";
+
+// NexviaCP per-domain cgroup limits (baseline + peak + cpu).
+$v_web_cgroup_high = $data[$v_domain]["WEB_CGROUP_HIGH"] ?? "";
+$v_web_cgroup_max = $data[$v_domain]["WEB_CGROUP_MAX"] ?? "";
+$v_web_cpu_quota = $data[$v_domain]["WEB_CPU_QUOTA"] ?? "";
 $v_stats_user = $data[$v_domain]["STATS_USER"];
 $v_stats_password = "";
 
@@ -654,6 +664,108 @@ if (!empty($_POST["save"])) {
 			);
 			check_return_code($return_var, $output);
 			unset($output);
+		}
+
+		// NexviaCP Git Auto-Deploy: enable / update / disable.
+		if (empty($_SESSION["error_msg"])) {
+			$post_repo = trim($_POST["v_git_repo"] ?? "");
+			$post_branch = trim($_POST["v_git_branch"] ?? "");
+			if ($post_branch === "") {
+				$post_branch = "main";
+			}
+			$disable_git = ($_POST["v_git_disable"] ?? "") === "yes";
+
+			if ($disable_git && !empty($v_git_repo)) {
+				// Disable git auto-deploy for this domain.
+				exec(
+					HESTIA_CMD . "v-delete-web-domain-git " . $user . " " . quoteshellarg($v_domain),
+					$output,
+					$return_var,
+				);
+				check_return_code($return_var, $output);
+				unset($output);
+				$v_git_repo = "";
+				$v_git_branch = "";
+				$v_git_secret = "";
+			} elseif (!$disable_git && $post_repo !== "" && $post_repo !== trim($v_git_repo, "'")) {
+				// Enable or update the git repository URL/branch.
+				exec(
+					HESTIA_CMD .
+						"v-add-web-domain-git " .
+						$user . " " .
+						quoteshellarg($v_domain) . " " .
+						quoteshellarg($post_repo) . " " .
+						quoteshellarg($post_branch),
+					$output,
+					$return_var,
+				);
+				check_return_code($return_var, $output);
+				unset($output);
+				// Refresh the git fields from the backend so the secret shows up.
+				exec(HESTIA_CMD . "v-list-web-domain " . $user . " " . quoteshellarg($v_domain) . " json", $output, $return_var);
+				if ($return_var === 0) {
+					$refresh = json_decode(implode("", $output), true);
+					if (isset($refresh[$v_domain])) {
+						$v_git_repo = $refresh[$v_domain]["GIT_REPO"] ?? "";
+						$v_git_branch = $refresh[$v_domain]["GIT_BRANCH"] ?? "";
+						$v_git_secret = $refresh[$v_domain]["GIT_DEPLOY_SECRET"] ?? "";
+					}
+				}
+				unset($output);
+			} elseif (!$disable_git && $post_repo !== "" && $post_branch !== trim($v_git_branch, "'")) {
+				// Only the branch changed; re-run setup with the new branch.
+				exec(
+					HESTIA_CMD .
+						"v-add-web-domain-git " .
+						$user . " " .
+						quoteshellarg($v_domain) . " " .
+						quoteshellarg($post_repo) . " " .
+						quoteshellarg($post_branch),
+					$output,
+					$return_var,
+				);
+				check_return_code($return_var, $output);
+				unset($output);
+				$v_git_branch = $post_branch;
+			}
+		}
+
+		// NexviaCP per-domain cgroup limits (baseline + peak + cpu).
+		if (empty($_SESSION["error_msg"])) {
+			$post_high = trim($_POST["v_web_cgroup_high"] ?? "");
+			$post_max = trim($_POST["v_web_cgroup_max"] ?? "");
+			$post_cpu = trim($_POST["v_web_cpu_quota"] ?? "");
+			// Treat "unlimited" sentinel consistently.
+			if ($post_high === "unlimited") $post_high = "";
+			if ($post_max === "unlimited") $post_max = "";
+			if ($post_cpu === "unlimited") $post_cpu = "";
+
+			$cur_high = trim($v_web_cgroup_high, "'");
+			$cur_max = trim($v_web_cgroup_max, "'");
+			$cur_cpu = trim($v_web_cpu_quota, "'");
+
+			if ($post_high !== $cur_high || $post_max !== $cur_max || $post_cpu !== $cur_cpu) {
+				// Map empty -> "unlimited" for the CLI arg contract.
+				$arg_high = $post_high !== "" ? $post_high : "unlimited";
+				$arg_max = $post_max !== "" ? $post_max : "unlimited";
+				$arg_cpu = $post_cpu !== "" ? $post_cpu : "unlimited";
+				exec(
+					HESTIA_CMD .
+						"v-change-web-domain-cgroup " .
+						$user . " " .
+						quoteshellarg($v_domain) . " " .
+						quoteshellarg($arg_high) . " " .
+						quoteshellarg($arg_max) . " " .
+						quoteshellarg($arg_cpu),
+					$output,
+					$return_var,
+				);
+				check_return_code($return_var, $output);
+				unset($output);
+				$v_web_cgroup_high = $post_high;
+				$v_web_cgroup_max = $post_max;
+				$v_web_cpu_quota = $post_cpu;
+			}
 		}
 	}
 

@@ -1,0 +1,57 @@
+#!/bin/bash
+# info: remove the isolated backend process unit for a domain
+# options: USER DOMAIN
+#
+# example: v-delete-web-domain-app admin acme.com
+#
+# Stops and removes the systemd unit created by v-add-web-domain-app, releasing
+# the allocated dynamic port. The nginx vhost keeps working (returns 502 until
+# the domain is rebuilt/reassigned), so call this only when retiring the app.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER DOMAIN'
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
+check_hestia_demo_mode
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+unit_name="hestia-app-${user}-${domain}"
+unit_file="/etc/systemd/system/${unit_name}.service"
+
+systemctl stop "$unit_name" >/dev/null 2>&1 || true
+systemctl disable "$unit_name" >/dev/null 2>&1 || true
+rm -f "$unit_file"
+systemctl daemon-reload
+
+# Clear the stored app metadata (leave the domain itself intact).
+update_object_value 'web' 'DOMAIN' "$domain" '$APP_BACKEND_PORT' ""
+update_object_value 'web' 'DOMAIN' "$domain" '$APP_TYPE' ""
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-log-action "system" "Info" "Web" "App backend removed (Domain: $domain, User: $user)."
+log_event "$OK" "$ARGUMENTS"
+
+echo "[+] App backend removed for $domain"
+exit

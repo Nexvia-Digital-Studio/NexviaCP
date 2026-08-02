@@ -61,14 +61,23 @@ get_database_values
 dbpass=$(generate_password)
 dbuser="hestia_sso_$(generate_password)"
 
-add_mysql_database_temp_user
-if [ $? -ne 0 ]; then
-	echo "Error: Unable to create temp user"
-	exit 2
+# NexviaCP: dispatch on database type so pgsql databases get a PG temp role.
+if [ "$type" = "pgsql" ]; then
+	add_pgsql_database_temp_user
+	if [ $? -ne 0 ]; then
+		echo "Error: Unable to create temp pgsql user"
+		exit 2
+	fi
+else
+	add_mysql_database_temp_user
+	if [ $? -ne 0 ]; then
+		echo "Error: Unable to create temp user"
+		exit 2
+	fi
 fi
 
 if [[ "$ttl" -gt 0 ]]; then
-	echo "$BIN/v-delete-database-temp-user $user $database $dbuser mysql $host" | at "now +${ttl} minute" > /dev/null 2>&1
+	echo "$BIN/v-delete-database-temp-user $user $database $dbuser $type $host" | at "now +${ttl} minute" > /dev/null 2>&1
 fi
 echo '{
     "login": {

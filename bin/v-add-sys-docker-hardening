@@ -1,0 +1,140 @@
+#!/bin/bash
+# info: enable Docker userns-remap hardening (container breakout prevention)
+# options: NONE
+#
+# example: v-add-sys-docker-hardening
+#
+# This script enables Docker userns-remap so that containers run as
+# non-root mapped UID/GID pairs. This prevents a compromised container
+# from accessing host files (/etc, /home, etc.) even if a container
+# escape vulnerability is exploited.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+# Ensure root user
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: v-add-sys-docker-hardening can be executed only by root user"
+	exit 10
+fi
+
+# Docker must be installed
+if ! command -v docker &> /dev/null; then
+	echo "ERROR: Docker is not installed. Run v-add-sys-portainer first."
+	check_result "$E_NOTEXIST" "docker not installed"
+fi
+
+# Already enabled? idempotent no-op
+if [ "$DOCKER_HARDENING" = "yes" ] && [ -f /etc/docker/daemon.json ]; then
+	if grep -q '"userns-remap"' /etc/docker/daemon.json 2>/dev/null; then
+		echo "[+] Docker userns-remap hardening is already enabled."
+		exit 0
+	fi
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+echo "[*] Enabling Docker userns-remap hardening..."
+
+# Ensure /etc/docker directory exists
+mkdir -p /etc/docker
+
+# Build daemon.json preserving any existing keys.
+# userns-remap=default makes Docker create a dedicated "default" subordinate
+# UID/GID range (dockremap user) so containers never run as real root.
+if [ ! -f /etc/docker/daemon.json ] || [ ! -s /etc/docker/daemon.json ]; then
+	cat > /etc/docker/daemon.json <<'EOF'
+{
+    "userns-remap": "default"
+}
+EOF
+else
+	# Preserve existing configuration; only inject userns-remap if missing.
+	if ! grep -q '"userns-remap"' /etc/docker/daemon.json 2>/dev/null; then
+		# Use python3 (already a Hestia dependency) to merge JSON safely.
+		if command -v python3 &> /dev/null; then
+			python3 - <<'PYEOF' || check_result "$E_PARSING" "unable to update daemon.json"
+import json
+path = "/etc/docker/daemon.json"
+try:
+    with open(path, "r") as f:
+        data = json.load(f)
+except Exception:
+    data = {}
+data["userns-remap"] = "default"
+with open(path, "w") as f:
+    json.dump(data, f, indent=4)
+PYEOF
+		else
+			# Fallback: prepend the key (valid JSON only if file was an object)
+			if head -c 1 /etc/docker/daemon.json | grep -q '{'; then
+				sed -i '0,/{/s//{\n    "userns-remap": "default",/' /etc/docker/daemon.json
+			else
+				echo '{"userns-remap": "default"}' > /etc/docker/daemon.json
+			fi
+		fi
+	fi
+fi
+
+# Restart Docker daemon to apply the new setting.
+# NOTE: existing containers are stopped & restarted by Docker on daemon restart.
+systemctl restart docker 2>/dev/null
+sleep 2
+
+# Verify the daemon came back up
+if ! systemctl is-active --quiet docker 2>/dev/null; then
+	echo "ERROR: Docker daemon failed to restart after userns-remap change."
+	echo "       Rolling back daemon.json..."
+	rm -f /etc/docker/daemon.json.bak
+	cp /etc/docker/daemon.json /etc/docker/daemon.json.failed
+	# Remove the userns-remap line and retry
+	if command -v python3 &> /dev/null; then
+		python3 - <<'PYEOF'
+import json
+path = "/etc/docker/daemon.json"
+try:
+    with open(path, "r") as f:
+        data = json.load(f)
+except Exception:
+    data = {}
+data.pop("userns-remap", None)
+with open(path, "w") as f:
+    json.dump(data, f, indent=4)
+PYEOF
+	fi
+	systemctl start docker 2>/dev/null
+	check_result "$E_RESTART" "docker daemon restart failed"
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+# Updating hestia.conf value
+$BIN/v-change-sys-config-value "DOCKER_HARDENING" "yes"
+
+# Logging
+$BIN/v-log-action "system" "Info" "Plugins" "Docker userns-remap hardening enabled (container breakout prevention)."
+log_event "$OK" "$ARGUMENTS"
+
+echo "[+] Docker userns-remap hardening enabled successfully."
+echo "    Containers now run with remapped UID/GID (no real root)."
+exit

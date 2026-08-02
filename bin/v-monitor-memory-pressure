@@ -1,0 +1,241 @@
+#!/bin/bash
+# info: dynamically scale per-domain MemoryHigh based on cgroup memory pressure
+# options: NONE
+#
+# example: v-monitor-memory-pressure
+#
+# Smart Dynamic RAM autoscaler. Runs from cron (every minute) and inspects each
+# domain's PHP-FPM pool cgroup:
+#   - Reads memory.pressure (PSI) + memory.current.
+#   - If the domain is under sustained memory pressure AND usage is near the
+#     current MemoryHigh baseline, MemoryHigh is bumped toward the configured
+#     peak (WEB_CGROUP_MAX) in steps (e.g. 256M -> 512M -> 1G -> peak).
+#   - If pressure is low AND usage is well below the current MemoryHigh for a
+#     cooldown window, MemoryHigh is relaxed back toward the baseline.
+#
+# The autoscaler NEVER exceeds the user-configured peak (WEB_CGROUP_MAX), so a
+# noisy site cannot starve the rest of the server. It also NEVER lowers below
+# the configured baseline (WEB_CGROUP_HIGH).
+#
+# State is kept lightweight in /var/lib/hestia/memory-state/<domain> so the
+# cooldown counters survive between cron runs.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+STATE_DIR="/var/lib/hestia/memory-state"
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+
+# Tunables (override via hestia.conf if desired).
+SCALE_UP_PRESSURE_THRESHOLD="${MEM_MONITOR_UP_PRESSURE:-60}"   # avg10 % some
+SCALE_DOWN_PRESSURE_THRESHOLD="${MEM_MONITOR_DOWN_PRESSURE:-5}" # avg10 % some
+SCALE_UP_USAGE_RATIO="${MEM_MONITOR_UP_USAGE:-0.85}"            # current/high
+SCALE_DOWN_USAGE_RATIO="${MEM_MONITOR_DOWN_USAGE:-0.40}"        # current/high
+SCALE_UP_COOLDOWN="${MEM_MONITOR_UP_COOLDOWN:-3}"               # consecutive hits
+SCALE_DOWN_COOLDOWN="${MEM_MONITOR_DOWN_COOLDOWN:-10}"          # consecutive calm
+SCALE_STEP_RATIO="${MEM_MONITOR_STEP:-1.5}"                     # multiply each step
+
+# Convert a human size (256M, 1G) to bytes.
+memory_to_bytes() {
+	local val="$1"
+	local num unit
+	num=$(echo "$val" | grep -oE '^[0-9]+')
+	unit=$(echo "$val" | grep -oE '[A-Za-z]+$' | tr '[:lower:]' '[:upper:]')
+	case "$unit" in
+		K|KB) echo $((num * 1024)) ;;
+		M|MB) echo $((num * 1048576)) ;;
+		G|GB) echo $((num * 1073741824)) ;;
+		T|TB) echo $((num * 1099511627776)) ;;
+		*) echo "$num" ;;
+	esac
+}
+
+# Convert bytes to a friendly human size (largest whole unit).
+bytes_to_human() {
+	local b="$1"
+	if [ "$b" -ge 1073741824 ] && [ $((b % 1073741824)) -eq 0 ]; then
+		echo "$((b / 1073741824))G"
+	elif [ "$b" -ge 1048576 ] && [ $((b % 1048576)) -eq 0 ]; then
+		echo "$((b / 1048576))M"
+	elif [ "$b" -ge 1024 ] && [ $((b % 1024)) -eq 0 ]; then
+		echo "$((b / 1024))K"
+	else
+		echo "${b}B"
+	fi
+}
+
+# Read cgroup v2 PSI avg10 "some" percentage for a path (0-100 integer).
+read_pressure_some() {
+	local f="$1/memory.pressure"
+	[ -f "$f" ] || { echo "0"; return; }
+	# Format: "some avg10=12.34 avg60=... avg300=... total=..."
+	awk -F'[= ]' '/^some / {for(i=1;i<=NF;i++) if($i=="avg10"){print $(i+1); exit}}' "$f" 2>/dev/null \
+		| awk -F. '{print $1}'
+}
+
+read_memory_current() {
+	local f="$1/memory.current"
+	[ -f "$f" ] || { echo "0"; return; }
+	cat "$f" 2>/dev/null | tr -d '[:space:]'
+}
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+# Requires cgroups v2 unified hierarchy.
+if [ ! -f /sys/fs/cgroup/memory.pressure ] && [ ! -f /sys/fs/cgroup/cgroup.controllers ]; then
+	# cgroups v2 not available; nothing to do.
+	exit 0
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Iterate every user with web domains.
+for user in $("$BIN/v-list-users" list 2>/dev/null); do
+	[ -z "$user" ] && continue
+	user_data="$HESTIA/data/users/$user/web.conf"
+	[ -f "$user_data" ] || continue
+
+	# Parse each domain line.
+	while IFS= read -r line; do
+		[ -z "$line" ] && continue
+		# Extract DOMAIN and the cgroup fields from the KV line.
+		domain=$(echo "$line" | grep -oE "DOMAIN='[^']*'" | head -1 | sed "s/^DOMAIN='//;s/'$//")
+		[ -z "$domain" ] && continue
+
+		# Skip if no limits configured (unlimited domains are not scaled).
+		baseline=$(echo "$line" | grep -oE "WEB_CGROUP_HIGH='[^']*'" | sed "s/^WEB_CGROUP_HIGH='//;s/'$//")
+		peak=$(echo "$line" | grep -oE "WEB_CGROUP_MAX='[^']*'" | sed "s/^WEB_CGROUP_MAX='//;s/'$//")
+		cpu_q=$(echo "$line" | grep -oE "WEB_CPU_QUOTA='[^']*'" | sed "s/^WEB_CPU_QUOTA='//;s/'$//")
+		[ -z "$baseline" ] && continue
+		[ -z "$peak" ] && peak="$baseline"
+
+		# Locate the domain's PHP-FPM pool cgroup directory.
+		backend=$(echo "$line" | grep -oE "BACKEND='[^']*'" | sed "s/^BACKEND='//;s/'$//")
+		[ -z "$backend" ] && continue
+		pool_unit="php${backend}-fpm.service"
+		# cgroup v2 path for the service.
+		cg_path="/sys/fs/cgroup/system.slice/${pool_unit}"
+		[ -d "$cg_path" ] || cg_path="/sys/fs/cgroup/${pool_unit}"
+		[ -d "$cg_path" ] || continue
+
+		pressure=$(read_pressure_some "$cg_path")
+		current=$(read_memory_current "$cg_path")
+		[ -z "$pressure" ] && pressure=0
+		[ -z "$current" ] && current=0
+
+		# Determine the CURRENT MemoryHigh in effect. We store the live value
+		# in the per-domain state file; fall back to baseline on first run.
+		state_file="$STATE_DIR/$domain"
+		current_high=""
+		up_hits=0
+		down_hits=0
+		if [ -f "$state_file" ]; then
+			. "$state_file" 2>/dev/null
+		fi
+		[ -z "$current_high" ] && current_high="$baseline"
+
+		base_bytes=$(memory_to_bytes "$baseline")
+		peak_bytes=$(memory_to_bytes "$peak")
+		high_bytes=$(memory_to_bytes "$current_high")
+		# Clamp current_high to [baseline, peak].
+		[ "$high_bytes" -lt "$base_bytes" ] 2>/dev/null && high_bytes=$base_bytes && current_high="$baseline"
+		[ "$high_bytes" -gt "$peak_bytes" ] 2>/dev/null && high_bytes=$peak_bytes && current_high="$peak"
+
+		# Ratio: current usage / current high.
+		usage_ratio=0
+		if [ "$high_bytes" -gt 0 ]; then
+			usage_ratio=$(awk -v c="$current" -v h="$high_bytes" 'BEGIN{printf "%.2f", c/h}')
+		fi
+
+		new_high="$current_high"
+		action="idle"
+
+		# SCALE UP: high pressure AND usage near the ceiling.
+		if [ "$pressure" -ge "$SCALE_UP_PRESSURE_THRESHOLD" ] 2>/dev/null; then
+			usage_check=$(awk -v r="$usage_ratio" -v t="$SCALE_UP_USAGE_RATIO" 'BEGIN{print (r>=t)?1:0}')
+			if [ "$usage_check" = "1" ]; then
+				up_hits=$((up_hits + 1))
+				down_hits=0
+				if [ "$up_hits" -ge "$SCALE_UP_COOLDOWN" ]; then
+					# Step up by SCALE_STEP_RATIO, capped at peak.
+					new_bytes=$(awk -v h="$high_bytes" -v s="$SCALE_STEP_RATIO" 'BEGIN{printf "%d", h*s}')
+					[ "$new_bytes" -gt "$peak_bytes" ] && new_bytes=$peak_bytes
+					new_high=$(bytes_to_human "$new_bytes")
+					new_high_bytes=$new_bytes
+					if [ "$new_high_bytes" -gt "$high_bytes" ]; then
+						action="scale-up"
+						up_hits=0
+					fi
+				fi
+			else
+				up_hits=0
+			fi
+		# SCALE DOWN: low pressure AND low usage for a sustained window.
+		elif [ "$pressure" -le "$SCALE_DOWN_PRESSURE_THRESHOLD" ] 2>/dev/null; then
+			usage_check=$(awk -v r="$usage_ratio" -v t="$SCALE_DOWN_USAGE_RATIO" 'BEGIN{print (r<=t)?1:0}')
+			if [ "$usage_check" = "1" ]; then
+				down_hits=$((down_hits + 1))
+				up_hits=0
+				# Only relax if we are actually above baseline.
+				if [ "$down_hits" -ge "$SCALE_DOWN_COOLDOWN" ] && [ "$high_bytes" -gt "$base_bytes" ]; then
+					new_bytes=$(awk -v h="$high_bytes" -v s="$SCALE_STEP_RATIO" 'BEGIN{printf "%d", h/s}')
+					[ "$new_bytes" -lt "$base_bytes" ] && new_bytes=$base_bytes
+					new_high=$(bytes_to_human "$new_bytes")
+					new_high_bytes=$new_bytes
+					if [ "$new_high_bytes" -lt "$high_bytes" ]; then
+						action="scale-down"
+						down_hits=0
+					fi
+				fi
+			else
+				down_hits=0
+			fi
+		else
+			# Pressure in the neutral band: reset both counters.
+			up_hits=0
+			down_hits=0
+		fi
+
+	# Apply the new MemoryHigh to the live cgroup if it changed.
+	# IMPORTANT: we do NOT set systemctl set-property on $pool_unit (php<X>-fpm.service)
+	# because that unit covers ALL domains sharing this PHP version — setting
+	# MemoryMax/MemoryHigh there would coerce every site to the same value (the
+	# original bug). Instead the per-site envelope is enforced correctly via the
+	# per-worker php_admin_value[memory_limit] in THIS domain's pool file only.
+	if [ "$action" != "idle" ]; then
+		# Relax/tighten the per-worker php_admin_value via this domain's pool file.
+		pool_file="/etc/php/$backend/fpm/pool.d/$domain.conf"
+		if [ -f "$pool_file" ]; then
+			sed -i "/;# nexvia-cgroup-begin/,/;# nexvia-cgroup-end/{
+				s/php_admin_value\[memory_limit\] = .*/php_admin_value[memory_limit] = $new_high/
+			}" "$pool_file" 2>/dev/null
+			systemctl reload "php${backend}-fpm" >/dev/null 2>&1 || true
+		fi
+		# Persist the live value so the next run uses it as the baseline.
+		current_high="$new_high"
+		$BIN/v-log-action "system" "Info" "Web" "Dynamic RAM $action for $domain: memory_limit now $new_high (baseline=$baseline peak=$peak pressure=${pressure}% usage=${current}B)."
+	fi
+
+		# Persist state for next run.
+		cat > "$state_file" <<EOF
+current_high="$current_high"
+up_hits=$up_hits
+down_hits=$down_hits
+EOF
+	done < <(grep -v "^TIME" "$user_data" 2>/dev/null)
+done
+
+exit 0

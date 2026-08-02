@@ -426,6 +426,42 @@ delete_mysql_database_temp_user() {
 	mysql_query "$query" > /dev/null
 }
 
+# NexviaCP: PostgreSQL temp user for phpPgAdmin SSO (mirrors the mysql helper).
+add_pgsql_database_temp_user() {
+	psql_connect $host
+
+	dbpass_esc=$(sql_escape "$dbpass")
+
+	# Create a LOGIN role scoped to the single target database only.
+	query="CREATE ROLE $dbuser WITH LOGIN PASSWORD '$dbpass_esc' VALID UNTIL 'now() + interval '1 hour''"
+	psql_query "$query" > /dev/null
+
+	query="GRANT CONNECT ON DATABASE $database TO $dbuser"
+	psql_query "$query" > /dev/null
+
+	# Grant schema + table privileges on the existing objects.
+	query="GRANT USAGE ON SCHEMA public TO $dbuser"
+	psql_query "$query" > /dev/null
+	query="GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA public TO $dbuser"
+	psql_query "$query" > /dev/null
+	query="GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO $dbuser"
+	psql_query "$query" > /dev/null
+	# Let the temp user create new tables that inherit the default privileges.
+	query="ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO $dbuser"
+	psql_query "$query" > /dev/null
+}
+
+delete_pgsql_database_temp_user() {
+	psql_connect $host
+	# Revoke + drop role (reassign owned handles any objects the temp role made).
+	query="REASSIGN OWNED BY $dbuser TO $dbuser"
+	psql_query "$query" > /dev/null 2>&1 || true
+	query="DROP OWNED BY $dbuser"
+	psql_query "$query" > /dev/null 2>&1 || true
+	query="DROP ROLE IF EXISTS $dbuser"
+	psql_query "$query" > /dev/null
+}
+
 # Check if database host do not exist in config
 is_dbhost_new() {
 	if [ -e "$HESTIA/conf/$type.conf" ]; then

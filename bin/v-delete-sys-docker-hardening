@@ -1,0 +1,89 @@
+#!/bin/bash
+# info: disable Docker userns-remap hardening
+# options: NONE
+#
+# example: v-delete-sys-docker-hardening
+#
+# This script removes the userns-remap setting from /etc/docker/daemon.json
+# and restarts Docker. WARNING: containers created under userns-remap will
+# need to be recreated.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+# Ensure root user
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: v-delete-sys-docker-hardening can be executed only by root user"
+	exit 10
+fi
+
+# Nothing to do if not enabled
+if [ "$DOCKER_HARDENING" != "yes" ]; then
+	echo "[+] Docker hardening is already disabled."
+	exit 0
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+echo "[*] Disabling Docker userns-remap hardening..."
+
+# Remove the userns-remap key from daemon.json
+if [ -f /etc/docker/daemon.json ]; then
+	if command -v python3 &> /dev/null; then
+		python3 - <<'PYEOF' || check_result "$E_PARSING" "unable to update daemon.json"
+import json
+path = "/etc/docker/daemon.json"
+try:
+    with open(path, "r") as f:
+        data = json.load(f)
+except Exception:
+    data = {}
+data.pop("userns-remap", None)
+with open(path, "w") as f:
+    json.dump(data, f, indent=4)
+PYEOF
+	else
+		# Fallback: clear the file (only userns-remap was managed by Hestia)
+		if [ "$(wc -l < /etc/docker/daemon.json)" -le 5 ]; then
+			echo '{}' > /etc/docker/daemon.json
+		else
+			sed -i '/"userns-remap"/d' /etc/docker/daemon.json
+		fi
+	fi
+fi
+
+# Restart Docker to apply
+systemctl restart docker 2>/dev/null
+sleep 2
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+# Updating hestia.conf value
+$BIN/v-change-sys-config-value "DOCKER_HARDENING" "no"
+
+# Logging
+$BIN/v-log-action "system" "Info" "Plugins" "Docker userns-remap hardening disabled."
+log_event "$OK" "$ARGUMENTS"
+
+echo "[+] Docker userns-remap hardening disabled."
+exit

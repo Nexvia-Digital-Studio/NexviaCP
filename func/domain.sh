@@ -287,6 +287,7 @@ add_web_config() {
 			-e "s|%ssl_pem%|$ssl_pem|g" \
 			-e "s|%ssl_ca_str%|$ssl_ca_str|g" \
 			-e "s|%ssl_ca%|$ssl_ca|g" \
+			-e "s|%app_port%|${app_port:-}|g" \
 			> $conf
 
 	process_http2_directive "$conf"
@@ -961,6 +962,7 @@ add_webmail_config() {
 			-e "s|%ssl_pem%|$ssl_pem|g" \
 			-e "s|%ssl_ca_str%|$ssl_ca_str|g" \
 			-e "s|%ssl_ca%|$ssl_ca|g" \
+			-e "s|%app_port%|${app_port:-}|g" \
 			> $conf
 
 	process_http2_directive "$conf"

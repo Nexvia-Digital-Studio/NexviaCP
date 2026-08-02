@@ -549,6 +549,46 @@ function syshealth_repair_system_config() {
 		$BIN/v-change-sys-config-value "DOMAINDIR_WRITABLE" "no"
 	fi
 
+	# NexviaCP Docker / Portainer hardening flags
+	if [[ -z $(check_key_exists 'PORTAINER_SUPPORT') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: PORTAINER_SUPPORT ('no')"
+		$BIN/v-change-sys-config-value "PORTAINER_SUPPORT" "no"
+	fi
+	if [[ -z $(check_key_exists 'DOCKER_HARDENING') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: DOCKER_HARDENING ('no')"
+		$BIN/v-change-sys-config-value "DOCKER_HARDENING" "no"
+	fi
+
+	# NexviaCP phpPgAdmin SSO key
+	if [[ -z $(check_key_exists 'PGA_SSO_KEY') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: PGA_SSO_KEY ('')"
+		$BIN/v-change-sys-config-value "PGA_SSO_KEY" ""
+	fi
+
+	# NexviaCP cache service flags
+	if [[ -z $(check_key_exists 'REDIS_SUPPORT') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: REDIS_SUPPORT ('no')"
+		$BIN/v-change-sys-config-value "REDIS_SUPPORT" "no"
+	fi
+	if [[ -z $(check_key_exists 'MEMCACHED_SUPPORT') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: MEMCACHED_SUPPORT ('no')"
+		$BIN/v-change-sys-config-value "MEMCACHED_SUPPORT" "no"
+	fi
+
+	# NexviaCP Cloudflare DNS API for wildcard SSL
+	if [[ -z $(check_key_exists 'DNS_API_PROVIDER') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: DNS_API_PROVIDER ('')"
+		$BIN/v-change-sys-config-value "DNS_API_PROVIDER" ""
+	fi
+	if [[ -z $(check_key_exists 'CF_API_TOKEN') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: CF_API_TOKEN ('')"
+		$BIN/v-change-sys-config-value "CF_API_TOKEN" ""
+	fi
+	if [[ -z $(check_key_exists 'CF_ZONE_ID') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: CF_ZONE_ID ('')"
+		$BIN/v-change-sys-config-value "CF_ZONE_ID" ""
+	fi
+
 	touch $HESTIA/conf/hestia.conf.new
 	while IFS='= ' read -r lhs rhs; do
 		if [[ ! $lhs =~ ^\ *# && -n $lhs ]]; then

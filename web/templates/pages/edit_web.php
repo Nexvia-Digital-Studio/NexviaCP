@@ -87,7 +87,9 @@
 					<option value="node-js" <?php if ($v_proxy_template == 'node-js' || $v_proxy_template == "'node-js'") echo 'selected'; ?>>🟢 Node.js / Express / Next.js (Port 3000)</option>
 					<option value="dotnet" <?php if ($v_proxy_template == 'dotnet' || $v_proxy_template == "'dotnet'") echo 'selected'; ?>>🔷 .NET 8 / 9 / 10 ASP.NET Core (Port 5000)</option>
 					<option value="websocket" <?php if ($v_proxy_template == 'websocket' || $v_proxy_template == "'websocket'") echo 'selected'; ?>>⚡ Live WebSocket & Socket.io (Port 3000)</option>
+					<?php if (($_SESSION["userContext"] ?? "") === "admin") { ?>
 					<option value="docker-ui" <?php if ($v_proxy_template == 'docker-ui' || $v_proxy_template == "'docker-ui'") echo 'selected'; ?>>🐳 Docker UI / Portainer Management (Port 9000)</option>
+					<?php } ?>
 				</select>
 				<small class="form-text text-muted u-mt5"><?= tohtml( _("Uygulamanızın çalışma modunu seçin. Seçilen mod Nginx reverse proxy ve SSL yönlendirmesini otomatik ayarlar.")) ?></small>
 			</div>
@@ -459,7 +461,7 @@
 				<?php } ?>
 			</div>
 
-			<details class="collapse u-mt20" id="git-deployment-options">
+			<details class="collapse u-mt20" id="git-deployment-options" <?= !empty($v_git_repo) ? "open" : "" ?>>
 				<summary class="collapse-header">
 					<i class="fab fa-github icon-blue u-mr5"></i><?= tohtml( _("Git Repository & Auto-Deploy (Public / Private)")) ?>
 				</summary>
@@ -468,7 +470,7 @@
 						<label for="v_git_repo" class="form-label">
 							<?= tohtml( _("Git Repository URL (Public veya Private Repo)")) ?>
 						</label>
-						<input type="text" class="form-control" name="v_git_repo" id="v_git_repo" placeholder="https://github.com/user/repo.git">
+						<input type="text" class="form-control" name="v_git_repo" id="v_git_repo" value="<?= tohtml(trim($v_git_repo, "'")) ?>" placeholder="https://github.com/user/repo.git">
 						<small class="form-text text-muted u-mt5" style="line-height:1.6;">
 							<strong>Örnek Adres Formatları:</strong><br>
 							• <strong>Açık (Public) Repo:</strong> <code>https://github.com/kullanici/repo.git</code><br>
@@ -478,15 +480,89 @@
 					</div>
 					<div class="u-mb10">
 						<label for="v_git_branch" class="form-label"><?= tohtml( _("Branch Name (Dal Adı)")) ?></label>
-						<input type="text" class="form-control" name="v_git_branch" id="v_git_branch" value="main" placeholder="main">
+						<input type="text" class="form-control" name="v_git_branch" id="v_git_branch" value="<?= !empty($v_git_branch) ? tohtml(trim($v_git_branch, "'")) : "main" ?>" placeholder="main">
 					</div>
+
+					<?php if (!empty($v_git_secret) && trim($v_git_secret, "'") !== "") { ?>
 					<div class="alert alert-info u-mt10 u-mb10" role="alert">
 						<i class="fas fa-link u-mr5"></i>
-						<span><?= tohtml( _("GitHub Webhook Payload URL:")) ?> <strong>https://<?= tohtml(trim($v_domain, "'")) ?>/deploy.php</strong></span>
+						<span><?= tohtml( _("Webhook Payload URL:")) ?><br>
+						<strong>https://<?= tohtml(trim($v_domain, "'")) ?>/deploy.php</strong></span>
 					</div>
-					<div class="alert alert-warning u-mt10 u-mb10" role="alert">
+					<div class="alert alert-success u-mt10 u-mb10" role="alert">
 						<i class="fas fa-shield-halved u-mr5"></i>
-						<span><strong>Güvenlik Notu:</strong> Webhook kurulumunda GitHub üzerinde <code>Secret Key</code> tanımlayabilirsiniz. Sunucu otomatik güncellemeleri 0ms kesintiyle arka planda yürütür.</span>
+						<span><strong><?= tohtml( _("HMAC-SHA256 Webhook Secret:")) ?></strong><br>
+						<code style="word-break:break-all;"><?= tohtml(trim($v_git_secret, "'")) ?></code><br>
+						<small class="u-mt5"><?= tohtml( _("GitHub/GitLab webhook 'Secret' alanına yukarıdaki anahtarı yapıştırın. Her istek HMAC-SHA256 ile doğrulanır.")) ?></small></span>
+					</div>
+					<?php } else { ?>
+					<div class="alert alert-warning u-mt10 u-mb10" role="alert">
+						<i class="fas fa-circle-info u-mr5"></i>
+						<span><?= tohtml( _("Bir Git Repository URL'si girip 'Kaydet'e bastığınızda, bu domain için HMAC-SHA256 Webhook Secret otomatik oluşturulacak ve webhook URL'si görünecektir.")) ?></span>
+					</div>
+					<?php } ?>
+
+					<?php if (!empty($v_git_repo)) { ?>
+					<div class="u-mt10">
+						<label class="form-check">
+							<input type="checkbox" class="form-check-input" name="v_git_disable" value="yes">
+							<span class="form-check-label"><?= tohtml( _("Git Auto-Deploy'u devre dışı bırak (webhook secret döndürülür)")) ?></span>
+						</label>
+					</div>
+					<?php } ?>
+				</div>
+			</details>
+
+			<details class="collapse u-mt20" id="web-resource-limits" <?= !empty($v_web_cgroup_high) || !empty($v_web_cpu_quota) ? "open" : "" ?>>
+				<summary class="collapse-header">
+					<i class="fas fa-microchip icon-blue u-mr5"></i><?= tohtml( _("Site Kaynak Limitleri (RAM / CPU)")) ?>
+				</summary>
+				<div class="collapse-content">
+					<div class="alert alert-info u-mb10" role="alert">
+						<i class="fas fa-circle-info u-mr5"></i>
+						<span><?= tohtml( _("Her siteyi izole etmek için baseline (normal RAM) ve peak (yoğunluk RAM) sınırı belirleyin. Akıllı Dinamik RAM, baseline ile peak arasında otomatik ölçeklendirme yapar.")) ?></span>
+					</div>
+
+					<div class="u-mb10">
+						<label for="v_web_cgroup_high" class="form-label">
+							<?= tohtml( _("Baseline RAM (MemoryHigh) — Normal çalışma sınırı")) ?>
+						</label>
+						<div class="u-d-flex u-gap5 u-mb5">
+							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cgroup_high" data-value="128M">128M</button>
+							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cgroup_high" data-value="256M">256M</button>
+							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cgroup_high" data-value="512M">512M</button>
+							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cgroup_high" data-value="1G">1G</button>
+						</div>
+						<input type="text" class="form-control" name="v_web_cgroup_high" id="v_web_cgroup_high" value="<?= tohtml(trim($v_web_cgroup_high, "'")) ?>" placeholder="256M">
+						<small class="form-text text-muted"><?= tohtml( _("Örn: 256M. Boş bırakılırsa sınırsız.")) ?></small>
+					</div>
+
+					<div class="u-mb10">
+						<label for="v_web_cgroup_max" class="form-label">
+							<?= tohtml( _("Peak RAM (MemoryMax) — Yoğunluk anı üst sınırı")) ?>
+						</label>
+						<div class="u-d-flex u-gap5 u-mb5">
+							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cgroup_max" data-value="1G">1G</button>
+							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cgroup_max" data-value="2G">2G</button>
+							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cgroup_max" data-value="4G">4G</button>
+							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cgroup_max" data-value="8G">8G</button>
+						</div>
+						<input type="text" class="form-control" name="v_web_cgroup_max" id="v_web_cgroup_max" value="<?= tohtml(trim($v_web_cgroup_max, "'")) ?>" placeholder="2G">
+						<small class="form-text text-muted"><?= tohtml( _("Örn: 2G. Peak ≥ Baseline olmalıdır.")) ?></small>
+					</div>
+
+					<div class="u-mb10">
+						<label for="v_web_cpu_quota" class="form-label">
+							<?= tohtml( _("CPU Kotası")) ?>
+						</label>
+						<div class="u-d-flex u-gap5 u-mb5">
+							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cpu_quota" data-value="25%">25%</button>
+							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cpu_quota" data-value="50%">50%</button>
+							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cpu_quota" data-value="100%">100%</button>
+							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cpu_quota" data-value="200%">200%</button>
+						</div>
+						<input type="text" class="form-control" name="v_web_cpu_quota" id="v_web_cpu_quota" value="<?= tohtml(trim($v_web_cpu_quota, "'")) ?>" placeholder="100%">
+						<small class="form-text text-muted"><?= tohtml( _("50% = yarım çekirdek, 100% = tam çekirdek, 200% = 2 çekirdek.")) ?></small>
 					</div>
 				</div>
 			</details>
