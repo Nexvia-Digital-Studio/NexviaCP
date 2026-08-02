@@ -15,7 +15,7 @@
 
 ## 🚀 NexviaCP Nedir?
 
-**NexviaCP (Nexvia Control Panel)**, Nexvia Dijital Stüdyo tarafından geliştirilen web siteleri, SaaS çözümleri, kurumsal müşteriler, **.NET 6/7/8/9 Web API**, **Node.js** uygulamaları ve **PHP** projeleri için optimize edilmiş açık kaynaklı, hafif ve ultra performanslı bir Linux web kontrol panelidir. 
+**NexviaCP (Nexvia Control Panel)**, Nexvia Dijital Stüdyo tarafından geliştirilen web siteleri, SaaS çözümleri, kurumsal müşteriler, **.NET 6/7/8/9 Web API**, **Node.js** uygulamaları ve **PHP** projeleri için optimize edilmiş açık kaynaklı, hafif ve ultra performanslı bir Linux web kontrol panelidir.
 
 Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **.NET & Node.js & WebSocket desteği**, akıllı kaynak kısıtlama (**cgroups RAM/CPU limitleme**), **Google Drive 2TB otomatik yedekleme**, **Cloudflare DNS otomatik SSL** ve **Private/Public Git Auto-Deploy** gibi ileri seviye modüllere sahiptir.
 
@@ -34,6 +34,7 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 - **Çoklu PHP Sürümü:** Aynı sunucuda PHP 7.4, 8.0, 8.1, 8.2, 8.3 ve 8.4 sürümlerini site bazlı seçebilme.
 - **Otomatik WebP Görsel Optimizasyonu:** Yüklenen görselleri sunucu seviyesinde otomatik `.webp` formatına dönüştürme.
 - **Domain & Subdomain:** Sınırsız alan adı, alt alan adı (subdomain), takma ad (alias) ve HTTP yönlendirmeleri.
+
 </details>
 
 <details open>
@@ -44,6 +45,7 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 - **CPU Kotası:** Yüzde cinsinden işlemci kısıtlama (`%50` yarım çekirdek, `%100` tam çekirdek, `%200` çift çekirdek).
 - **Akıllı Dinamik RAM Yükseltme:** Organik trafik yoğunluğuna göre sitelerin RAM limitini kademeli (256MB -> 512MB -> 2GB) artırma ve otomatik düşürme.
 - **Paket (Package) Yönetimi:** Farklı kotalara ve limitlere sahip şablon paketler oluşturup sitelere tek tıkla atama.
+
 </details>
 
 <details open>
@@ -53,6 +55,7 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 - **SSH Deploy Keys & Access Tokens:** Private repolar için güvenli SSH Deploy Key veya Personal Access Token (PAT) desteği.
 - **Zero-Downtime Reload:** Güncelleme sırasında PM2 veya systemd ile sitelerin kesintisiz (0ms çökme) güncellenmesi.
 - **Otomatik Bağımlılık Yükleme:** `git pull` sonrası `dotnet publish`, `npm install` veya `composer install` süreçleri.
+
 </details>
 
 <details open>
@@ -62,6 +65,7 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 - **Artımlı (Incremental) Yedekleme:** Yalnızca değişen dosyaları yedekleyerek alan ve zaman tasarrufu sağlama.
 - **Çoklu Bulut Desteği:** AWS S3, Backblaze B2, SFTP ve Google Drive yedekleme hedefleri.
 - **Tek Tıkla Geri Yükleme (Restore):** Arayüzden istenen günün yedeğini anında geri yükleyebilme.
+
 </details>
 
 <details open>
@@ -71,6 +75,7 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 - **Otomatik Let's Encrypt SSL:** Standart ve Wildcard SSL sertifikalarını otomatik alma ve süresi dolmadan yenileme.
 - **Dahili Saldırı Koruması:** `iptables`, `fail2ban` ve `ipset` ile kaba kuvvet (brute-force) ve IP banlama sistemi.
 - **Gelişmiş Giriş Güvenliği:** 2FA (İki Faktörlü Doğrulama) ve SSH IP kısıtlaması.
+
 </details>
 
 <details open>
@@ -79,6 +84,7 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 - **MariaDB / MySQL & PostgreSQL:** Çoklu veritabanı desteği ve veritabanı boyut takibi.
 - **phpMyAdmin & pgMyAdmin SSO:** Arayüzden şifre girmeden tek tıkla veritabanı yönetimine geçiş.
 - **Redis & Memcached:** Veri tabanı yükünü %90 azaltan uçan hafıza (In-Memory Caching) altyapısı.
+
 </details>
 
 <details open>
@@ -88,6 +94,7 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 - **Web Terminali:** SSH istemcisine ihtiyaç duymadan arayüzden Linux terminal komutları çalıştırabilme.
 - **RRDtool Sistem Grafikleri:** CPU, RAM, Disk, Ağ ve Veri trafiğini canlı izleme göstergeleri.
 - **White-Label Markalama:** Özel logo, favicon, tema ve panel ismi tanımlayabilme.
+
 </details>
 
 ---
@@ -97,14 +104,18 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 NexviaCP üzerinde **.NET 8 / 9 Web API veya MVC** projelerinizi yayınlamak son derece kolaydır:
 
 1. Sunucuya .NET SDK/Runtime kurun:
-   ```bash
-   sudo apt-get update && sudo apt-get install -y dotnet-sdk-8.0
-   ```
+
+```bash
+sudo apt-get update && sudo apt-get install -y dotnet-sdk-8.0
+```
+
 2. .NET projenizi sunucuda çalıştırın (Port 5000):
-   ```bash
-   dotnet publish -c Release -o /home/admin/web/siteniz.com/app
-   pm2 start "dotnet /home/admin/web/siteniz.com/app/MyApp.dll" --name "dotnet-app"
-   ```
+
+```bash
+dotnet publish -c Release -o /home/admin/web/siteniz.com/app
+pm2 start "dotnet /home/admin/web/siteniz.com/app/MyApp.dll" --name "dotnet-app"
+```
+
 3. NexviaCP Arayüzünden `WEB` sekmesine girip sitenizin **Proxy Template** ayarından **`dotnet`** şablonunu seçin ve kaydedin.
 
 ---
