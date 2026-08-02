@@ -1,41 +1,164 @@
 #!/bin/bash
-# info: setup automatic git deployment for domain
+# info: configure automatic git deployment for a web domain
 # options: USER DOMAIN REPO_URL [BRANCH]
 #
-# example: v-add-web-domain-git admin domain.com https://github.com/user/repo.git main
+# example: v-add-web-domain-git admin example.com https://github.com/user/repo.git main
+#
+# This script registers a git repository for zero-downtime auto-deployment:
+#   - clones the repo into the domain's public_html (preserving deploy.php)
+#   - writes the repo URL and branch to the domain config
+#   - regenerates deploy.sh with the correct branch
+#   - the webhook receiver (public_html/deploy.php) verifies HMAC-SHA256
+#     signatures using the per-domain GIT_DEPLOY_SECRET created at provisioning
+#
+# For private repositories, embed credentials directly in REPO_URL:
+#   PAT:  https://github_pat_xxx@github.com/user/repo.git
+#   SSH:  git@github.com:user/repo.git
 
-user=$1
-domain=$2
-repo_url=$3
-branch=${4:-main}
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
 
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
 source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
 source $HESTIA/func/main.sh
+# load config file
 source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
 
 check_args '3' "$#" 'USER DOMAIN REPO_URL [BRANCH]'
 is_format_valid 'user' 'domain'
 is_object_valid 'user' 'USER' "$user"
+is_object_unsuspended 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
 
-docroot="/home/$user/web/$domain/public_html"
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
 
-if [ -d "$docroot" ]; then
-    echo "[*] Setting up Git Repository for $domain..."
-    sudo -u "$user" bash -c "cd $docroot && git init && git remote add origin $repo_url && git fetch && git checkout -t origin/$branch -f"
-    
-    # Create deploy script
-    deploy_script="/home/$user/web/$domain/deploy.sh"
-    echo "#!/bin/bash" > "$deploy_script"
-    echo "cd $docroot && git pull origin $branch" >> "$deploy_script"
-    echo "if [ -f package.json ]; then npm install && pm2 restart all --silent || true; fi" >> "$deploy_script"
-    chown "$user:$user" "$deploy_script"
-    chmod +x "$deploy_script"
-    
-    log_event "$OK" "$ARGUMENTS"
-    echo "[+] Git Auto-Deploy successfully configured for $domain."
-else
-    echo "[!] Error: Document root $docroot not found."
-    exit 1
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+docroot="$HOMEDIR/$user/web/$domain/public_html"
+domain_home="$HOMEDIR/$user/web/$domain"
+
+# Validate repository URL (allow http(s), git, ssh forms).
+case "$repo_url" in
+	http://*|https://*|git://*|git@*|ssh://*) : ;;
+	*)
+		check_result "$E_INVALID" "invalid repository URL: $repo_url"
+		;;
+esac
+
+# Preserve the deploy.php webhook receiver before cloning (skel ships it).
+preserve_deploy_php=""
+if [ -f "$docroot/deploy.php" ]; then
+	preserve_deploy_php=$(cat "$docroot/deploy.php")
 fi
 
-exit 0
+# Initialize the working tree as a git repo and fetch the requested branch.
+# We clone into a temp dir then move .git into place to avoid clobbering
+# existing public_html assets (index.html, deploy.php, etc.).
+if [ ! -d "$docroot/.git" ]; then
+	echo "[*] Initializing git repository for $domain..."
+	tmp_clone=$(mktemp -d)
+	user_exec git clone --branch "${branch:-main}" --depth 1 "$repo_url" "$tmp_clone/repo" >/dev/null 2>&1
+	if [ $? -ne 0 ]; then
+		rm -rf "$tmp_clone"
+		check_result "$E_CONNECT" "git clone failed (check URL/credentials/branch)"
+	fi
+	# Move .git into the docroot; copy any missing tracked files on top.
+	user_exec mv "$tmp_clone/repo/.git" "$docroot/.git"
+	rm -rf "$tmp_clone"
+fi
+
+# Always (re)set the remote origin so URL/credential rotation is supported.
+user_exec git -C "$docroot" remote remove origin 2>/dev/null || true
+user_exec git -C "$docroot" remote add origin "$repo_url"
+user_exec git -C "$docroot" fetch origin "${branch:-main}" >/dev/null 2>&1 || true
+user_exec git -C "$docroot" checkout -B "${branch:-main}" "origin/${branch:-main}" -f >/dev/null 2>&1 || true
+
+# Restore the webhook receiver if it was clobbered by the clone.
+if [ -n "$preserve_deploy_php" ] && [ ! -f "$docroot/deploy.php" ]; then
+	printf '%s' "$preserve_deploy_php" > "$docroot/deploy.php"
+fi
+
+# (Re)generate deploy.sh with the correct branch baked in.
+deploy_sh="$domain_home/deploy.sh"
+if [ -f "$WEBTPL/skel/deploy.sh" ]; then
+	cp -f "$WEBTPL/skel/deploy.sh" "$deploy_sh"
+else
+	# Minimal fallback if the skel template is unavailable.
+	cat > "$deploy_sh" <<EOF
+#!/bin/bash
+set -e
+cd "$docroot"
+git fetch origin "${branch:-main}"
+git reset --hard "origin/${branch:-main}"
+[ -f composer.json ] && command -v composer >/dev/null && composer install --no-interaction --prefer-dist || true
+[ -f package.json ] && command -v npm >/dev/null && (npm ci || npm install) || true
+command -v pm2 >/dev/null && pm2 reload all --silent || true
+EOF
+fi
+sed -i "s|%branch%|${branch:-main}|g" "$deploy_sh"
+chown "$user:$user" "$deploy_sh"
+chmod 700 "$deploy_sh"
+
+# Make sure the deploy secret exists (older domains created before this
+# feature may not have one yet).
+secret=$(get_object_value 'web' 'DOMAIN' "$domain" '$GIT_DEPLOY_SECRET')
+if [ -z "$secret" ] || [ "$secret" = "%deploy_secret%" ]; then
+	secret=$(generate_password 'a-z0-9' 64)
+	if [ -z "$secret" ]; then
+		secret=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+	fi
+	add_object_key 'web' 'DOMAIN' "$domain" '$GIT_DEPLOY_SECRET' '$TIME'
+	update_object_value 'web' 'DOMAIN' "$domain" '$GIT_DEPLOY_SECRET' "$secret"
+fi
+
+# Re-inject the secret into deploy.php (it may have been overwritten by clone).
+deploy_php="$docroot/deploy.php"
+if [ -f "$deploy_php" ]; then
+	# If deploy.php still has the placeholder, fill it; otherwise leave as-is.
+	if grep -q '%deploy_secret%' "$deploy_php" 2>/dev/null; then
+		sed -i "s/%deploy_secret%/$secret/g" "$deploy_php"
+	fi
+fi
+
+# Persist repo URL + branch in domain config.
+add_object_key 'web' 'DOMAIN' "$domain" '$GIT_REPO' '$TIME'
+update_object_value 'web' 'DOMAIN' "$domain" '$GIT_REPO' "$repo_url"
+add_object_key 'web' 'DOMAIN' "$domain" '$GIT_BRANCH' '$TIME'
+update_object_value 'web' 'DOMAIN' "$domain" '$GIT_BRANCH' "${branch:-main}"
+
+# Fix ownership of docroot after git operations.
+chown -R "$user:$user" "$docroot"
+find "$docroot" -type d -exec chmod 755 {} \;
+find "$docroot" -type f -exec chmod 644 {} \; 2>/dev/null || true
+
+# Harden the webhook receiver: deploy.php contains the HMAC secret that can
+# trigger code deployment, so it must NOT be world-readable. 644 would let any
+# other tenant (or any local process) read the secret. Restrict to owner + the
+# web server group only (WEB_RGROUPS, e.g. www-data).
+if [ -f "$deploy_php" ]; then
+	chown "$user:${WEB_RGROUPS:-www-data}" "$deploy_php"
+	chmod 640 "$deploy_php"
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+# Logging
+$BIN/v-log-action "system" "Info" "Web" "Git auto-deploy enabled for domain (Domain: $domain, User: $user, Branch: ${branch:-main})."
+log_event "$OK" "$ARGUMENTS"
+
+echo "[+] Git auto-deploy configured for $domain (branch: ${branch:-main})."
+echo "    Webhook URL:  https://$domain/deploy.php"
+echo "    Secret:       $secret"
+exit

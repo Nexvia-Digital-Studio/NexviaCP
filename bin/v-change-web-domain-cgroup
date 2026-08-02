@@ -1,0 +1,112 @@
+#!/bin/bash
+# info: set per-domain RAM/CPU cgroup limits (baseline + peak + cpu)
+# options: USER DOMAIN MEMORY_HIGH MEMORY_MAX CPU_QUOTA
+#
+# example: v-change-web-domain-cgroup admin example.com 256M 2G 100%
+#
+# MEMORY_HIGH : soft limit / baseline RAM (e.g. 256M). Each PHP worker is
+#               constrained to this via php_admin_value[memory_limit].
+# MEMORY_MAX  : hard ceiling / peak RAM during traffic bursts (e.g. 2G).
+#               Used to size pm.max_children and the systemd MemoryMax.
+# CPU_QUOTA   : CPU quota as a percentage (50% = half core, 200% = 2 cores).
+#
+# Pass "unlimited" for any value to remove that specific limit.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '5' "$#" 'USER DOMAIN MEMORY_HIGH MEMORY_MAX CPU_QUOTA'
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
+
+# Validate memory / cpu values (allow "unlimited" or sizes like 256M/1G).
+for val_name in memory_high memory_max cpu_quota; do
+	val="${!val_name}"
+	if [ "$val" != "unlimited" ]; then
+		case "$val_name" in
+			cpu_quota)
+				if ! echo "$val" | grep -qE '^[1-9][0-9]*%$'; then
+					check_result "$E_INVALID" "invalid cpu quota: $val (expected e.g. 100%)"
+				fi
+				;;
+			*)
+				if ! echo "$val" | grep -qE '^[0-9]+(K|M|G|T|KB|MB|GB|TB)?$'; then
+					check_result "$E_INVALID" "invalid memory size: $val (expected e.g. 256M, 1G)"
+				fi
+				# Peak must be >= baseline, otherwise the envelope makes no sense.
+				;;
+		esac
+	fi
+done
+
+# Cross-check: peak (max) must be >= baseline (high) when both are bounded.
+if [ "$memory_high" != "unlimited" ] && [ "$memory_max" != "unlimited" ]; then
+	h_bytes=$(memory_to_bytes "$memory_high")
+	m_bytes=$(memory_to_bytes "$memory_max")
+	if [ -n "$h_bytes" ] && [ -n "$m_bytes" ] && [ "$h_bytes" -gt "$m_bytes" ]; then
+		check_result "$E_INVALID" "memory peak ($memory_max) must be >= baseline ($memory_high)"
+	fi
+fi
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Ensure the keys exist on the domain row, then persist the new values.
+add_object_key 'web' 'DOMAIN' "$domain" '$WEB_CGROUP_HIGH' '$TIME'
+add_object_key 'web' 'DOMAIN' "$domain" '$WEB_CGROUP_MAX' '$TIME'
+add_object_key 'web' 'DOMAIN' "$domain" '$WEB_CPU_QUOTA' '$TIME'
+
+# Normalize "unlimited" to empty for storage (empty == unlimited on read).
+store_high="$memory_high"; [ "$store_high" = "unlimited" ] && store_high=""
+store_max="$memory_max";   [ "$store_max" = "unlimited" ]   && store_max=""
+store_cpu="$cpu_quota";    [ "$store_cpu" = "unlimited" ]   && store_cpu=""
+
+update_object_value 'web' 'DOMAIN' "$domain" '$WEB_CGROUP_HIGH' "$store_high"
+update_object_value 'web' 'DOMAIN' "$domain" '$WEB_CGROUP_MAX' "$store_max"
+update_object_value 'web' 'DOMAIN' "$domain" '$WEB_CPU_QUOTA' "$store_cpu"
+
+# Apply the new limits immediately.
+$BIN/v-update-web-domain-cgroup "$user" "$domain"
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+# Logging
+$BIN/v-log-action "system" "Info" "Web" "Per-domain resource limits updated (Domain: $domain, Baseline: $memory_high, Peak: $memory_max, CPU: $cpu_quota)."
+log_event "$OK" "$ARGUMENTS"
+
+exit
+
+# Helper: convert human memory size to bytes.
+memory_to_bytes() {
+	local val="$1"
+	local num unit
+	num=$(echo "$val" | grep -oE '^[0-9]+')
+	unit=$(echo "$val" | grep -oE '[A-Za-z]+$' | tr '[:lower:]' '[:upper:]')
+	case "$unit" in
+		K|KB) echo $((num * 1024)) ;;
+		M|MB) echo $((num * 1048576)) ;;
+		G|GB) echo $((num * 1073741824)) ;;
+		T|TB) echo $((num * 1099511627776)) ;;
+		*) echo "$num" ;;
+	esac
+}

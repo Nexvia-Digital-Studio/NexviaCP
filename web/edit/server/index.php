@@ -587,7 +587,79 @@ if (!empty($_POST["save"])) {
 		}
 	}
 
-	// Set phpMyAdmin access restriction (Hestia SSO only, no direct login)
+	// NexviaCP: Set phpPgAdmin SSO key
+	if (empty($_SESSION["error_msg"])) {
+		if (!empty($_POST["v_phppgadmin_key"])) {
+			$cur_pga_key = $_SESSION["PGA_SSO_KEY"] ?? "";
+			if ($_POST["v_phppgadmin_key"] == "yes" && $cur_pga_key == "") {
+				exec(HESTIA_CMD . "v-add-sys-pga-sso quiet", $output, $return_var);
+				check_return_code($return_var, $output);
+				unset($output);
+				if (empty($_SESSION["error_msg"])) {
+					// Reload the config value so the UI reflects the new key.
+					exec(HESTIA_CMD . "v-list-sys-config json", $output, $return_var);
+					if ($return_var === 0) {
+						$cfg = json_decode(implode("", $output), true);
+						$_SESSION["PGA_SSO_KEY"] = $cfg["config"]["PGA_SSO_KEY"]["value"] ?? "";
+					}
+					unset($output);
+				}
+			} elseif ($_POST["v_phppgadmin_key"] == "no" && $cur_pga_key != "") {
+				exec(HESTIA_CMD . "v-delete-sys-pga-sso quiet", $output, $return_var);
+				check_return_code($return_var, $output);
+				unset($output);
+				if (empty($_SESSION["error_msg"])) {
+					$_SESSION["PGA_SSO_KEY"] = "";
+				}
+			}
+		}
+	}
+
+		// NexviaCP: Set Redis cache server
+		if (empty($_SESSION["error_msg"])) {
+			if (!empty($_POST["v_redis"])) {
+				$cur_redis = $_SESSION["REDIS_SUPPORT"] ?? "no";
+				if ($_POST["v_redis"] == "yes" && $cur_redis != "yes") {
+					exec(HESTIA_CMD . "v-add-sys-redis", $output, $return_var);
+					check_return_code($return_var, $output);
+					unset($output);
+					if (empty($_SESSION["error_msg"])) {
+						$_SESSION["REDIS_SUPPORT"] = "yes";
+					}
+				} elseif ($_POST["v_redis"] == "no" && $cur_redis == "yes") {
+					exec(HESTIA_CMD . "v-delete-sys-redis", $output, $return_var);
+					check_return_code($return_var, $output);
+					unset($output);
+					if (empty($_SESSION["error_msg"])) {
+						$_SESSION["REDIS_SUPPORT"] = "no";
+					}
+				}
+			}
+		}
+
+		// NexviaCP: Set Memcached cache server
+		if (empty($_SESSION["error_msg"])) {
+			if (!empty($_POST["v_memcached"])) {
+				$cur_memcached = $_SESSION["MEMCACHED_SUPPORT"] ?? "no";
+				if ($_POST["v_memcached"] == "yes" && $cur_memcached != "yes") {
+					exec(HESTIA_CMD . "v-add-sys-memcached", $output, $return_var);
+					check_return_code($return_var, $output);
+					unset($output);
+					if (empty($_SESSION["error_msg"])) {
+						$_SESSION["MEMCACHED_SUPPORT"] = "yes";
+					}
+				} elseif ($_POST["v_memcached"] == "no" && $cur_memcached == "yes") {
+					exec(HESTIA_CMD . "v-delete-sys-memcached", $output, $return_var);
+					check_return_code($return_var, $output);
+					unset($output);
+					if (empty($_SESSION["error_msg"])) {
+						$_SESSION["MEMCACHED_SUPPORT"] = "no";
+					}
+				}
+			}
+		}
+
+		// Set phpMyAdmin access restriction (Hestia SSO only, no direct login)
 	if (empty($_SESSION["error_msg"])) {
 		if (!empty($_POST["v_pma_restrict"])) {
 			if ($_POST["v_pma_restrict"] == "yes" && $_SESSION["PMA_RESTRICT_ACCESS"] != "yes") {
@@ -790,6 +862,64 @@ if (!empty($_POST["save"])) {
 			check_return_code($return_var, $output);
 			unset($output);
 			$v_db_adv = "yes";
+		}
+	}
+
+	// NexviaCP: Update Cloudflare DNS API settings for wildcard SSL
+	if (empty($_SESSION["error_msg"])) {
+		if (empty($_POST["v_dns_api_provider"])) {
+			$_POST["v_dns_api_provider"] = "";
+		}
+		$cur_dns_api = $_SESSION["DNS_API_PROVIDER"] ?? "";
+		if ($_POST["v_dns_api_provider"] != $cur_dns_api) {
+			exec(
+				HESTIA_CMD .
+					"v-change-sys-config-value DNS_API_PROVIDER " .
+					quoteshellarg($_POST["v_dns_api_provider"]),
+				$output,
+				$return_var,
+			);
+			check_return_code($return_var, $output);
+			unset($output);
+			if (empty($_SESSION["error_msg"])) {
+				$_SESSION["DNS_API_PROVIDER"] = $_POST["v_dns_api_provider"];
+			}
+		}
+		// API token: only write when a (non-empty) value is submitted so the
+		// field is not accidentally cleared by an empty browser autofill.
+		if (!empty($_POST["v_cf_api_token"])) {
+			$cur_token = $_SESSION["CF_API_TOKEN"] ?? "";
+			if ($_POST["v_cf_api_token"] != $cur_token) {
+				exec(
+					HESTIA_CMD .
+						"v-change-sys-config-value CF_API_TOKEN " .
+						quoteshellarg($_POST["v_cf_api_token"]),
+					$output,
+					$return_var,
+				);
+				check_return_code($return_var, $output);
+				unset($output);
+				if (empty($_SESSION["error_msg"])) {
+					$_SESSION["CF_API_TOKEN"] = $_POST["v_cf_api_token"];
+				}
+			}
+		}
+		if (!empty($_POST["v_cf_zone_id"])) {
+			$cur_zone = $_SESSION["CF_ZONE_ID"] ?? "";
+			if ($_POST["v_cf_zone_id"] != $cur_zone) {
+				exec(
+					HESTIA_CMD .
+						"v-change-sys-config-value CF_ZONE_ID " .
+						quoteshellarg($_POST["v_cf_zone_id"]),
+					$output,
+					$return_var,
+				);
+				check_return_code($return_var, $output);
+				unset($output);
+				if (empty($_SESSION["error_msg"])) {
+					$_SESSION["CF_ZONE_ID"] = $_POST["v_cf_zone_id"];
+				}
+			}
 		}
 	}
 

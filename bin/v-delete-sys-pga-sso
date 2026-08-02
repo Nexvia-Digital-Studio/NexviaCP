@@ -1,0 +1,54 @@
+#!/bin/bash
+# info: disables single sign on for phpPgAdmin (NexviaCP)
+# options: NONE
+#
+# example: v-delete-sys-pga-sso
+#
+# Removes the Hestia SSO bridge for phpPgAdmin.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+PGA_INSTALL="${PGA_INSTALL_DIR:-/usr/share/phppgadmin}"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_hestia_demo_mode
+
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "Error: Script can be run executed only by root"
+	exit 10
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Remove the SSO bridge file and revoke the API access key.
+rm -f "$PGA_INSTALL/hestia-sso.php" 2>/dev/null || true
+
+# Clear the SSO key.
+$BIN/v-change-sys-config-value 'PGA_SSO_KEY' ''
+
+# Revoke the API access key created for phpPgAdmin SSO (best effort).
+$BIN/v-delete-access-key "$ROOT_USER" 'phppgadmin-sso' >/dev/null 2>&1 || true
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-log-action "system" "Info" "Plugins" "phpPgAdmin Single Sign-On has been disabled."
+log_event "$OK" "$ARGUMENTS"
+
+exit

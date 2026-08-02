@@ -1,0 +1,96 @@
+#!/bin/bash
+# info: enables single sign on for phpPgAdmin (NexviaCP)
+# options: [mode]
+#
+# example: v-add-sys-pga-sso
+#
+# Installs the Hestia SSO bridge for phpPgAdmin: a temp PostgreSQL role is
+# created per-click (60 minute TTL, scoped to the target database) and the
+# user is redirected into phpPgAdmin without typing a password.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+MODE=$1
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+PGA_INSTALL="${PGA_INSTALL_DIR:-/usr/share/phppgadmin}"
+PGA_CONFIG="${PGA_CONFIG_DIR:-/etc/phppgadmin}"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+# Checking root permissions
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "Error: Script can be run executed only by root"
+	exit 10
+fi
+
+if [ -n "$PGA_SSO_KEY" ] && [ "$PGA_SSO_KEY" != "" ]; then
+	echo "Error: phpPgAdmin SSO has already been installed. Run v-delete-sys-pga-sso first to re-enable."
+	exit 1
+fi
+
+if [ ! -d "$PGA_INSTALL" ]; then
+	echo "Error: phpPgAdmin not found at $PGA_INSTALL. Install phpPgAdmin first."
+	exit 2
+fi
+
+if [ -f "$PGA_INSTALL/hestia-sso.php" ]; then
+	echo "Error: hestia-sso.php is already installed"
+	exit 2
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Generate the keys to secure everything.
+pgakey=$(generate_password)
+apikey=$($BIN/v-add-access-key "$ROOT_USER" 'phppgadmin-sso' 'phpPgAdmin' 'plain')
+
+# Copy the SSO bridge into the phpPgAdmin install dir.
+cp -f "$HESTIA_INSTALL_DIR/pga/hestia-sso.php" "$PGA_INSTALL/hestia-sso.php" 2>/dev/null
+if [ ! -f "$PGA_INSTALL/hestia-sso.php" ]; then
+	# Fall back to the common install dir layout.
+	cp -f "$HESTIA/install/deb/pga/hestia-sso.php" "$PGA_INSTALL/hestia-sso.php"
+fi
+chmod 640 "$PGA_INSTALL/hestia-sso.php"
+chown root:hestiamail "$PGA_INSTALL/hestia-sso.php"
+
+sed -i "s/%PGA_SSO_KEY%/$pgakey/g" "$PGA_INSTALL/hestia-sso.php"
+sed -i "s/%API_KEY%/$apikey/g" "$PGA_INSTALL/hestia-sso.php"
+sed -i "s/%API_HOST_NAME%/$(hostname -f)/g" "$PGA_INSTALL/hestia-sso.php"
+sed -i "s/%API_HESTIA_PORT%/$BACKEND_PORT/g" "$PGA_INSTALL/hestia-sso.php"
+
+# Persist the SSO key in hestia.conf so the UI can generate tokens.
+$BIN/v-change-sys-config-value 'PGA_SSO_KEY' "$pgakey"
+
+# Allow the API to be called from localhost if not already permitted.
+if [ -z "$(echo "$API_ALLOWED_IP" | grep 127.0.0.1)" ]; then
+	$BIN/v-add-sys-api-ip "127.0.0.1"
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+if [ "$MODE" != "quiet" ]; then
+	echo "phpPgAdmin Hestia-SSO bridge has been successfully installed"
+fi
+$BIN/v-log-action "system" "Info" "Plugins" "phpPgAdmin Single Sign-On has been enabled."
+log_event "$OK" "$ARGUMENTS"
+
+exit

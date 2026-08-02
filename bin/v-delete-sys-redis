@@ -1,0 +1,64 @@
+#!/bin/bash
+# info: disable Redis server and PHP redis extension
+# options: NONE
+#
+# example: v-delete-sys-redis
+#
+# Stops and disables the Redis service, removes the PHP redis extension for
+# every installed PHP-FPM version, and flips REDIS_SUPPORT=no.
+# The redis-server package itself is NOT purged (so data is retained).
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_hestia_demo_mode
+
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "Error: Script can be run executed only by root"
+	exit 10
+fi
+
+if [ "$REDIS_SUPPORT" != "yes" ]; then
+	echo "[+] Redis is not enabled."
+	exit 0
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Stop + disable the service (keep the package + data intact).
+systemctl stop redis-server >/dev/null 2>&1 || systemctl stop redis >/dev/null 2>&1 || true
+systemctl disable redis-server >/dev/null 2>&1 || systemctl disable redis >/dev/null 2>&1 || true
+
+# Disable the PHP redis extension for every installed PHP version.
+for phpver in $(ls /etc/php/ 2>/dev/null); do
+	if [ -d "/etc/php/$phpver/fpm" ]; then
+		phpdismod -v "$phpver" redis >/dev/null 2>&1 || true
+		systemctl reload "php$phpver-fpm" >/dev/null 2>&1 || true
+	fi
+done
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-change-sys-config-value 'REDIS_SUPPORT' 'no'
+$BIN/v-log-action "system" "Info" "Plugins" "Redis server disabled and PHP redis extension removed."
+log_event "$OK" "$ARGUMENTS"
+
+echo "[+] Redis disabled."
+exit

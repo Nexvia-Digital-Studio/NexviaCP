@@ -7,7 +7,7 @@
 			</a>
 		</div>
 		<div class="toolbar-buttons">
-			<a href="https://<?= $_SERVER['HTTP_HOST'] ?>:9000" target="_blank" class="button">
+			<a href="https://<?= $_SERVER['HTTP_HOST'] ?>:9443" target="_blank" class="button">
 				<i class="fab fa-docker icon-blue"></i><?= tohtml( _("Open Portainer Full UI")) ?>
 			</a>
 		</div>
@@ -30,7 +30,7 @@
 		</div>
 
 		<div class="docker-iframe-container" style="width:100%; height:750px; border:1px solid #ddd; border-radius:8px; overflow:hidden;">
-			<iframe src="https://<?= $_SERVER['HTTP_HOST'] ?>:9000" style="width:100%; height:100%; border:none;"></iframe>
+			<iframe src="https://<?= $_SERVER['HTTP_HOST'] ?>:9443" style="width:100%; height:100%; border:none;"></iframe>
 		</div>
 	</div>
 </div>

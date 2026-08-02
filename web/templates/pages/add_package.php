@@ -318,6 +318,12 @@
 						<label for="memory_limit" class="form-label">
 							<?= tohtml( _("Memory Limit (in bytes or with units like '2G')")) ?>
 						</label>
+						<div class="u-d-flex u-gap5 u-mb5">
+							<button type="button" class="button button-secondary js-memory-preset" data-target="v_memory_limit" data-value="256M">256M</button>
+							<button type="button" class="button button-secondary js-memory-preset" data-target="v_memory_limit" data-value="512M">512M</button>
+							<button type="button" class="button button-secondary js-memory-preset" data-target="v_memory_limit" data-value="1G">1G</button>
+							<button type="button" class="button button-secondary js-memory-preset" data-target="v_memory_limit" data-value="2G">2G</button>
+						</div>
 						<div class="u-pos-relative">
 							<input type="text" class="form-control" name="v_memory_limit" id="v_memory_limit" value="<?= tohtml(trim($v_memory_limit, "'")) ?>">
 							<button type="button" class="unlimited-toggle js-unlimited-toggle" title="<?= tohtml( _("Unlimited")) ?>">

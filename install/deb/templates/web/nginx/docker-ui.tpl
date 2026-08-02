@@ -16,6 +16,13 @@ server {
 	}
 
 	location / {
+		# Defense layer 2: nginx HTTP basic auth gate in front of Portainer.
+		# Defense layer 1 is that Portainer ports are bound to 127.0.0.1 only,
+		# so this vhost is the ONLY entry path. The htpasswd file is generated
+		# by v-add-sys-portainer and lives outside any tenant's home directory.
+		auth_basic           "Portainer Admin";
+		auth_basic_user_file /usr/local/hestia/.security/portainer.htpasswd;
+
 		proxy_pass http://127.0.0.1:9000;
 		proxy_http_version 1.1;
 		proxy_set_header Upgrade $http_upgrade;

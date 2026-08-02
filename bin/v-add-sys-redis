@@ -1,0 +1,86 @@
+#!/bin/bash
+# info: install and enable Redis server + PHP redis extension
+# options: NONE
+#
+# example: v-add-sys-redis
+#
+# Installs the redis-server package, enables the PHP redis extension for every
+# installed PHP-FPM version, starts the service, and flips REDIS_SUPPORT=yes.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_hestia_demo_mode
+
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "Error: Script can be run executed only by root"
+	exit 10
+fi
+
+# Idempotent: nothing to do if already enabled.
+if [ "$REDIS_SUPPORT" = "yes" ] && systemctl is-active --quiet redis-server 2>/dev/null; then
+	echo "[+] Redis is already installed and enabled."
+	exit 0
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+echo "[*] Installing Redis server..."
+
+# Detect available apt package; older distros ship redis-server, newer ones
+# renamed it to redis-tools / redis-server.
+apt-get -qq update >/dev/null 2>&1 || true
+
+if ! apt-get -qq install -y redis-server >/dev/null 2>&1; then
+	# Fallback for distributions where the meta package differs.
+	apt-get -qq install -y redis >/dev/null 2>&1 || \
+		check_result "$E_UPDATE" "unable to install redis-server package"
+fi
+
+# Enable + start the service (socket binding on 127.0.0.1:6379 by default).
+systemctl enable redis-server >/dev/null 2>&1 || systemctl enable redis >/dev/null 2>&1 || true
+systemctl restart redis-server >/dev/null 2>&1 || systemctl restart redis >/dev/null 2>&1 || true
+
+# Enable the PHP redis extension for every installed PHP version so apps can
+# use Redis for sessions/object-cache without manual configuration.
+for phpver in $(ls /etc/php/ 2>/dev/null); do
+	# Skip CLI-only or non-FPM versions gracefully.
+	if [ -d "/etc/php/$phpver/fpm" ]; then
+		# Install the matching php-redis package if the Sury ondrej repo layout is in use.
+		if apt-cache show "php$phpver-redis" >/dev/null 2>&1; then
+			apt-get -qq install -y "php$phpver-redis" >/dev/null 2>&1 || true
+		elif apt-cache show "php-redis" >/dev/null 2>&1; then
+			apt-get -qq install -y "php-redis" >/dev/null 2>&1 || true
+		fi
+		# Make sure the extension is actually enabled.
+		phpenmod -v "$phpver" redis >/dev/null 2>&1 || true
+		systemctl reload "php$phpver-fpm" >/dev/null 2>&1 || true
+	fi
+done
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-change-sys-config-value 'REDIS_SUPPORT' 'yes'
+$BIN/v-log-action "system" "Info" "Plugins" "Redis server installed and PHP redis extension enabled."
+log_event "$OK" "$ARGUMENTS"
+
+echo "[+] Redis server installed and running on 127.0.0.1:6379."
+echo "    PHP redis extension enabled for all installed PHP versions."
+exit

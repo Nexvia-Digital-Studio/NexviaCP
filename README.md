@@ -23,12 +23,15 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 
 ## 🛡️ Full Güvenlik Koruması & İzolasyon (Security Hardening)
 
-NexviaCP, müşterilerinize SSH yetkisi vermeden güvenle hizmet sunabilmeniz için 4 katmanlı güvenlik korumasına sahiptir:
+NexviaCP, müşterilerinize SSH yetkisi vermeden güvenle hizmet sunabilmeniz için 5 katmanlı güvenlik korumasına sahiptir:
 
-1. **Docker Konteyner İzolasyonu (Container Breakout Prevention):** Müşterilerin çalıştırdığı Docker konteynerleri kök kullanıcı (root) yetkilerinden tamamen arındırılmıştır (`userns-remap`). Konteyner içinden sunucunun ana dosyalarına (`/etc`, `/home` vb.) erişilmesi engellenmiştir.
-2. **Linux cgroups RAM & CPU İzolasyonu:** Her kullanıcının ve uygulamanın bellek ve işlemci sınırı (`MemoryHigh`, `CPUQuota`) bağımsızdır. Bir uygulamanın çökmesi veya kilitlenmesi sunucunun kalanına ve diğer sitelere asla zarar veremez.
-3. **HMAC SHA-256 Şifreli Webhook Güvenliği:** Otomatik Git güncellemelerinde GitHub `Secret Key` doğrulaması yapılır. Yetkisiz kişilerin sunucuda tetikleme yapması imkansızdır.
-4. **Veritabanı İzolasyonu (User Prefix):** PostgreSQL ve MariaDB veritabanları kullanıcı ön ekleri (`musteri_db`) ile ayrıştırılır. Bir müşteri yalnızca kendi veritabanını yönetebilir.
+1. **Docker Konteyner İzolasyonu (Container Breakout Prevention):** Müşterilerin çalıştırdığı Docker konteynerleri kök kullanıcı (root) yetkilerinden tamamen arındırılmıştır (`userns-remap`). Portainer Agent, `docker.sock`'u doğrudan mount etmez; CE arayüzü `portainer-agent-net` ağı üzerinden haberleşir.
+2. **Portainer Admin-Only Kilit (3 Katmanlı Savunma):** Portainer portları **sadece 127.0.0.1'e** bağlıdır (dışarıdan doğrudan erişim yok). Tek giriş yolu olan `docker-ui` nginx vhostu **HTTP basic auth** şifresi ister (katman 2), ardından Portainer'ın kendi şifresi (katman 3). Panelde Docker menüsü ve `docker-ui` şablonu **yalnızca admin rolündeki kullanıcılar** görür; müşteriler erişemez.
+3. **Linux cgroups İzolasyonu:** **PHP siteleri** için per-site RAM sınırları (`memory_limit × max_children`, gerçek peak hesabı) + per-user kernel CPU limiti (`user-<uid>.slice CPUQuota`). **Node.js / .NET / Next.js** uygulamaları için ise **her siteye ayrı systemd birimi** ayrılarak gerçek per-site kernel-seviye `MemoryMax` + `CPUQuota` cgroup izolasyonu uygulanır (`v-add-web-domain-app`). Bir sitenin çökmesi veya kilitlenmesi diğerlerini etkilemez.
+4. **HMAC SHA-256 Şifreli Webhook Güvenliği:** Otomatik Git güncellemelerinde GitHub `Secret Key` doğrulaması yapılır. `deploy.php` dosyası `chmod 640` ile izole edilmiştir — başka müşteriler webhook secret'ınızı okuyamaz.
+5. **Veritabanı İzolasyonu (User Prefix):** PostgreSQL ve MariaDB veritabanları kullanıcı ön ekleri (`musteri_db`) ile ayrıştırılır. Bir müşteri yalnızca kendi veritabanını yönetebilir.
+
+> **Dürüst not (PHP CPU izolasyonu):** Tüm PHP siteleri tek FPM master altında paylaşıldığı için per-site CPU kotası mimari olarak imkânsızdır; bu nedenle CPU kısıtlaması kullanıcı bazında (kernel), RAM kısıtlaması ise site bazında (PHP + app backends için kernel) uygulanır. Node.js / .NET backends her biri ayrı systemd biriminde olduğu için tam kernel-seviye per-site CPU+RAM izolasyonu alır.
 
 ---
 
@@ -44,7 +47,6 @@ NexviaCP, müşterilerinize SSH yetkisi vermeden güvenle hizmet sunabilmeniz i�
 - **Canlı WebSocket Desteği:** Socket.io ve canlı bildirim/mesajlaşma uygulamaları için Nginx Upgrade şablonları (`websocket` şablonu).
 - **Nginx + PHP-FPM Hibrit Performans:** Statik dosyalar için yüksek hızlı Nginx, dinamik kodlar için izole PHP-FPM havuzları.
 - **Çoklu PHP Sürümü:** Aynı sunucuda PHP 7.4, 8.0, 8.1, 8.2, 8.3 ve 8.4 sürümlerini site bazlı seçebilme.
-- **Otomatik WebP Görsel Optimizasyonu:** Yüklenen görselleri sunucu seviyesinde otomatik `.webp` formatına dönüştürme.
 - **Domain & Subdomain:** Sınırsız alan adı, alt alan adı (subdomain), takma ad (alias) ve HTTP yönlendirmeleri.
 
 </details>
@@ -52,10 +54,10 @@ NexviaCP, müşterilerinize SSH yetkisi vermeden güvenle hizmet sunabilmeniz i�
 <details open>
 <summary><h3>⚙️ 2. Kaynak Yönetimi & cgroups (RAM / CPU / Storage)</h3></summary>
 
-- **Linux cgroups Limitleme:** Kullanıcı ve site bazında `MemoryHigh`, `CPUQuota` ve `MemorySwapMax` kısıtlaması.
+- **Linux cgroups Limitleme (Per-Site):** Her site/domain için `MemoryHigh` (baseline), `MemoryMax` (peak) ve `CPUQuota` ayrı ayrı ayarlanabilir; değerler PHP-FPM pool'a (`memory_limit`, `pm.max_children`) otomatik yansır.
 - **Kolay Arayüzle RAM Ayarı:** Kutucuğa `256M`, `512M`, `1G`, `2G` yazarak veya `∞ (Sınırsız)` butonuna basarak RAM belirleme.
 - **CPU Kotası:** Yüzde cinsinden işlemci kısıtlama (`%50` yarım çekirdek, `%100` tam çekirdek, `%200` çift çekirdek).
-- **Akıllı Dinamik RAM Yükseltme:** Organik trafik yoğunluğuna göre sitelerin RAM limitini kademeli (256MB -> 512MB -> 2GB) artırma ve otomatik düşürme.
+- **Akıllı Dinamik RAM Yükseltme (memory.pressure bazlı):** Her site için belirlenen baseline ↔ peak aralığında, çekirdeğin `memory.pressure` değerini okuyarak RAM limitini kademeli olarak yükseltip düşüren gerçek zamanlı izleyici (`v-monitor-memory-pressure`).
 - **Paket (Package) Yönetimi:** Farklı kotalara ve limitlere sahip şablon paketler oluşturup sitelere tek tıkla atama.
 
 </details>
@@ -63,7 +65,8 @@ NexviaCP, müşterilerinize SSH yetkisi vermeden güvenle hizmet sunabilmeniz i�
 <details open>
 <summary><h3>🔄 3. Otomasyon & Continuous Deployment (Private / Public Git)</h3></summary>
 
-- **Private & Public Git Auto-Deploy:** Gizli (Private) veya açık repolar için Otomatik Git yayınlama (`deploy.sh`).
+- **Private & Public Git Auto-Deploy:** Gizli (Private) veya açık repolar için Otomatik Git yayınlama (`deploy.sh` + `deploy.php` webhook receiver).
+- **HMAC SHA-256 Webhook Güvenliği:** Her site için 64 karakterlik benzersiz secret üretilir; `deploy.php`, gelen isteğin `X-Hub-Signature-256` başlığını HMAC-SHA256 ile doğrular. Yetkisiz tetikleme imkansızdır.
 - **SSH Deploy Keys & Access Tokens:** Private repolar için güvenli SSH Deploy Key veya Personal Access Token (PAT) desteği.
 - **Zero-Downtime Reload:** Güncelleme sırasında PM2 veya systemd ile sitelerin kesintisiz (0ms çökme) güncellenmesi.
 - **Otomatik Bağımlılık Yükleme:** `git pull` sonrası `dotnet publish`, `npm install` veya `composer install` süreçleri.
@@ -73,9 +76,9 @@ NexviaCP, müşterilerinize SSH yetkisi vermeden güvenle hizmet sunabilmeniz i�
 <details open>
 <summary><h3>☁️ 4. Bulut Yedekleme & Veri Güvenliği (Restic & Google Drive)</h3></summary>
 
-- **Google Drive 2TB Entegrasyonu:** `rclone` ve `restic` kullanarak 40 sitenin tüm dosya ve veritabanlarını şifreli olarak Google Drive'a yedekleme.
+- **Google Drive 2TB Entegrasyonu:** `restic` + `rclone` kullanarak 40 sitenin tüm dosya ve veritabanlarını uçtan uca şifreli olarak Google Drive'a yedekleme.
 - **Artımlı (Incremental) Yedekleme:** Yalnızca değişen dosyaları yedekleyerek alan ve zaman tasarrufu sağlama.
-- **Çoklu Bulut Desteği:** AWS S3, Backblaze B2, SFTP ve Google Drive yedekleme hedefleri.
+- **Geniş Protokol Desteği:** FTP, SFTP, Backblaze B2 ve Rclone üzerinden Google Drive / S3 / R2 / Wasabi hedefleri (Rclone bu servislerin tümunu kapsar).
 - **Tek Tıkla Geri Yükleme (Restore):** Arayüzden istenen günün yedeğini anında geri yükleyebilme.
 
 </details>
@@ -83,7 +86,7 @@ NexviaCP, müşterilerinize SSH yetkisi vermeden güvenle hizmet sunabilmeniz i�
 <details open>
 <summary><h3>🛡️ 5. Güvenlik & SSL Yönetimi</h3></summary>
 
-- **Cloudflare DNS API Entegrasyonu:** Cloudflare kullanarak `*.siteniz.com` şeklinde ücretsiz Wildcard SSL sertifikası üretimi.
+- **Cloudflare DNS API Wildcard SSL:** Sunucu Ayarları'ndan Cloudflare API Token + Zone ID girildiğinde, `*.siteniz.com` wildcard Let's Encrypt sertifikaları için `_acme-challenge` TXT kaydı Cloudflare API'sine otomatik yazılır ve silinir — yerel DNS zone gerektirmez.
 - **Otomatik Let's Encrypt SSL:** Standart ve Wildcard SSL sertifikalarını otomatik alma ve süresi dolmadan yenileme.
 - **Dahili Saldırı Koruması:** `iptables`, `fail2ban` ve `ipset` ile kaba kuvvet (brute-force) ve IP banlama sistemi.
 - **Gelişmiş Giriş Güvenliği:** 2FA (İki Faktörlü Doğrulama) ve SSH IP kısıtlaması.
@@ -94,8 +97,8 @@ NexviaCP, müşterilerinize SSH yetkisi vermeden güvenle hizmet sunabilmeniz i�
 <summary><h3>⚡ 6. Veritabanı & Nesne Önbellekleme (Caching)</h3></summary>
 
 - **MariaDB / MySQL & PostgreSQL:** Çoklu veritabanı desteği ve veritabanı boyut takibi.
-- **phpMyAdmin & pgMyAdmin SSO:** Arayüzden şifre girmeden tek tıkla veritabanı yönetimine geçiş.
-- **Redis & Memcached:** Veri tabanı yükünü %90 azaltan uçan hafıza (In-Memory Caching) altyapısı.
+- **phpMyAdmin & phpPgAdmin SSO:** Arayüzden şifre girmeden tek tıkla veritabanı yönetimine geçiş. phpPgAdmin için her tıklamada 60 dakikalık geçici PostgreSQL rolü (TTL) üretilir.
+- **Redis & Memcached:** Arayüzden tek tıkla kurulup tüm PHP sürümleri için etkinleştirilen, veri tabanı yükünü %90 azaltan In-Memory Caching altyapısı.
 
 </details>
 
@@ -111,19 +114,21 @@ NexviaCP, müşterilerinize SSH yetkisi vermeden güvenle hizmet sunabilmeniz i�
 
 ---
 
-## 🐳 Görsel Docker UI / Portainer Entegrasyonu (SSH'sız Yönetim)
+## 🐳 Görsel Docker UI / Portainer Entegrasyonu (Admin-Only, Kilitli)
 
-SSH yetkisi vermediğiniz müşterilerin Docker konteynerlerini arayüzden görsel olarak yönetebilmesi için:
+NexviaCP, Portainer CE'yi güvenli (hardened) ve **sadece ana yöneticiye açık** bir yapıyla kurar. Müşterileriniz Portainer'a erişemez.
 
-1. Sunucuda Portainer konteyneri başlatın:
+1. Root olarak NexviaCP'nin Portainer kurulum script'ini çalıştırın (veya kurulumda `--portainer yes` bayrağını kullanın):
 
 ```bash
-docker run -d -p 9000:9000 --name portainer --restart=always -v /var/run/docker.sock:/var/run/docker.sock portainer/portainer-ce
+v-add-sys-portainer
 ```
 
-2. NexviaCP arayüzünde `WEB` sekmesinden `portainer.siteniz.com` alan adını ekleyin.
+Bu komut Portainer CE ve Portainer Agent'ı ayrı konteynerler olarak başlatır, `userns-remap` ile Docker hardening uygular, `docker.sock`'u doğrudan mount etmez ve `portainer-agent-net` ağı üzerinden haberleşir. **Portainer portları yalnızca 127.0.0.1'e bağlıdır** — dışarıdan doğrudan erişilemez. Kurulum sonunda size bir **nginx auth_basic kullanıcı adı + şifresi** üretilir (bunları kaydedin).
+
+2. NexviaCP arayüzünde `WEB` sekmesinden `portainer.siteniz.com` alan adını ekleyin. (`docker-ui` şablonu panelde **sadece admin'e** görünür.)
 3. **Proxy Template** alanından **`docker-ui`** şablonunu seçin ve **SSL (Let's Encrypt)** aktif edin.
-4. Müşteriniz tarayıcısından `https://portainer.siteniz.com` adresine girerek kendi Docker konteynerlerini görsel olarak yönetebilir.
+4. `https://portainer.siteniz.com` adresine girerken **önce nginx şifresi** (kurulumda üretilen), **ardından Portainer şifresi** istenir. Müşterilerinizin panelinde Docker menüsü hiç görünmez.
 
 ---
 
@@ -143,9 +148,37 @@ wget https://raw.githubusercontent.com/Nexvia-Digital-Studio/NexviaCP/main/insta
 
 ### Adım 3: Kurulumu Başlatın
 
+**Tüm NexviaCP özelliklerini (PHP + MySQL + PostgreSQL + Docker + Portainer + Redis + .NET + Node.js) tek seferde kuran tam komut:**
+
+```bash
+bash hst-install.sh \
+  --nginx yes --phpfpm yes --apache no --multiphp yes \
+  --mysql yes --postgresql yes \
+  --docker yes --portainer yes \
+  --redis yes --memcached yes \
+  --dotnet yes \
+  --force
+```
+
+**Sadece temel PHP + MySQL istiyorsanız:**
+
 ```bash
 bash hst-install.sh --nginx yes --phpfpm yes --apache no --multiphp yes --mysql yes --force
 ```
+
+> **Not:** `--portainer yes` otomatik olarak `--docker yes`'i de etkinleştirir. Kurulum bittikten sonra Portainer nginx şifreniz konsolda görüntülenir — kaydedin.
+
+#### Tüm NexviaCP bayrakları
+
+| Bayrak | Açıklama | Varsayılan |
+|---|---|---|
+| `--redis` | Redis object cache | no |
+| `--memcached` | Memcached object cache | no |
+| `--docker` | Docker engine + userns-remap hardening | no |
+| `--portainer` | Portainer CE (admin-only, 127.0.0.1) | no |
+| `--dotnet` | .NET SDK 8/9/10 | no |
+| `--postgresql` | PostgreSQL | no |
+| `--multiphp` | Çoklu PHP sürümleri (7.4-8.5) | no |
 
 ---
 

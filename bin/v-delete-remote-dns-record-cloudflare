@@ -1,0 +1,80 @@
+#!/bin/bash
+# info: delete a DNS TXT record from Cloudflare (cleanup after LE dns-01)
+# options: DOMAIN RECORD_ID
+#
+# example: v-delete-remote-dns-record-cloudflare example.com abc123recordid
+#
+# Uses the Cloudflare API v4 to delete the given DNS record id. The DOMAIN
+# argument is accepted for symmetry/logging but only the RECORD_ID is used.
+# Requires DNS_API_PROVIDER=cloudflare, CF_API_TOKEN and CF_ZONE_ID in hestia.conf.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+domain=$1
+record_id=$2
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'DOMAIN RECORD_ID'
+is_format_valid 'domain' 'record_id'
+check_hestia_demo_mode
+
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "Error: Script can be run executed only by root"
+	exit 10
+fi
+
+if [ "$DNS_API_PROVIDER" != "cloudflare" ]; then
+	check_result "$E_INVALID" "DNS_API_PROVIDER is not set to cloudflare"
+fi
+if [ -z "$CF_API_TOKEN" ]; then
+	check_result "$E_NOTEXIST" "CF_API_TOKEN is not configured"
+fi
+if [ -z "$CF_ZONE_ID" ]; then
+	check_result "$E_NOTEXIST" "CF_ZONE_ID is not configured"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+api_url="https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records/$record_id"
+
+answer=$(curl --silent --show-error --max-time 30 \
+	--request DELETE "$api_url" \
+	--header "Authorization: Bearer $CF_API_TOKEN" \
+	--header "Content-Type: application/json")
+
+success=$(echo "$answer" | jq -r '.success // false')
+if [ "$success" != "true" ]; then
+	err_msg=$(echo "$answer" | jq -r '.errors[0].message // "unknown Cloudflare API error"')
+	# A missing/already-deleted record is not fatal during LE cleanup.
+	if echo "$err_msg" | grep -qi "could not find\|not exist\|invalid"; then
+		$BIN/v-log-action "system" "Info" "DNS" "Cloudflare record $record_id already gone for $domain."
+		log_event "$OK" "$ARGUMENTS"
+		exit
+	fi
+	check_result "$E_CONNECT" "Cloudflare API delete failed for $domain (id: $record_id): $err_msg"
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-log-action "system" "Info" "DNS" "Deleted Cloudflare TXT record $record_id for $domain."
+log_event "$OK" "$ARGUMENTS"
+
+exit

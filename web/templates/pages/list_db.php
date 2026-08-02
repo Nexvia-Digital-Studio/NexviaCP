@@ -195,16 +195,40 @@ if (!empty($_SESSION["DB_PGA_ALIAS"])) {
 										]);
 									?>
 									<li class="units-table-row-action shortcut-enter" data-key-action="href">
-										<a
-											class="units-table-row-action-link"
-											href="<?= tohtml($hestia_sso_url) ?>"
-											title="phpMyAdmin" target="_blank"
-										>
-										<i class="fas fa-right-to-bracket icon-orange"></i>
-										<span class="u-hide-desktop">phpMyAdmin</span>
-									</a>
-								</li>
-							<?php } ?>
+									<a
+										class="units-table-row-action-link"
+										href="<?= tohtml($hestia_sso_url) ?>"
+										title="phpMyAdmin" target="_blank"
+									>
+									<i class="fas fa-right-to-bracket icon-orange"></i>
+									<span class="u-hide-desktop">phpMyAdmin</span>
+								</a>
+							</li>
+						<?php } ?>
+							<?php if ($data[$key]['TYPE'] == 'pgsql' && isset($_SESSION['PGA_SSO_KEY']) && $_SESSION['PGA_SSO_KEY'] != '' && !ipUsed()) { $time = time(); ?>
+								<?php
+									$hestia_pga_sso_token = password_hash(
+										$key . $user_plain . $_SESSION['user_combined_ip'] . $time . $_SESSION['PGA_SSO_KEY'],
+										PASSWORD_DEFAULT,
+									);
+									$hestia_pga_sso_url = $db_pgadmin_link . "hestia-sso.php?" . http_build_query([
+										"database" => $key,
+										"user" => $user_plain,
+										"exp" => $time,
+										"token" => $hestia_pga_sso_token,
+									]);
+								?>
+								<li class="units-table-row-action shortcut-enter" data-key-action="href">
+									<a
+										class="units-table-row-action-link"
+										href="<?= tohtml($hestia_pga_sso_url) ?>"
+										title="phpPgAdmin" target="_blank"
+									>
+									<i class="fas fa-right-to-bracket icon-orange"></i>
+									<span class="u-hide-desktop">phpPgAdmin</span>
+								</a>
+							</li>
+						<?php } ?>
 							<li class="units-table-row-action shortcut-enter" data-key-action="href">
 								<a
 									class="units-table-row-action-link"

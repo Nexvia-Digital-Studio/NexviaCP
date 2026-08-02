@@ -115,7 +115,14 @@ help() {
   -f, --force             Force installation
   -h, --help              Print this help
 
-  Example: bash $0 -e demo@hestiacp.com -p p4ssw0rd --multiphp yes"
+  NexviaCP extensions (opt-in services):
+  --redis                 Install Redis cache           [yes|no]  default: no
+  --memcached             Install Memcached cache       [yes|no]  default: no
+  --docker                Install Docker + hardening    [yes|no]  default: no
+  --portainer             Install Portainer (admin)     [yes|no]  default: no
+  --dotnet                Install .NET SDK 8/9/10       [yes|no]  default: no
+
+  Example: bash $0 -e demo@hestiacp.com -p p4ssw0rd --multiphp yes --docker yes --portainer yes"
 	exit 1
 }
 
@@ -288,6 +295,11 @@ for arg; do
 		--quota) args="${args}-q " ;;
 		--resourcelimit) args="${args}-L " ;;
 		--webterminal) args="${args}-W " ;;
+		--redis) args="${args}-1 " ;;
+		--memcached) args="${args}-2 " ;;
+		--docker) args="${args}-3 " ;;
+		--portainer) args="${args}-4 " ;;
+		--dotnet) args="${args}-5 " ;;
 		--port) args="${args}-r " ;;
 		--lang) args="${args}-l " ;;
 		--interactive) args="${args}-y " ;;
@@ -308,7 +320,7 @@ done
 eval set -- "$args"
 
 # Parsing arguments
-while getopts "a:w:v:j:k:m:M:g:d:x:z:Z:c:t:i:b:r:o:q:L:l:y:s:u:e:p:W:D:fh" Option; do
+while getopts "a:w:v:j:k:m:M:g:d:x:z:Z:c:t:i:b:r:o:q:L:l:y:s:u:e:p:W:D:1:2:3:4:5:fh" Option; do
 	case $Option in
 		a) apache=$OPTARG ;;        # Apache
 		w) phpfpm=$OPTARG ;;        # PHP-FPM
@@ -338,6 +350,11 @@ while getopts "a:w:v:j:k:m:M:g:d:x:z:Z:c:t:i:b:r:o:q:L:l:y:s:u:e:p:W:D:fh" Optio
 		u) username=$OPTARG ;;      # Admin username
 		p) vpass=$OPTARG ;;         # Admin password
 		D) withdebs=$OPTARG ;;      # Hestia debs path
+		1) redis=$OPTARG ;;         # NexviaCP: Redis cache
+		2) memcached=$OPTARG ;;     # NexviaCP: Memcached cache
+		3) docker=$OPTARG ;;        # NexviaCP: Docker + hardening
+		4) portainer=$OPTARG ;;     # NexviaCP: Portainer (admin-only)
+		5) dotnet=$OPTARG ;;        # NexviaCP: .NET SDK
 		f) force='yes' ;;           # Force install
 		h) help ;;                  # Help
 		*) help ;;                  # Print help (default)
@@ -414,6 +431,17 @@ set_default_value 'interactive' 'yes'
 set_default_value 'api' 'yes'
 set_default_port '8083'
 set_default_lang 'en'
+
+# NexviaCP extension defaults (opt-in services).
+set_default_value 'redis' 'no'
+set_default_value 'memcached' 'no'
+set_default_value 'docker' 'no'
+set_default_value 'portainer' 'no'
+set_default_value 'dotnet' 'no'
+# Portainer auto-pulls Docker in (it depends on the Docker engine).
+if [ "$portainer" = 'yes' ]; then
+	docker='yes'
+fi
 
 # Checking software conflicts
 if [ "$proftpd" = 'yes' ]; then
@@ -1120,6 +1148,48 @@ if [ -d "$withdebs" ]; then
 fi
 
 #----------------------------------------------------------#
+#         NexviaCP extension packages (opt-in)             #
+#----------------------------------------------------------#
+# Redis / Memcached are plain apt packages, safe to append directly.
+if [ "$redis" = 'yes' ]; then
+	software="$software redis-server"
+fi
+if [ "$memcached" = 'yes' ]; then
+	software="$software memcached"
+fi
+# Docker: add the official Docker apt repo + packages. The hardening
+# (userns-remap) is applied post-install by v-add-sys-docker-hardening.
+if [ "$docker" = 'yes' ]; then
+	echo "[ * ] Adding Docker official APT repository..."
+	mkdir -p /etc/apt/keyrings 2>/dev/null
+	curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc 2>/dev/null
+	chmod a+r /etc/apt/keyrings/docker.asc 2>/dev/null
+	os_codename=$(lsb_release -cs 2>/dev/null)
+	if [ -n "$os_codename" ] && [ -f /etc/apt/keyrings/docker.asc ]; then
+		echo "deb [arch=$(dpkg --print-architecture 2>/dev/null) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $os_codename stable" \
+			> /etc/apt/sources.list.d/docker.list
+	fi
+	software="$software docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+fi
+# .NET SDK: add the Microsoft apt repo. v-add-web-domain (.NET template) and
+# deploy.sh (dotnet publish) rely on it being present.
+if [ "$dotnet" = 'yes' ]; then
+	echo "[ * ] Adding Microsoft .NET APT repository..."
+	curl -fsSL https://packages.microsoft.com/keys/microsoft.asc -o /usr/share/keyrings/microsoft.asc 2>/dev/null
+	os_codename=$(lsb_release -cs 2>/dev/null)
+	if [ -n "$os_codename" ] && [ -f /usr/share/keyrings/microsoft.asc ]; then
+		echo "deb [arch=$(dpkg --print-architecture 2>/dev/null) signed-by=/usr/share/keyrings/microsoft.asc] https://packages.microsoft.com/debian/${os_codename}/prod $os_codename main" \
+			> /etc/apt/sources.list.d/microsoft-prod.list
+	fi
+	software="$software dotnet-sdk-8.0 dotnet-sdk-9.0"
+fi
+
+# Refresh apt cache if any third-party repo was added above.
+if [ "$docker" = 'yes' ] || [ "$dotnet" = 'yes' ]; then
+	apt-get update >> $LOG 2>&1
+fi
+
+#----------------------------------------------------------#
 #                     Install packages                     #
 #----------------------------------------------------------#
 
@@ -1274,6 +1344,10 @@ if [ $? -ne 0 ]; then
 else
 	echo "@reboot root sleep 5 && mount -o remount,defaults,hidepid=2 /proc" > /etc/cron.d/hestia-proc
 fi
+
+# NexviaCP: per-minute smart dynamic RAM autoscaler (cgroups memory.pressure).
+echo "*/1 * * * * root /usr/local/hestia/bin/v-monitor-memory-pressure >/dev/null 2>&1" > /etc/cron.d/hestia-memory-monitor
+chmod 644 /etc/cron.d/hestia-memory-monitor
 
 #----------------------------------------------------------#
 #                     Configure Hestia                     #
@@ -1455,6 +1529,23 @@ write_config_value "UPGRADE_SEND_EMAIL_LOG" "false"
 
 # Set "root" user
 write_config_value "ROOT_USER" "$username"
+
+# NexviaCP Docker / Portainer hardening flags (disabled by default; enabled by
+# v-add-sys-portainer and v-add-sys-docker-hardening on demand).
+write_config_value "PORTAINER_SUPPORT" "no"
+write_config_value "DOCKER_HARDENING" "no"
+
+# NexviaCP phpPgAdmin SSO key (populated by v-add-sys-pga-sso).
+write_config_value "PGA_SSO_KEY" ""
+
+# NexviaCP cache service flags (enabled by v-add-sys-redis / v-add-sys-memcached).
+write_config_value "REDIS_SUPPORT" "no"
+write_config_value "MEMCACHED_SUPPORT" "no"
+
+# NexviaCP Cloudflare DNS API for wildcard SSL (configured in Server Settings).
+write_config_value "DNS_API_PROVIDER" ""
+write_config_value "CF_API_TOKEN" ""
+write_config_value "CF_ZONE_ID" ""
 
 # Installing hosting packages
 cp -rf $HESTIA_COMMON_DIR/packages $HESTIA/data/
@@ -1955,6 +2046,38 @@ if [ "$postgresql" = 'yes' ]; then
 	# Limit access to /etc/phppgadmin/
 	chown -R root:hestiamail /etc/phppgadmin/
 	chmod 640 /etc/phppgadmin/config.inc.php
+fi
+
+#----------------------------------------------------------#
+#           NexviaCP extension services (opt-in)           #
+#----------------------------------------------------------#
+# These are enabled at install time via the --redis / --memcached / --docker /
+# --portainer / --dotnet flags. They call the dedicated bin/ scripts which
+# perform the real setup (config files, config flags, hardening).
+
+if [ "$redis" = 'yes' ]; then
+	echo "[ * ] Enabling Redis object cache..."
+	$HESTIA/bin/v-add-sys-redis >> $LOG 2>&1 || echo "[!] Redis setup reported an issue (continuing)"
+fi
+
+if [ "$memcached" = 'yes' ]; then
+	echo "[ * ] Enabling Memcached object cache..."
+	$HESTIA/bin/v-add-sys-memcached >> $LOG 2>&1 || echo "[!] Memcached setup reported an issue (continuing)"
+fi
+
+if [ "$docker" = 'yes' ]; then
+	echo "[ * ] Enabling Docker userns-remap hardening..."
+	$HESTIA/bin/v-add-sys-docker-hardening >> $LOG 2>&1 || echo "[!] Docker hardening reported an issue (continuing)"
+fi
+
+if [ "$portainer" = 'yes' ]; then
+	echo "[ * ] Installing Portainer CE (admin-only, locked to 127.0.0.1)..."
+	$HESTIA/bin/v-add-sys-portainer >> $LOG 2>&1 || echo "[!] Portainer setup reported an issue (continuing)"
+fi
+
+# phpPgAdmin SSO bridge (only meaningful when PostgreSQL is installed).
+if [ "$postgresql" = 'yes' ] && [ -x "$HESTIA/bin/v-add-sys-pga-sso" ]; then
+	$HESTIA/bin/v-add-sys-pga-sso >> $LOG 2>&1 || true
 fi
 
 #----------------------------------------------------------#

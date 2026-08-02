@@ -64,7 +64,9 @@
 						<option value="node-js">🟢 Node.js / Express / Next.js (Port 3000)</option>
 						<option value="dotnet">🔷 .NET 8 / 9 / 10 ASP.NET Core (Port 5000)</option>
 						<option value="websocket">⚡ Live WebSocket & Socket.io (Port 3000)</option>
+						<?php if (($_SESSION["userContext"] ?? "") === "admin") { ?>
 						<option value="docker-ui">🐳 Docker UI / Portainer Management (Port 9000)</option>
+						<?php } ?>
 					</select>
 					<small class="form-text text-muted u-mt5"><?= tohtml( _("Uygulamanızın çalışma modunu seçin. Seçilen mod Nginx reverse proxy ve SSL yönlendirmesini otomatik ayarlar.")) ?></small>
 				</div>

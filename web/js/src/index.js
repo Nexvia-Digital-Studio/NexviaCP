@@ -27,6 +27,7 @@ import handleSyncEmailValues from './syncEmailValues';
 import handleTabPanels from './tabPanels';
 import handleToggleAdvanced from './toggleAdvanced';
 import handleUnlimitedInput from './unlimitedInput';
+import handleMemoryPresets from './memoryPresets';
 import initWebTerminal from './webTerminal';
 
 initListeners();
@@ -65,4 +66,5 @@ document.addEventListener('alpine:init', () => {
 	handleIpListDataSource();
 	handleShortcuts();
 	handleUnlimitedInput();
+	handleMemoryPresets();
 });
