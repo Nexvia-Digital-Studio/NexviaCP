@@ -1,5 +1,5 @@
-<link rel="alternate icon" href="/images/favicon.png" type="image/png">
-<link rel="icon" href="/images/logo.svg" type="image/svg+xml">
+<link rel="shortcut icon" href="/images/favicon.ico" type="image/x-icon">
+<link rel="icon" href="/images/logo.webp" type="image/webp">
 <link rel="stylesheet" href="/css/themes/default.min.css?<?= JS_LATEST_UPDATE ?>">
 
 <?php
