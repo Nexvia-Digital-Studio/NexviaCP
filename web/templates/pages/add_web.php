@@ -55,6 +55,19 @@
 						?>
 					</select>
 				</div>
+				<div class="u-mb20">
+					<label for="v_app_preset" class="form-label">
+						<i class="fas fa-layer-group icon-purple u-mr5"></i><?= tohtml( _("Application Runtime & Proxy Preset (Uygulama Çalıştırma Tipi)")) ?>
+					</label>
+					<select class="form-select" name="v_proxy_template" id="v_app_preset">
+						<option value="default" selected>🐘 PHP Web Application (PHP-FPM Default)</option>
+						<option value="node-js">🟢 Node.js / Express / Next.js (Port 3000)</option>
+						<option value="dotnet">🔷 .NET 8 / 9 / 10 ASP.NET Core (Port 5000)</option>
+						<option value="websocket">⚡ Live WebSocket & Socket.io (Port 3000)</option>
+						<option value="docker-ui">🐳 Docker UI / Portainer Management (Port 9000)</option>
+					</select>
+					<small class="form-text text-muted u-mt5"><?= tohtml( _("Uygulamanızın çalışma modunu seçin. Seçilen mod Nginx reverse proxy ve SSL yönlendirmesini otomatik ayarlar.")) ?></small>
+				</div>
 				<?php if (isset($_SESSION["DNS_SYSTEM"]) && !empty($_SESSION["DNS_SYSTEM"])) { ?>
 					<?php if ($panel[$user_plain]["DNS_DOMAINS"] != "0") { ?>
 						<div class="form-check u-mb10">

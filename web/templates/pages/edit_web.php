@@ -78,6 +78,19 @@
 					?>
 				</select>
 			</div>
+			<div class="u-mb20">
+				<label for="v_app_preset" class="form-label">
+					<i class="fas fa-layer-group icon-purple u-mr5"></i><?= tohtml( _("Application Runtime & Proxy Preset (Uygulama Çalıştırma Tipi)")) ?>
+				</label>
+				<select class="form-select" name="v_proxy_template_preset" id="v_app_preset" onchange="if(document.getElementById('v_proxy_template')) document.getElementById('v_proxy_template').value = this.value;">
+					<option value="default" <?php if (empty($v_proxy_template) || $v_proxy_template == 'default' || $v_proxy_template == "'default'") echo 'selected'; ?>>🐘 PHP Web Application (PHP-FPM Default)</option>
+					<option value="node-js" <?php if ($v_proxy_template == 'node-js' || $v_proxy_template == "'node-js'") echo 'selected'; ?>>🟢 Node.js / Express / Next.js (Port 3000)</option>
+					<option value="dotnet" <?php if ($v_proxy_template == 'dotnet' || $v_proxy_template == "'dotnet'") echo 'selected'; ?>>🔷 .NET 8 / 9 / 10 ASP.NET Core (Port 5000)</option>
+					<option value="websocket" <?php if ($v_proxy_template == 'websocket' || $v_proxy_template == "'websocket'") echo 'selected'; ?>>⚡ Live WebSocket & Socket.io (Port 3000)</option>
+					<option value="docker-ui" <?php if ($v_proxy_template == 'docker-ui' || $v_proxy_template == "'docker-ui'") echo 'selected'; ?>>🐳 Docker UI / Portainer Management (Port 9000)</option>
+				</select>
+				<small class="form-text text-muted u-mt5"><?= tohtml( _("Uygulamanızın çalışma modunu seçin. Seçilen mod Nginx reverse proxy ve SSL yönlendirmesini otomatik ayarlar.")) ?></small>
+			</div>
 			<div class="u-mb10">
 				<label for="v_stats" class="form-label"><?= tohtml( _("Web Statistics")) ?></label>
 				<select class="form-select js-stats-select" name="v_stats" id="v_stats">
