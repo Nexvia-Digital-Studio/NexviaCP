@@ -1,7 +1,7 @@
 <h1 align="center"><a href="https://github.com/Nexvia-Digital-Studio/NexviaCP">Nexvia Control Panel (NexviaCP)</a></h1>
 
 <p align="center">
-  <img src="web/images/logo-dark.webp" alt="NexviaCP Logo" width="220" />
+  <img src="web/images/logo.webp" alt="NexviaCP Logo" width="220" />
 </p>
 
 <h2 align="center">Nexvia Dijital Stüdyo Projelerine Özel Yüksek Performanslı Web Kontrol Paneli</h2>
