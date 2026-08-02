@@ -17,7 +17,18 @@
 
 **NexviaCP (Nexvia Control Panel)**, Nexvia Dijital Stüdyo tarafından geliştirilen web siteleri, SaaS çözümleri, kurumsal müşteriler, **.NET 8 / 9 / 10 Web API**, **Node.js** uygulamaları ve **PHP** projeleri için optimize edilmiş açık kaynaklı, hafif ve ultra performanslı bir Linux web kontrol panelidir.
 
-Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **.NET & Node.js & WebSocket desteği**, akıllı kaynak kısıtlama (**cgroups RAM/CPU limitleme**), **Google Drive 2TB otomatik yedekleme**, **Cloudflare DNS otomatik SSL** ve **Private/Public Git Auto-Deploy** gibi ileri seviye modüllere sahiptir.
+Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **Visual Docker UI & Portainer desteği**, **Full Security Hardening (Tam Güvenlik Koruması)**, akıllı kaynak kısıtlama (**cgroups RAM/CPU limitleme**), **Google Drive 2TB otomatik yedekleme**, **Cloudflare DNS otomatik SSL** ve **Private/Public Git Auto-Deploy** gibi ileri seviye modüllere sahiptir.
+
+---
+
+## 🛡️ Full Güvenlik Koruması & İzolasyon (Security Hardening)
+
+NexviaCP, müşterilerinize SSH yetkisi vermeden güvenle hizmet sunabilmeniz için 4 katmanlı güvenlik korumasına sahiptir:
+
+1. **Docker Konteyner İzolasyonu (Container Breakout Prevention):** Müşterilerin çalıştırdığı Docker konteynerleri kök kullanıcı (root) yetkilerinden tamamen arındırılmıştır (`userns-remap`). Konteyner içinden sunucunun ana dosyalarına (`/etc`, `/home` vb.) erişilmesi engellenmiştir.
+2. **Linux cgroups RAM & CPU İzolasyonu:** Her kullanıcının ve uygulamanın bellek ve işlemci sınırı (`MemoryHigh`, `CPUQuota`) bağımsızdır. Bir uygulamanın çökmesi veya kilitlenmesi sunucunun kalanına ve diğer sitelere asla zarar veremez.
+3. **HMAC SHA-256 Şifreli Webhook Güvenliği:** Otomatik Git güncellemelerinde GitHub `Secret Key` doğrulaması yapılır. Yetkisiz kişilerin sunucuda tetikleme yapması imkansızdır.
+4. **Veritabanı İzolasyonu (User Prefix):** PostgreSQL ve MariaDB veritabanları kullanıcı ön ekleri (`musteri_db`) ile ayrıştırılır. Bir müşteri yalnızca kendi veritabanını yönetebilir.
 
 ---
 
@@ -27,6 +38,7 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 <summary><h3>🌐 1. Web & Alan Adı Yönetimi</h3></summary>
 
 - **40+ İzole Site Barındırma:** Tek VPS üzerinde onlarca PHP, Node.js ve .NET Core sitesini performans kaybı olmadan izole çalıştırma.
+- **Görsel Docker UI / Portainer:** SSH erişimi olmayan kullanıcıların Docker konteynerlerini arayüzden yönetebilmesi için `docker-ui` şablonu.
 - **.NET 8 / 9 / 10 & ASP.NET Core Desteği:** Kestrel sunucusu üzerinden çalışan .NET Web API ve MVC uygulamalarını Nginx reverse proxy ile yayınlama (`dotnet` şablonu).
 - **Node.js & Reverse Proxy:** Express.js, Next.js, NestJS ve Fastify uygulamalarını yayınlama (`node-js` şablonu).
 - **Canlı WebSocket Desteği:** Socket.io ve canlı bildirim/mesajlaşma uygulamaları için Nginx Upgrade şablonları (`websocket` şablonu).
@@ -99,24 +111,19 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 
 ---
 
-## 🚀 .NET Core (ASP.NET / Kestrel) Uygulaması Yayınlama
+## 🐳 Görsel Docker UI / Portainer Entegrasyonu (SSH'sız Yönetim)
 
-NexviaCP üzerinde **.NET 8 / 9 / 10 Web API veya MVC** projelerinizi yayınlamak son derece kolaydır:
+SSH yetkisi vermediğiniz müşterilerin Docker konteynerlerini arayüzden görsel olarak yönetebilmesi için:
 
-1. Sunucuya .NET 8 / 9 / 10 SDK/Runtime kurun:
-
-```bash
-sudo apt-get update && sudo apt-get install -y dotnet-sdk-8.0
-```
-
-2. .NET projenizi sunucuda çalıştırın (Port 5000):
+1. Sunucuda Portainer konteyneri başlatın:
 
 ```bash
-dotnet publish -c Release -o /home/admin/web/siteniz.com/app
-pm2 start "dotnet /home/admin/web/siteniz.com/app/MyApp.dll" --name "dotnet-app"
+docker run -d -p 9000:9000 --name portainer --restart=always -v /var/run/docker.sock:/var/run/docker.sock portainer/portainer-ce
 ```
 
-3. NexviaCP Arayüzünden `WEB` sekmesine girip sitenizin **Proxy Template** ayarından **`dotnet`** şablonunu seçin ve kaydedin.
+2. NexviaCP arayüzünde `WEB` sekmesinden `portainer.siteniz.com` alan adını ekleyin.
+3. **Proxy Template** alanından **`docker-ui`** şablonunu seçin ve **SSL (Let's Encrypt)** aktif edin.
+4. Müşteriniz tarayıcısından `https://portainer.siteniz.com` adresine girerek kendi Docker konteynerlerini görsel olarak yönetebilir.
 
 ---
 
