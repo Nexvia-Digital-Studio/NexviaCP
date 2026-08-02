@@ -200,6 +200,14 @@
 								<?php } ?>
 							<?php } ?>
 
+							<!-- Docker Manager (Portainer) -->
+							<li class="top-bar-menu-item">
+								<a title="<?= _("Docker Manager (Portainer)") ?>" class="top-bar-menu-link <?php if ($TAB == "DOCKER") { echo "active"; } ?>" href="/list/docker/">
+									<i class="fab fa-docker icon-blue"></i>
+									<span class="top-bar-menu-link-label u-hide-desktop"><?= _("Docker Manager") ?></span>
+								</a>
+							</li>
+
 							<!-- Server Settings -->
 							<?php if (($_SESSION["userContext"] === "admin" && $_SESSION["POLICY_SYSTEM_HIDE_SERVICES"] !== "yes") || $_SESSION["user"] === $_SESSION['ROOT_USER']) { ?>
 								<?php if ($_SESSION["userContext"] === "admin" && $_SESSION["look"] !== "") { ?>
