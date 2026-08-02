@@ -21,17 +21,72 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 
 ---
 
-## ⚡ Temel Özellikler & Nexvia Gelişmiş Modülleri
+## 🌟 Tüm Özellikler & Yapılabilecekler (Full Feature List)
 
-- **Çoklu Site Mimarisi (40+ Site Desteği):** Tek VPS üzerinde onlarca siteyi tamamen izole PHP-FPM havuzlarında performans kaybı olmadan çalıştırır.
-- **Node.js & WebSocket Proxy Şablonları:** Express.js, Next.js, NestJS ve Socket.io projelerini tek tıkla varsayılan Nginx şablonlarıyla yayınlama.
-- **cgroups (Control Groups) RAM & CPU Sınırlandırma:** Kullanıcı ve web sitesi bazında `MemoryHigh`, `CPUQuota` ve `MemorySwapMax` limitleri tanımlayarak sunucunun çökmesini engeller.
-- **Dinamik Kademeli RAM Ölçeklendirme:** Organik trafik yoğunluğuna göre sitelerin RAM kullanımını kademeli olarak (örn. 256MB -> 512MB -> 1GB -> 2GB) artırır ve trafik normale dönünce kaynakları serbest bırakır.
-- **Otomatik WebP Görsel Dönüştürme:** Yüklenen görselleri sunucu seviyesinde `.webp` formatına dönüştüren Nginx yapılandırma şablonları.
-- **Otomatik Git Deploy (GitHub Webhook):** GitHub'a kod push edildiğinde sunucudaki projenin otomatik çekilmesi ve güncellenmesi (`deploy.sh`).
-- **Google Drive 2TB Bulut Yedekleme:** `rclone` ve `restic` entegrasyonu ile tüm sitelerin ve veritabanlarının şifreli olarak Google Drive hesabına otomatik yedeklenmesi.
-- **Cloudflare DNS & Wildcard SSL:** Cloudflare API ile `*.siteniz.com` dahil ücretsiz Let's Encrypt Wildcard SSL sertifikası üretimi.
-- **Redis & Memcached Caching:** PHP-FPM ve Node.js için uçan hafıza veri tabanı önbellek altyapısı.
+<details open>
+<summary><h3>🌐 1. Web & Alan Adı Yönetimi</h3></summary>
+
+- **40+ İzole Site Barındırma:** Tek VPS üzerinde onlarca PHP ve Node.js sitesini performans kaybı olmadan izole çalıştırma.
+- **Nginx + PHP-FPM Hibrit Performans:** Statik dosyalar için yüksek hızlı Nginx, dinamik kodlar için izole PHP-FPM havuzları.
+- **Çoklu PHP Sürümü:** Aynı sunucuda PHP 7.4, 8.0, 8.1, 8.2, 8.3 ve 8.4 sürümlerini site bazlı seçebilme.
+- **Node.js & Reverse Proxy:** Express.js, Next.js, NestJS ve Fastify uygulamalarını doğrudan Nginx üzerinden yayınlama.
+- **Canlı WebSocket Desteği:** Socket.io ve canlı bildirim/mesajlaşma uygulamaları için Nginx Upgrade şablonları.
+- **Otomatik WebP Görsel Optimizasyonu:** Yüklenen görselleri sunucu seviyesinde otomatik `.webp` formatına dönüştürme.
+- **Domain & Subdomain:** Sınırsız alan adı, alt alan adı (subdomain), takma ad (alias) ve HTTP yönlendirmeleri.
+</details>
+
+<details open>
+<summary><h3>⚙️ 2. Kaynak Yönetimi & cgroups (RAM / CPU / Storage)</h3></summary>
+
+- **Linux cgroups Limitleme:** Kullanıcı ve site bazında `MemoryHigh`, `CPUQuota` ve `MemorySwapMax` kısıtlaması.
+- **Kolay Arayüzle RAM Ayarı:** Kutucuğa `256M`, `512M`, `1G`, `2G` yazarak veya `∞ (Sınırsız)` butonuna basarak RAM belirleme.
+- **CPU Kotası:** Yüzde cinsinden işlemci kısıtlama (`%50` yarım çekirdek, `%100` tam çekirdek, `%200` çift çekirdek).
+- **Akıllı Dinamik RAM Yükseltme:** Organik trafik yoğunluğuna göre sitelerin RAM limitini kademeli (256MB -> 512MB -> 2GB) artırma ve otomatik düşürme.
+- **Paket (Package) Yönetimi:** Farklı kotalara ve limitlere sahip şablon paketler oluşturup sitelere tek tıkla atama.
+</details>
+
+<details open>
+<summary><h3>🔄 3. Otomasyon & Continuous Deployment (CI/CD & Git)</h3></summary>
+
+- **Otomatik Git Deploy:** GitHub'a kod push edildiğinde sunucudaki sitenin otomatik güncellenmesi (`deploy.sh`).
+- **Zero-Downtime Reload:** Güncelleme sırasında PM2 `Graceful Reload` ile sitelerin kesintisiz (0ms çökme) güncellenmesi.
+- **Otomatik Bağımlılık Yükleme:** `git pull` sonrası `npm install` veya `composer install` süreçlerinin otomatize edilmesi.
+</details>
+
+<details open>
+<summary><h3>☁️ 4. Bulut Yedekleme & Veri Güvenliği (Restic & Google Drive)</h3></summary>
+
+- **Google Drive 2TB Entegrasyonu:** `rclone` ve `restic` kullanarak 40 sitenin tüm dosya ve veritabanlarını şifreli olarak Google Drive'a yedekleme.
+- **Artımlı (Incremental) Yedekleme:** Yalnızca değişen dosyaları yedekleyerek alan ve zaman tasarrufu sağlama.
+- **Çoklu Bulut Desteği:** AWS S3, Backblaze B2, SFTP ve Google Drive yedekleme hedefleri.
+- **Tek Tıkla Geri Yükleme (Restore):** Arayüzden istenen günün yedeğini anında geri yükleyebilme.
+</details>
+
+<details open>
+<summary><h3>🛡️ 5. Güvenlik & SSL Yönetimi</h3></summary>
+
+- **Cloudflare DNS API Entegrasyonu:** Cloudflare kullanarak `*.siteniz.com` şeklinde ücretsiz Wildcard SSL sertifikası üretimi.
+- **Otomatik Let's Encrypt SSL:** Standart ve Wildcard SSL sertifikalarını otomatik alma ve süresi dolmadan yenileme.
+- **Dahili Saldırı Koruması:** `iptables`, `fail2ban` ve `ipset` ile kaba kuvvet (brute-force) ve IP banlama sistemi.
+- **Gelişmiş Giriş Güvenliği:** 2FA (İki Faktörlü Doğrulama) ve SSH IP kısıtlaması.
+</details>
+
+<details open>
+<summary><h3>⚡ 6. Veritabanı & Nesne Önbellekleme (Caching)</h3></summary>
+
+- **MariaDB / MySQL & PostgreSQL:** Çoklu veritabanı desteği ve veritabanı boyut takibi.
+- **phpMyAdmin & pgMyAdmin SSO:** Arayüzden şifre girmeden tek tıkla veritabanı yönetimine geçiş.
+- **Redis & Memcached:** Veri tabanı yükünü %90 azaltan uçan hafıza (In-Memory Caching) altyapısı.
+</details>
+
+<details open>
+<summary><h3>📊 7. Sistem Yönetimi & Dosya Yöneticisi</h3></summary>
+
+- **Dahili Web Dosya Yöneticisi:** Tarayıcı üzerinden dosya yükleme, sürükle-bırak, arşivden çıkarma ve düzenleme.
+- **Web Terminali:** SSH istemcisine ihtiyaç duymadan arayüzden Linux terminal komutları çalıştırabilme.
+- **RRDtool Sistem Grafikleri:** CPU, RAM, Disk, Ağ ve Veri trafiğini canlı izleme göstergeleri.
+- **White-Label Markalama:** Özel logo, favicon, tema ve panel ismi tanımlayabilme.
+</details>
 
 ---
 
@@ -102,7 +157,6 @@ Siteniz için otomatik Git yayınlamasını aktif edin:
 ```bash
 /usr/local/hestia/bin/v-add-web-domain-git admin siteniz.com https://github.com/Nexvia-Digital-Studio/proje.git main
 ```
-*GitHub'da reponuzun Settings > Webhooks kısmına `https://siteniz.com/deploy.php` adresini eklemeniz yeterlidir.*
 
 ---
 
