@@ -1,0 +1,41 @@
+#!/bin/bash
+# info: setup automatic git deployment for domain
+# options: USER DOMAIN REPO_URL [BRANCH]
+#
+# example: v-add-web-domain-git admin domain.com https://github.com/user/repo.git main
+
+user=$1
+domain=$2
+repo_url=$3
+branch=${4:-main}
+
+source /etc/hestiacp/hestia.conf
+source $HESTIA/func/main.sh
+source_conf "$HESTIA/conf/hestia.conf"
+
+check_args '3' "$#" 'USER DOMAIN REPO_URL [BRANCH]'
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+
+docroot="/home/$user/web/$domain/public_html"
+
+if [ -d "$docroot" ]; then
+    echo "[*] Setting up Git Repository for $domain..."
+    sudo -u "$user" bash -c "cd $docroot && git init && git remote add origin $repo_url && git fetch && git checkout -t origin/$branch -f"
+    
+    # Create deploy script
+    deploy_script="/home/$user/web/$domain/deploy.sh"
+    echo "#!/bin/bash" > "$deploy_script"
+    echo "cd $docroot && git pull origin $branch" >> "$deploy_script"
+    echo "if [ -f package.json ]; then npm install && pm2 restart all --silent || true; fi" >> "$deploy_script"
+    chown "$user:$user" "$deploy_script"
+    chmod +x "$deploy_script"
+    
+    log_event "$OK" "$ARGUMENTS"
+    echo "[+] Git Auto-Deploy successfully configured for $domain."
+else
+    echo "[!] Error: Document root $docroot not found."
+    exit 1
+fi
+
+exit 0
