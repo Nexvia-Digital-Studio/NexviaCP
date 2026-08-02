@@ -445,6 +445,29 @@
 					</button>
 				<?php } ?>
 			</div>
+
+			<details class="collapse u-mt20" id="git-deployment-options">
+				<summary class="collapse-header">
+					<i class="fab fa-github icon-blue u-mr5"></i><?= tohtml( _("Git Repository & Auto-Deploy (Public / Private)")) ?>
+				</summary>
+				<div class="collapse-content">
+					<div class="u-mb10">
+						<label for="v_git_repo" class="form-label">
+							<?= tohtml( _("Git Repository URL (HTTPS or SSH for Private Repos)")) ?>
+						</label>
+						<input type="text" class="form-control" name="v_git_repo" id="v_git_repo" placeholder="https://github.com/user/repo.git or git@github.com:user/private-repo.git">
+						<small class="form-text text-muted"><?= tohtml( _("For Private Repositories, use SSH (git@github.com:...) or Personal Access Token in HTTPS URL.")) ?></small>
+					</div>
+					<div class="u-mb10">
+						<label for="v_git_branch" class="form-label"><?= tohtml( _("Branch Name")) ?></label>
+						<input type="text" class="form-control" name="v_git_branch" id="v_git_branch" value="main" placeholder="main">
+					</div>
+					<div class="alert alert-info u-mt10 u-mb10" role="alert">
+						<i class="fas fa-code-branch u-mr5"></i>
+						<span><?= tohtml( _("GitHub Webhook Payload URL:")) ?> <strong>https://<?= tohtml(trim($v_domain, "'")) ?>/deploy.php</strong></span>
+					</div>
+				</div>
+			</details>
 		</div>
 
 	</form>
