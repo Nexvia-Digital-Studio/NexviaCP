@@ -8,6 +8,8 @@ module.exports = {
 		MD013: false,
 		// MD024/no-duplicate-heading/no-duplicate-header
 		MD024: false,
+		// MD029/ordered-list-item-prefix
+		MD029: false,
 		// MD031/blanks-around-fences
 		MD031: false,
 		// MD032/blanks-around-lists
