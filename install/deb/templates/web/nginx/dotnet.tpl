@@ -1,6 +1,6 @@
 #=========================================================================#
 # NexviaCP .NET Core (ASP.NET / Kestrel) Reverse Proxy Template           #
-# Designed for .NET 6/7/8/9 Web APIs and Web Applications (Port 5000)     #
+# Designed for .NET 8, 9, and 10 Web APIs and Web Applications (Port 5000)#
 #=========================================================================#
 
 server {

@@ -15,7 +15,7 @@
 
 ## 🚀 NexviaCP Nedir?
 
-**NexviaCP (Nexvia Control Panel)**, Nexvia Dijital Stüdyo tarafından geliştirilen web siteleri, SaaS çözümleri, kurumsal müşteriler, **.NET 6/7/8/9 Web API**, **Node.js** uygulamaları ve **PHP** projeleri için optimize edilmiş açık kaynaklı, hafif ve ultra performanslı bir Linux web kontrol panelidir.
+**NexviaCP (Nexvia Control Panel)**, Nexvia Dijital Stüdyo tarafından geliştirilen web siteleri, SaaS çözümleri, kurumsal müşteriler, **.NET 8 / 9 / 10 Web API**, **Node.js** uygulamaları ve **PHP** projeleri için optimize edilmiş açık kaynaklı, hafif ve ultra performanslı bir Linux web kontrol panelidir.
 
 Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **.NET & Node.js & WebSocket desteği**, akıllı kaynak kısıtlama (**cgroups RAM/CPU limitleme**), **Google Drive 2TB otomatik yedekleme**, **Cloudflare DNS otomatik SSL** ve **Private/Public Git Auto-Deploy** gibi ileri seviye modüllere sahiptir.
 
@@ -27,7 +27,7 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 <summary><h3>🌐 1. Web & Alan Adı Yönetimi</h3></summary>
 
 - **40+ İzole Site Barındırma:** Tek VPS üzerinde onlarca PHP, Node.js ve .NET Core sitesini performans kaybı olmadan izole çalıştırma.
-- **.NET 6 / 7 / 8 / 9 & ASP.NET Core Desteği:** Kestrel sunucusu üzerinden çalışan .NET Web API ve MVC uygulamalarını Nginx reverse proxy ile yayınlama (`dotnet` şablonu).
+- **.NET 8 / 9 / 10 & ASP.NET Core Desteği:** Kestrel sunucusu üzerinden çalışan .NET Web API ve MVC uygulamalarını Nginx reverse proxy ile yayınlama (`dotnet` şablonu).
 - **Node.js & Reverse Proxy:** Express.js, Next.js, NestJS ve Fastify uygulamalarını yayınlama (`node-js` şablonu).
 - **Canlı WebSocket Desteği:** Socket.io ve canlı bildirim/mesajlaşma uygulamaları için Nginx Upgrade şablonları (`websocket` şablonu).
 - **Nginx + PHP-FPM Hibrit Performans:** Statik dosyalar için yüksek hızlı Nginx, dinamik kodlar için izole PHP-FPM havuzları.
@@ -101,9 +101,9 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 
 ## 🚀 .NET Core (ASP.NET / Kestrel) Uygulaması Yayınlama
 
-NexviaCP üzerinde **.NET 8 / 9 Web API veya MVC** projelerinizi yayınlamak son derece kolaydır:
+NexviaCP üzerinde **.NET 8 / 9 / 10 Web API veya MVC** projelerinizi yayınlamak son derece kolaydır:
 
-1. Sunucuya .NET SDK/Runtime kurun:
+1. Sunucuya .NET 8 / 9 / 10 SDK/Runtime kurun:
 
 ```bash
 sudo apt-get update && sudo apt-get install -y dotnet-sdk-8.0
