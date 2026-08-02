@@ -15,9 +15,9 @@
 
 ## 🚀 NexviaCP Nedir?
 
-**NexviaCP (Nexvia Control Panel)**, Nexvia Dijital Stüdyo tarafından geliştirilen web siteleri, SaaS çözümleri, kurumsal müşteriler, Node.js uygulamaları ve PHP projeleri için optimize edilmiş açık kaynaklı, hafif ve ultra performanslı bir Linux web kontrol panelidir. 
+**NexviaCP (Nexvia Control Panel)**, Nexvia Dijital Stüdyo tarafından geliştirilen web siteleri, SaaS çözümleri, kurumsal müşteriler, **.NET 6/7/8/9 Web API**, **Node.js** uygulamaları ve **PHP** projeleri için optimize edilmiş açık kaynaklı, hafif ve ultra performanslı bir Linux web kontrol panelidir. 
 
-Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **Node.js & WebSocket desteği**, akıllı kaynak kısıtlama (**cgroups RAM/CPU limitleme**), **Google Drive 2TB otomatik yedekleme**, **Cloudflare DNS otomatik SSL** ve **Private/Public Git Auto-Deploy** gibi ileri seviye modüllere sahiptir.
+Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **.NET & Node.js & WebSocket desteği**, akıllı kaynak kısıtlama (**cgroups RAM/CPU limitleme**), **Google Drive 2TB otomatik yedekleme**, **Cloudflare DNS otomatik SSL** ve **Private/Public Git Auto-Deploy** gibi ileri seviye modüllere sahiptir.
 
 ---
 
@@ -26,11 +26,12 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 <details open>
 <summary><h3>🌐 1. Web & Alan Adı Yönetimi</h3></summary>
 
-- **40+ İzole Site Barındırma:** Tek VPS üzerinde onlarca PHP ve Node.js sitesini performans kaybı olmadan izole çalıştırma.
+- **40+ İzole Site Barındırma:** Tek VPS üzerinde onlarca PHP, Node.js ve .NET Core sitesini performans kaybı olmadan izole çalıştırma.
+- **.NET 6 / 7 / 8 / 9 & ASP.NET Core Desteği:** Kestrel sunucusu üzerinden çalışan .NET Web API ve MVC uygulamalarını Nginx reverse proxy ile yayınlama (`dotnet` şablonu).
+- **Node.js & Reverse Proxy:** Express.js, Next.js, NestJS ve Fastify uygulamalarını yayınlama (`node-js` şablonu).
+- **Canlı WebSocket Desteği:** Socket.io ve canlı bildirim/mesajlaşma uygulamaları için Nginx Upgrade şablonları (`websocket` şablonu).
 - **Nginx + PHP-FPM Hibrit Performans:** Statik dosyalar için yüksek hızlı Nginx, dinamik kodlar için izole PHP-FPM havuzları.
 - **Çoklu PHP Sürümü:** Aynı sunucuda PHP 7.4, 8.0, 8.1, 8.2, 8.3 ve 8.4 sürümlerini site bazlı seçebilme.
-- **Node.js & Reverse Proxy:** Express.js, Next.js, NestJS ve Fastify uygulamalarını doğrudan Nginx üzerinden yayınlama.
-- **Canlı WebSocket Desteği:** Socket.io ve canlı bildirim/mesajlaşma uygulamaları için Nginx Upgrade şablonları.
 - **Otomatik WebP Görsel Optimizasyonu:** Yüklenen görselleri sunucu seviyesinde otomatik `.webp` formatına dönüştürme.
 - **Domain & Subdomain:** Sınırsız alan adı, alt alan adı (subdomain), takma ad (alias) ve HTTP yönlendirmeleri.
 </details>
@@ -50,8 +51,8 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 
 - **Private & Public Git Auto-Deploy:** Gizli (Private) veya açık repolar için Otomatik Git yayınlama (`deploy.sh`).
 - **SSH Deploy Keys & Access Tokens:** Private repolar için güvenli SSH Deploy Key veya Personal Access Token (PAT) desteği.
-- **Zero-Downtime Reload:** Güncelleme sırasında PM2 `Graceful Reload` ile sitelerin kesintisiz (0ms çökme) güncellenmesi.
-- **Otomatik Bağımlılık Yükleme:** `git pull` sonrası `npm install` veya `composer install` süreçlerinin otomatize edilmesi.
+- **Zero-Downtime Reload:** Güncelleme sırasında PM2 veya systemd ile sitelerin kesintisiz (0ms çökme) güncellenmesi.
+- **Otomatik Bağımlılık Yükleme:** `git pull` sonrası `dotnet publish`, `npm install` veya `composer install` süreçleri.
 </details>
 
 <details open>
@@ -91,33 +92,20 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 
 ---
 
-## 🔒 Private (Gizli) GitHub Repoları İle Otomatik Güncelleme
+## 🚀 .NET Core (ASP.NET / Kestrel) Uygulaması Yayınlama
 
-NexviaCP ile **Private (Gizli)** GitHub repozituvarlarınızı sunucuya güvenli şekilde bağlayıp otomatik güncelleyebilirsiniz. Bunun için 2 kolay yöntem vardır:
+NexviaCP üzerinde **.NET 8 / 9 Web API veya MVC** projelerinizi yayınlamak son derece kolaydır:
 
-### Yöntem 1: SSH Deploy Key (En Güvenli & Önerilen)
-
-1. Sunucuda o site için bir SSH anahtarı üretin:
+1. Sunucuya .NET SDK/Runtime kurun:
    ```bash
-   ssh-keygen -t ed25519 -C "deploy@siteniz.com" -f /home/admin/.ssh/id_siteniz -N ""
+   sudo apt-get update && sudo apt-get install -y dotnet-sdk-8.0
    ```
-2. Üretilen kamu anahtarını kopyalayın:
+2. .NET projenizi sunucuda çalıştırın (Port 5000):
    ```bash
-   cat /home/admin/.ssh/id_siteniz.pub
+   dotnet publish -c Release -o /home/admin/web/siteniz.com/app
+   pm2 start "dotnet /home/admin/web/siteniz.com/app/MyApp.dll" --name "dotnet-app"
    ```
-3. GitHub Private Repo'nuza gidin: **Settings ➔ Deploy Keys ➔ Add Deploy Key** tıklayıp yapıştırın.
-4. NexviaCP üzerinden reponuzu SSH adresiyle bağlayın:
-   ```bash
-   /usr/local/hestia/bin/v-add-web-domain-git admin siteniz.com git@github.com:Nexvia-Digital-Studio/private-proje.git main
-   ```
-
-### Yöntem 2: Personal Access Token (PAT)
-
-1. GitHub'da **Settings ➔ Developer Settings ➔ Personal Access Tokens ➔ Fine-grained Tokens** kısmından Okuma (Read-only) yetkili bir token üretin (Örn: `github_pat_xxxx`).
-2. Reponuzu token ile bağlayın:
-   ```bash
-   /usr/local/hestia/bin/v-add-web-domain-git admin siteniz.com https://github_pat_xxxx@github.com/Nexvia-Digital-Studio/private-proje.git main
-   ```
+3. NexviaCP Arayüzünden `WEB` sekmesine girip sitenizin **Proxy Template** ayarından **`dotnet`** şablonunu seçin ve kaydedin.
 
 ---
 
