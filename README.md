@@ -17,7 +17,7 @@
 
 **NexviaCP (Nexvia Control Panel)**, Nexvia Dijital Stüdyo tarafından geliştirilen web siteleri, SaaS çözümleri, kurumsal müşteriler, Node.js uygulamaları ve PHP projeleri için optimize edilmiş açık kaynaklı, hafif ve ultra performanslı bir Linux web kontrol panelidir. 
 
-Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **Node.js & WebSocket desteği**, akıllı kaynak kısıtlama (**cgroups RAM/CPU limitleme**), **Google Drive 2TB otomatik yedekleme**, **Cloudflare DNS otomatik SSL** ve **Otomatik Git Deploy** gibi ileri seviye modüllere sahiptir.
+Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **Node.js & WebSocket desteği**, akıllı kaynak kısıtlama (**cgroups RAM/CPU limitleme**), **Google Drive 2TB otomatik yedekleme**, **Cloudflare DNS otomatik SSL** ve **Private/Public Git Auto-Deploy** gibi ileri seviye modüllere sahiptir.
 
 ---
 
@@ -46,9 +46,10 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 </details>
 
 <details open>
-<summary><h3>🔄 3. Otomasyon & Continuous Deployment (CI/CD & Git)</h3></summary>
+<summary><h3>🔄 3. Otomasyon & Continuous Deployment (Private / Public Git)</h3></summary>
 
-- **Otomatik Git Deploy:** GitHub'a kod push edildiğinde sunucudaki sitenin otomatik güncellenmesi (`deploy.sh`).
+- **Private & Public Git Auto-Deploy:** Gizli (Private) veya açık repolar için Otomatik Git yayınlama (`deploy.sh`).
+- **SSH Deploy Keys & Access Tokens:** Private repolar için güvenli SSH Deploy Key veya Personal Access Token (PAT) desteği.
 - **Zero-Downtime Reload:** Güncelleme sırasında PM2 `Graceful Reload` ile sitelerin kesintisiz (0ms çökme) güncellenmesi.
 - **Otomatik Bağımlılık Yükleme:** `git pull` sonrası `npm install` veya `composer install` süreçlerinin otomatize edilmesi.
 </details>
@@ -90,10 +91,33 @@ Tek bir VPS sunucusunda **40+ web sitesini** izole bir şekilde barındırma, **
 
 ---
 
-## 💻 Desteklenen İşletim Sistemleri
+## 🔒 Private (Gizli) GitHub Repoları İle Otomatik Güncelleme
 
-* **Ubuntu:** 24.04 LTS, 22.04 LTS (Önerilen)
-* **Debian:** 12 (Bookworm), 11 (Bullseye)
+NexviaCP ile **Private (Gizli)** GitHub repozituvarlarınızı sunucuya güvenli şekilde bağlayıp otomatik güncelleyebilirsiniz. Bunun için 2 kolay yöntem vardır:
+
+### Yöntem 1: SSH Deploy Key (En Güvenli & Önerilen)
+
+1. Sunucuda o site için bir SSH anahtarı üretin:
+   ```bash
+   ssh-keygen -t ed25519 -C "deploy@siteniz.com" -f /home/admin/.ssh/id_siteniz -N ""
+   ```
+2. Üretilen kamu anahtarını kopyalayın:
+   ```bash
+   cat /home/admin/.ssh/id_siteniz.pub
+   ```
+3. GitHub Private Repo'nuza gidin: **Settings ➔ Deploy Keys ➔ Add Deploy Key** tıklayıp yapıştırın.
+4. NexviaCP üzerinden reponuzu SSH adresiyle bağlayın:
+   ```bash
+   /usr/local/hestia/bin/v-add-web-domain-git admin siteniz.com git@github.com:Nexvia-Digital-Studio/private-proje.git main
+   ```
+
+### Yöntem 2: Personal Access Token (PAT)
+
+1. GitHub'da **Settings ➔ Developer Settings ➔ Personal Access Tokens ➔ Fine-grained Tokens** kısmından Okuma (Read-only) yetkili bir token üretin (Örn: `github_pat_xxxx`).
+2. Reponuzu token ile bağlayın:
+   ```bash
+   /usr/local/hestia/bin/v-add-web-domain-git admin siteniz.com https://github_pat_xxxx@github.com/Nexvia-Digital-Studio/private-proje.git main
+   ```
 
 ---
 
@@ -115,47 +139,6 @@ wget https://raw.githubusercontent.com/Nexvia-Digital-Studio/NexviaCP/main/insta
 
 ```bash
 bash hst-install.sh --nginx yes --phpfpm yes --apache no --multiphp yes --mysql yes --force
-```
-
----
-
-## 🔧 Gelişmiş Özelliklerin Yapılandırılması
-
-### 1. cgroups (RAM & CPU Sınırlandırması) Aktif Etme
-```bash
-/usr/local/hestia/bin/v-add-sys-cgroups
-```
-
-### 2. Node.js Uygulaması Yayınlama (Reverse Proxy)
-1. Node.js projenizi PM2 ile başlatın: `pm2 start app.js --name "my-app"` (Port: 3000)
-2. NexviaCP arayüzünde `WEB` sekmesinden sitenizin **Proxy Template** alanından `node-js` veya `websocket` şablonunu seçin.
-
-### 3. Google Drive 2TB Otomatik Bulut Yedekleme Ayarı
-1. Sunucuda Rclone yapılandırın:
-   ```bash
-   rclone config
-   # Google Drive seçeneğini belirleyip 2TB hesabınızı yetkilendirin (Remote adı: gdrive)
-   ```
-2. NexviaCP Restic yedekleme servisine Google Drive'ı ekleyin:
-   ```bash
-   /usr/local/hestia/bin/v-add-backup-host-restic rclone gdrive:nexvia-backups
-   ```
-
-### 4. Cloudflare DNS API ile Wildcard SSL (`*.siteniz.com`)
-1. Sunucuya Cloudflare API bilgilerinizi tanımlayın:
-   ```bash
-   export CLOUDFLARE_API_KEY="your-cloudflare-api-token"
-   export CLOUDFLARE_EMAIL="info@nexviadigital.com"
-   ```
-2. Wildcard SSL oluşturun:
-   ```bash
-   /usr/local/hestia/bin/v-add-letsencrypt-domain admin siteniz.com "" "yes"
-   ```
-
-### 5. Otomatik Git Deploy (GitHub Webhook)
-Siteniz için otomatik Git yayınlamasını aktif edin:
-```bash
-/usr/local/hestia/bin/v-add-web-domain-git admin siteniz.com https://github.com/Nexvia-Digital-Studio/proje.git main
 ```
 
 ---
