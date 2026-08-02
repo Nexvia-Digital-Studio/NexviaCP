@@ -453,18 +453,27 @@
 				<div class="collapse-content">
 					<div class="u-mb10">
 						<label for="v_git_repo" class="form-label">
-							<?= tohtml( _("Git Repository URL (HTTPS or SSH for Private Repos)")) ?>
+							<?= tohtml( _("Git Repository URL (Public veya Private Repo)")) ?>
 						</label>
-						<input type="text" class="form-control" name="v_git_repo" id="v_git_repo" placeholder="https://github.com/user/repo.git or git@github.com:user/private-repo.git">
-						<small class="form-text text-muted"><?= tohtml( _("For Private Repositories, use SSH (git@github.com:...) or Personal Access Token in HTTPS URL.")) ?></small>
+						<input type="text" class="form-control" name="v_git_repo" id="v_git_repo" placeholder="https://github.com/user/repo.git">
+						<small class="form-text text-muted u-mt5" style="line-height:1.6;">
+							<strong>Örnek Adres Formatları:</strong><br>
+							• <strong>Açık (Public) Repo:</strong> <code>https://github.com/kullanici/repo.git</code><br>
+							• <strong>Gizli (Private) Token ile:</strong> <code>https://github_pat_TOKEN@github.com/hesap/private-repo.git</code><br>
+							• <strong>Gizli (Private) SSH ile:</strong> <code>git@github.com:hesap/private-repo.git</code>
+						</small>
 					</div>
 					<div class="u-mb10">
-						<label for="v_git_branch" class="form-label"><?= tohtml( _("Branch Name")) ?></label>
+						<label for="v_git_branch" class="form-label"><?= tohtml( _("Branch Name (Dal Adı)")) ?></label>
 						<input type="text" class="form-control" name="v_git_branch" id="v_git_branch" value="main" placeholder="main">
 					</div>
 					<div class="alert alert-info u-mt10 u-mb10" role="alert">
-						<i class="fas fa-code-branch u-mr5"></i>
+						<i class="fas fa-link u-mr5"></i>
 						<span><?= tohtml( _("GitHub Webhook Payload URL:")) ?> <strong>https://<?= tohtml(trim($v_domain, "'")) ?>/deploy.php</strong></span>
+					</div>
+					<div class="alert alert-warning u-mt10 u-mb10" role="alert">
+						<i class="fas fa-shield-halved u-mr5"></i>
+						<span><strong>Güvenlik Notu:</strong> Webhook kurulumunda GitHub üzerinde <code>Secret Key</code> tanımlayabilirsiniz. Sunucu otomatik güncellemeleri 0ms kesintiyle arka planda yürütür.</span>
 					</div>
 				</div>
 			</details>
