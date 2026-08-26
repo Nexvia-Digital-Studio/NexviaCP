@@ -46,7 +46,7 @@ NexviaCP, müşterilerinize SSH yetkisi vermeden güvenle hizmet sunabilmeniz i�
 - **Node.js & Reverse Proxy:** Express.js, Next.js, NestJS ve Fastify uygulamalarını yayınlama (`node-js` şablonu).
 - **Canlı WebSocket Desteği:** Socket.io ve canlı bildirim/mesajlaşma uygulamaları için Nginx Upgrade şablonları (`websocket` şablonu).
 - **Nginx + PHP-FPM Hibrit Performans:** Statik dosyalar için yüksek hızlı Nginx, dinamik kodlar için izole PHP-FPM havuzları.
-- **Çoklu PHP Sürümü:** Aynı sunucuda PHP 7.4, 8.0, 8.1, 8.2, 8.3 ve 8.4 sürümlerini site bazlı seçebilme.
+- **Çoklu PHP Sürümü:** Aynı sunucuda PHP 7.4, 8.0, 8.1, 8.2, 8.3, 8.4 ve 8.5 sürümlerini site bazlı seçebilme.
 - **Domain & Subdomain:** Sınırsız alan adı, alt alan adı (subdomain), takma ad (alias) ve HTTP yönlendirmeleri.
 
 </details>
@@ -134,39 +134,53 @@ Bu komut Portainer CE ve Portainer Agent'ı ayrı konteynerler olarak başlatır
 
 ## 🛠️ Kurulum Adımları
 
-### Adım 1: Sunucuya SSH ile Bağlanın
+> **Önemli:** Kurulum **iki adımlıdır**. 1. adım temel Hestia paketlerini ve tüm sistem servislerini (nginx, PHP-FPM, MariaDB, PostgreSQL, mail, DNS, Docker...) kurar; 2. adım NexviaCP'ye özel kodu (Node.js/.NET app yöneticisi, cgroup limitleri, Portainer entegrasyonu, arayüz) panelin üzerine uygular. 2. adımı atlamayın — aksi halde panelde NexviaCP özellikleri görünmez.
+
+**Gereksinimler:** Ubuntu 22.04 / 24.04 (veya Debian 12), en az 2 GB RAM (tüm özelliklerle 4 GB önerilir), temiz bir sunucu, root erişimi.
+
+### Adım 1: Depoyu Klonlayın ve Temel Kurulumu Başlatın
 
 ```bash
-ssh root@sunucu-ip-adresiniz
-```
+apt-get update && apt-get install -y git
+git clone https://github.com/Nexvia-Digital-Studio/NexviaCP.git /root/NexviaCP
+cd /root/NexviaCP
 
-### Adım 2: Kurulum Script'ini İndirin
-
-```bash
-wget https://raw.githubusercontent.com/Nexvia-Digital-Studio/NexviaCP/main/install/hst-install.sh
-```
-
-### Adım 3: Kurulumu Başlatın
-
-**Tüm NexviaCP özelliklerini (PHP + MySQL + PostgreSQL + Docker + Portainer + Redis + .NET + Node.js) tek seferde kuran tam komut:**
-
-```bash
-bash hst-install.sh \
-  --nginx yes --phpfpm yes --apache no --multiphp yes \
+# Tüm NexviaCP özellikleri (önerilen, test edilmiş komut):
+bash install/hst-install.sh \
+  --apache no --phpfpm yes --multiphp yes \
   --mysql yes --postgresql yes \
-  --docker yes --portainer yes \
-  --redis yes --memcached yes \
-  --dotnet yes \
-  --force
+  --vsftpd yes --named yes \
+  --exim yes --dovecot yes --clamav no --spamassassin no \
+  --iptables yes --fail2ban yes \
+  --resourcelimit yes \
+  --docker yes --portainer yes --redis yes \
+  --hostname panel.siteniz.com \
+  --email admin@siteniz.com \
+  --interactive no --force
 ```
 
 **Sadece temel PHP + MySQL istiyorsanız:**
 
 ```bash
-bash hst-install.sh --nginx yes --phpfpm yes --apache no --multiphp yes --mysql yes --force
+bash install/hst-install.sh --apache no --phpfpm yes --mysql yes --force
 ```
 
-> **Not:** `--portainer yes` otomatik olarak `--docker yes`'i de etkinleştirir. Kurulum bittikten sonra Portainer nginx şifreniz konsolda görüntülenir — kaydedin.
+> **Notlar:**
+> - `--hostname` bir FQDN olmalı ve en az iki nokta içermelidir (`panel.siteniz.com` gibi; `sunucu` veya `siteniz.com` reddedilir).
+> - `--portainer yes` otomatik olarak `--docker yes`'i de etkinleştirir.
+> - `.NET SDK'ları` (`--dotnet yes`) yalnızca dağıtımınızda gerçekten mevcut olan sürümler kurulur (ör. Ubuntu 24.04: 8.0 + 10.0). Microsoft repo'su codename'iniz için yayınlanmamışsa dağıtım paketleri kullanılır; eksik sürüm pinlemesi kurulumu artık kırmaz.
+> - Minimal bulut imajlarında `fail2ban` başlamazsa: `rsyslog`'un çalıştığından ve `/var/log/auth.log` dosyasının mevcut olduğundan emin olun.
+
+### Adım 2: NexviaCP Kaynağını Panele Uygulayın
+
+Kurulum bitince **aynı sunucuda**, aynı depo dizininden:
+
+```bash
+cd /root/NexviaCP
+bash install/nexvia-apply-source.sh . --docker --portainer --redis
+```
+
+Bu betik NexviaCP'nin `bin/`, `func/`, `web/` ve şablon dosyalarını `/usr/local/hestia` üzerine kopyalar, arayüz varlıklarını (npm ile) derler, paneli yeniden başlatır ve istenen eklentileri (Docker hardening, Portainer, Redis, Memcached, phpPgAdmin SSO) devreye alır. Portainer'ın nginx `auth_basic` şifresi konsolda görüntülenir — kaydedin.
 
 #### Tüm NexviaCP bayrakları
 
@@ -176,9 +190,14 @@ bash hst-install.sh --nginx yes --phpfpm yes --apache no --multiphp yes --mysql 
 | `--memcached` | Memcached object cache | no |
 | `--docker` | Docker engine + userns-remap hardening | no |
 | `--portainer` | Portainer CE (admin-only, 127.0.0.1) | no |
-| `--dotnet` | .NET SDK 8/9/10 | no |
+| `--dotnet` | Mevcut .NET SDK'ları (8.0 / 9.0 / 10.0) | no |
 | `--postgresql` | PostgreSQL | no |
 | `--multiphp` | Çoklu PHP sürümleri (7.4-8.5) | no |
+| `--resourcelimit` | Kullanıcı bazlı RAM/CPU limit arayüzü | no |
+
+#### Kaynak güncellemesi (repo değiştiğinde)
+
+Repoda yapılan değişiklikleri kurulmuş sunucuya tekrar uygulamak için Adım 2'yi yeniden çalıştırmanız yeterlidir (`git pull` sonrası `bash install/nexvia-apply-source.sh .`).
 
 ---
 

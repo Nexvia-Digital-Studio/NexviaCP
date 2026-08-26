@@ -259,6 +259,11 @@ add_web_config() {
 	#   -If possible custom templates should be automatically upgraded to use the new format
 	#   -Alternatively a depreciation period with proper notifications should be considered
 
+	# Load the app backend port (Node.js / .NET / WebSocket domains) so the
+	# %app_port% template placeholder can be substituted. Empty for plain PHP
+	# domains, which renders the app proxy templates unusable on purpose.
+	app_port=$(get_object_value 'web' 'DOMAIN' "$domain" '$APP_BACKEND_PORT')
+
 	cat "${WEBTPL_LOCATION}/$2" \
 		| sed -e "s|%ip%|$local_ip|g" \
 			-e "s|%domain%|$domain|g" \

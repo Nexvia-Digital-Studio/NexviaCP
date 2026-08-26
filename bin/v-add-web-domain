@@ -139,7 +139,7 @@ if [ -f "$deploy_sh" ]; then
 fi
 # Persist the secret in the domain config so the UI can display it.
 # add_object_key first ensures the GIT_DEPLOY_SECRET field exists on the row.
-add_object_key 'web' 'DOMAIN' "$domain" '$GIT_DEPLOY_SECRET' '$TIME'
+add_object_key 'web' 'DOMAIN' "$domain" 'GIT_DEPLOY_SECRET' 'TIME'
 update_object_value 'web' 'DOMAIN' "$domain" '$GIT_DEPLOY_SECRET' "$deploy_secret"
 
 # Changing file owner & permission

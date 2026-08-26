@@ -16,6 +16,31 @@
 #                Variables & Functions                     #
 #----------------------------------------------------------#
 
+# Convert a human memory size (256M, 1G, 2G) to bytes.
+# NOTE: must be defined before first use; a definition placed after the
+# final `exit` can never execute.
+memory_to_bytes() {
+	local val="$1"
+	local num unit
+	num=$(echo "$val" | grep -oE '^[0-9]+')
+	unit=$(echo "$val" | grep -oE '[A-Za-z]+$' | tr '[:lower:]' '[:upper:]')
+	case "$unit" in
+		K | KB) echo $((num * 1024)) ;;
+		M | MB) echo $((num * 1048576)) ;;
+		G | GB) echo $((num * 1073741824)) ;;
+		T | TB) echo $((num * 1099511627776)) ;;
+		*) echo "$num" ;;
+	esac
+}
+
+# Argument definition
+user=$1
+domain=$2
+domain_idn=$2
+memory_high=$3
+memory_max=$4
+cpu_quota=$5
+
 # Includes
 # shellcheck source=/etc/hestiacp/hestia.conf
 source /etc/hestiacp/hestia.conf
@@ -70,9 +95,12 @@ check_hestia_demo_mode
 #----------------------------------------------------------#
 
 # Ensure the keys exist on the domain row, then persist the new values.
-add_object_key 'web' 'DOMAIN' "$domain" '$WEB_CGROUP_HIGH' '$TIME'
-add_object_key 'web' 'DOMAIN' "$domain" '$WEB_CGROUP_MAX' '$TIME'
-add_object_key 'web' 'DOMAIN' "$domain" '$WEB_CPU_QUOTA' '$TIME'
+# NOTE: add_object_key expects PLAIN key names (no leading "$"); a "$"-prefixed
+# key/position makes the internal sed search for literal "$TIME='", which never
+# exists in the conf file, and the call silently does nothing.
+add_object_key 'web' 'DOMAIN' "$domain" 'WEB_CGROUP_HIGH' 'TIME'
+add_object_key 'web' 'DOMAIN' "$domain" 'WEB_CGROUP_MAX' 'TIME'
+add_object_key 'web' 'DOMAIN' "$domain" 'WEB_CPU_QUOTA' 'TIME'
 
 # Normalize "unlimited" to empty for storage (empty == unlimited on read).
 store_high="$memory_high"; [ "$store_high" = "unlimited" ] && store_high=""
@@ -95,18 +123,3 @@ $BIN/v-log-action "system" "Info" "Web" "Per-domain resource limits updated (Dom
 log_event "$OK" "$ARGUMENTS"
 
 exit
-
-# Helper: convert human memory size to bytes.
-memory_to_bytes() {
-	local val="$1"
-	local num unit
-	num=$(echo "$val" | grep -oE '^[0-9]+')
-	unit=$(echo "$val" | grep -oE '[A-Za-z]+$' | tr '[:lower:]' '[:upper:]')
-	case "$unit" in
-		K|KB) echo $((num * 1024)) ;;
-		M|MB) echo $((num * 1048576)) ;;
-		G|GB) echo $((num * 1073741824)) ;;
-		T|TB) echo $((num * 1099511627776)) ;;
-		*) echo "$num" ;;
-	esac
-}

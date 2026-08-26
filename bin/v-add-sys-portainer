@@ -67,12 +67,16 @@ docker network create portainer-agent-net &> /dev/null || true
 echo "[*] Starting Portainer Agent (owns the docker.sock)..."
 # The Agent is the ONLY container that touches /var/run/docker.sock.
 # It exposes the Portainer Edge/API protocol on TCP port 9001.
+# --userns=host is REQUIRED: with global userns-remap hardening enabled the
+# agent's remapped root cannot read /var/run/docker.sock (owned by the real
+# root:docker) and would crash-loop with "permission denied".
 # SECURITY: ports are bound to 127.0.0.1 ONLY so the agent socket is never
 # reachable from the public internet. The CE UI reaches it over the internal
 # portainer-agent-net Docker network, never over the host's loopback publish.
 docker run -d \
 	--name portainer-agent \
 	--restart=always \
+	--userns=host \
 	--network portainer-agent-net \
 	-p 127.0.0.1:9001:9001 \
 	-v /var/run/docker.sock:/var/run/docker.sock \

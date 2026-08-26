@@ -117,7 +117,7 @@ if [ -z "$secret" ] || [ "$secret" = "%deploy_secret%" ]; then
 	if [ -z "$secret" ]; then
 		secret=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
 	fi
-	add_object_key 'web' 'DOMAIN' "$domain" '$GIT_DEPLOY_SECRET' '$TIME'
+	add_object_key 'web' 'DOMAIN' "$domain" 'GIT_DEPLOY_SECRET' 'TIME'
 	update_object_value 'web' 'DOMAIN' "$domain" '$GIT_DEPLOY_SECRET' "$secret"
 fi
 
@@ -131,9 +131,9 @@ if [ -f "$deploy_php" ]; then
 fi
 
 # Persist repo URL + branch in domain config.
-add_object_key 'web' 'DOMAIN' "$domain" '$GIT_REPO' '$TIME'
+add_object_key 'web' 'DOMAIN' "$domain" 'GIT_REPO' 'TIME'
 update_object_value 'web' 'DOMAIN' "$domain" '$GIT_REPO' "$repo_url"
-add_object_key 'web' 'DOMAIN' "$domain" '$GIT_BRANCH' '$TIME'
+add_object_key 'web' 'DOMAIN' "$domain" 'GIT_BRANCH' 'TIME'
 update_object_value 'web' 'DOMAIN' "$domain" '$GIT_BRANCH' "${branch:-main}"
 
 # Fix ownership of docroot after git operations.

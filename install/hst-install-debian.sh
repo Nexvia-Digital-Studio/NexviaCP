@@ -2,7 +2,7 @@
 
 # ======================================================== #
 #
-# Hestia Control Panel Installer for Debian
+# Nexvia Control Panel Installer for Debian
 # https://www.hestiacp.com/
 #
 # Currently Supported Versions:
@@ -31,7 +31,14 @@ HESTIA_COMMON_DIR="$HESTIA/install/common"
 VERBOSE='no'
 
 # Define software versions
-HESTIA_INSTALL_VER='1.10.0~alpha'
+# Base the package pin on the version currently published in the upstream
+# release branch. Forks cut from a development branch otherwise keep an
+# alpha version string (e.g. 1.10.0~alpha) that is NOT published in the
+# package repository, which makes the pinned apt install fail outright.
+HESTIA_INSTALL_VER="$(curl -fsSL --max-time 20 https://raw.githubusercontent.com/hestiacp/hestiacp/release/src/deb/hestia/control 2>/dev/null | awk '/^Version:/{print $2; exit}')"
+if [ -z "$HESTIA_INSTALL_VER" ]; then
+	HESTIA_INSTALL_VER='1.10.4'
+fi
 
 # Build the full Hestia version
 # Split base version (1.10.0) from channel suffix (~alpha / ~beta), if present
@@ -58,7 +65,9 @@ esac
 HESTIA_INSTALL_BUILD="${HESTIA_BASE_VER}-1+${os_id}${HESTIA_CHANNEL}"
 
 # Supported PHP versions
-multiphp_v=("5.6" "7.0" "7.1" "7.2" "7.3" "7.4" "8.0" "8.1" "8.2" "8.3" "8.4" "8.5")
+# Supported PHP versions (EOL 5.6-7.3 intentionally dropped; the panel
+# README documents 7.4 - 8.5 support)
+multiphp_v=("7.4" "8.0" "8.1" "8.2" "8.3" "8.4" "8.5")
 # One of the following PHP versions is required for Roundcube / phpmyadmin
 multiphp_required=("8.1" "8.2" "8.3" "8.4" "8.5")
 # Default PHP version if none supplied
@@ -495,7 +504,7 @@ if [ ! -f /etc/apt/apt.conf.d/80-retries ]; then
 fi
 
 # Welcome message
-echo "Welcome to the Hestia Control Panel installer!"
+echo "Welcome to the Nexvia Control Panel installer!"
 echo
 echo "Please wait, the installer is now checking for missing dependencies..."
 echo
@@ -554,7 +563,7 @@ if [ -n "$conflicts" ] && [ -z "$force" ]; then
 		check_result $? 'apt-get remove failed'
 		unset $answer
 	else
-		check_result 1 "Hestia Control Panel should be installed on a clean server."
+		check_result 1 "Nexvia Control Panel should be installed on a clean server."
 	fi
 fi
 
@@ -647,7 +656,7 @@ install_welcome_message() {
 	echo '               |  _  |  __/\__ \ |_| | (_| | |___|  __/                 '
 	echo '               |_| |_|\___||___/\__|_|\__,_|\____|_|                    '
 	echo "                                                                        "
-	echo "                          Hestia Control Panel                          "
+	echo "                          Nexvia Control Panel                          "
 	if [[ "$HESTIA_INSTALL_VER" =~ "beta" ]]; then
 		echo "                              BETA RELEASE                          "
 	fi
@@ -661,7 +670,7 @@ install_welcome_message() {
 	echo
 	echo "========================================================================"
 	echo
-	echo "Thank you for downloading Hestia Control Panel! In a few moments,"
+	echo "Thank you for downloading Nexvia Control Panel! In a few moments,"
 	echo "we will begin installing the following components on your server:"
 	echo
 }
@@ -926,7 +935,7 @@ if [ "$mysql8" = 'yes' ]; then
 fi
 
 # Installing HestiaCP repo
-echo "[ * ] Hestia Control Panel"
+echo "[ * ] Nexvia Control Panel"
 echo "deb [arch=$ARCH signed-by=/usr/share/keyrings/hestia-keyring.gpg] https://$RHOST/ $codename main" > $apt/hestia.list
 gpg --no-default-keyring --keyring /usr/share/keyrings/hestia-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys A189E93654F0B0E5 > /dev/null 2>&1
 
@@ -1174,14 +1183,31 @@ fi
 # .NET SDK: add the Microsoft apt repo. v-add-web-domain (.NET template) and
 # deploy.sh (dotnet publish) rely on it being present.
 if [ "$dotnet" = 'yes' ]; then
-	echo "[ * ] Adding Microsoft .NET APT repository..."
-	curl -fsSL https://packages.microsoft.com/keys/microsoft.asc -o /usr/share/keyrings/microsoft.asc 2>/dev/null
+	echo "[ * ] Preparing .NET SDK repositories..."
 	os_codename=$(lsb_release -cs 2>/dev/null)
-	if [ -n "$os_codename" ] && [ -f /usr/share/keyrings/microsoft.asc ]; then
-		echo "deb [arch=$(dpkg --print-architecture 2>/dev/null) signed-by=/usr/share/keyrings/microsoft.asc] https://packages.microsoft.com/debian/${os_codename}/prod $os_codename main" \
-			> /etc/apt/sources.list.d/microsoft-prod.list
+	ms_repo="https://packages.microsoft.com/debian/${os_codename}/prod"
+	# Only add the Microsoft repo when it actually publishes a Release file.
+	# Some codenames never got a Microsoft prod repo (e.g. ubuntu noble) and a
+	# dangling source list makes the later apt-get update fail hard.
+	if [ -n "$os_codename" ] && curl -fsSL --max-time 20 -o /dev/null "$ms_repo/dists/$os_codename/Release" 2>/dev/null; then
+		echo "[ * ] Adding Microsoft .NET APT repository..."
+		curl -fsSL https://packages.microsoft.com/keys/microsoft.asc -o /usr/share/keyrings/microsoft.asc 2>/dev/null
+		if [ -f /usr/share/keyrings/microsoft.asc ]; then
+			echo "deb [arch=$(dpkg --print-architecture 2>/dev/null) signed-by=/usr/share/keyrings/microsoft.asc] $ms_repo $os_codename main" \
+				> /etc/apt/sources.list.d/microsoft-prod.list
+			apt-get update >> $LOG 2>&1
+		fi
+	else
+		echo "[ * ] Microsoft .NET repo not published for $os_codename; relying on distro packages."
 	fi
-	software="$software dotnet-sdk-8.0 dotnet-sdk-9.0"
+	# Install only SDK versions that actually exist in any enabled repo.
+	# Pinning a missing package (e.g. the EOL STS dotnet-sdk-9.0) aborts the
+	# ENTIRE apt transaction and therefore breaks the whole installation.
+	for dotnet_sdk in dotnet-sdk-8.0 dotnet-sdk-9.0 dotnet-sdk-10.0; do
+		if apt-cache show "$dotnet_sdk" >/dev/null 2>&1; then
+			software="$software $dotnet_sdk"
+		fi
+	done
 fi
 
 # Refresh apt cache if any third-party repo was added above.
@@ -1353,7 +1379,7 @@ chmod 644 /etc/cron.d/hestia-memory-monitor
 #                     Configure Hestia                     #
 #----------------------------------------------------------#
 
-echo "[ * ] Configuring Hestia Control Panel..."
+echo "[ * ] Configuring Nexvia Control Panel..."
 # Installing sudo configuration
 mkdir -p /etc/sudoers.d
 cp -f $HESTIA_COMMON_DIR/sudo/hestiaweb /etc/sudoers.d/
@@ -1617,7 +1643,7 @@ fi
 # Generating SSL certificate
 echo "[ * ] Generating default self-signed SSL certificate..."
 $HESTIA/bin/v-generate-ssl-cert $(hostname) '' 'US' 'California' \
-	'San Francisco' 'Hestia Control Panel' 'IT' > /tmp/hst.pem
+	'San Francisco' 'Nexvia Control Panel' 'IT' > /tmp/hst.pem
 
 crt_end=$(grep -n "END CERTIFICATE-" /tmp/hst.pem | head -n1 | cut -f 1 -d:)
 # Newer OpenSSL may emit BEGIN PRIVATE KEY while older flows emit BEGIN RSA PRIVATE KEY.
@@ -1633,7 +1659,7 @@ check_result $(
 ) "failed to parse generated SSL certificate"
 
 # Adding SSL certificate
-echo "[ * ] Adding SSL certificate to Hestia Control Panel..."
+echo "[ * ] Adding SSL certificate to Nexvia Control Panel..."
 cd $HESTIA/ssl
 sed -n "1,${crt_end}p" /tmp/hst.pem > certificate.crt
 sed -n "$key_start,${key_end}p" /tmp/hst.pem > certificate.key
@@ -2632,7 +2658,7 @@ echo -e "\n"
 # Sending notification to admin email
 echo -e "Congratulations!
 
-You have successfully installed Hestia Control Panel on your server.
+You have successfully installed Nexvia Control Panel on your server.
 
 Ready to get started? Log in using the following credentials:
 
@@ -2643,7 +2669,7 @@ fi
 echo -e -n " 	Username:   $username
 	Password:   $displaypass
 
-Thank you for choosing Hestia Control Panel to power your full stack web server,
+Thank you for choosing Nexvia Control Panel to power your full stack web server,
 we hope that you enjoy using it as much as we do!
 
 Please feel free to contact us at any time if you have any questions,
@@ -2656,18 +2682,18 @@ GitHub:         https://www.github.com/hestiacp/hestiacp
 Note: Automatic updates are enabled by default. If you would like to disable them,
 please log in and navigate to Server > Updates to turn them off.
 
-Help support the Hestia Control Panel project by donating via PayPal:
+Help support the Nexvia Control Panel project by donating via PayPal:
 https://www.hestiacp.com/donate
 
 --
 Sincerely yours,
-The Hestia Control Panel development team
+The Nexvia Control Panel development team
 
 Made with love & pride by the open-source community around the world.
 " >> $tmpfile
 
 send_mail="$HESTIA/web/inc/mail-wrapper.php"
-cat $tmpfile | $send_mail -s "Hestia Control Panel" $email
+cat $tmpfile | $send_mail -s "Nexvia Control Panel" $email
 
 # Congrats
 echo
@@ -2675,7 +2701,7 @@ cat $tmpfile
 rm -f $tmpfile
 
 # Add welcome message to notification panel
-$HESTIA/bin/v-add-user-notification "$username" 'Welcome to Hestia Control Panel!' '<p>You are now ready to begin adding <a href="/add/user/">user accounts</a> and <a href="/add/web/">domains</a>. For help and assistance, <a href="https://hestiacp.com/docs/" target="_blank">view the documentation</a> or <a href="https://forum.hestiacp.com/" target="_blank">visit our forum</a>.</p><p>Please <a href="https://github.com/hestiacp/hestiacp/issues" target="_blank">report any issues via GitHub</a>.</p><p class="u-text-bold">Have a wonderful day!</p><p><i class="fas fa-heart icon-red"></i> The Hestia Control Panel development team</p>'
+$HESTIA/bin/v-add-user-notification "$username" 'Welcome to Nexvia Control Panel!' '<p>You are now ready to begin adding <a href="/add/user/">user accounts</a> and <a href="/add/web/">domains</a>. For help and assistance, <a href="https://hestiacp.com/docs/" target="_blank">view the documentation</a> or <a href="https://forum.hestiacp.com/" target="_blank">visit our forum</a>.</p><p>Please <a href="https://github.com/hestiacp/hestiacp/issues" target="_blank">report any issues via GitHub</a>.</p><p class="u-text-bold">Have a wonderful day!</p><p><i class="fas fa-heart icon-red"></i> The Nexvia Control Panel development team</p>'
 
 # Clean-up
 # Sort final configuration file

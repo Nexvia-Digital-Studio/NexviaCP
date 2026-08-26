@@ -2,6 +2,90 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased][NexviaCP] - End-to-end install & isolation fixes
+
+Findings from a full E2E installation test (Ubuntu 24.04, privileged systemd
+container, nginx + PHP-FPM stack with multi-PHP, MariaDB, PostgreSQL, mail,
+BIND, Docker, Portainer, Redis). Every fix below was verified against a live
+panel installation.
+
+### Fixed
+
+- **Installer no longer pins a non-existent package version.** The installer
+  hard-coded `hestia=1.10.0-1+<distro>~alpha`, which is not published in the
+  package repository, aborting the whole installation. The version is now
+  resolved dynamically from the upstream `release` branch (with a fallback),
+  and the script/release mismatch check passes naturally.
+- **`--dotnet yes` no longer breaks the entire installation.** The Microsoft
+  apt repo is only added when it actually publishes a `Release` file for the
+  distro codename (e.g. there is no `ubuntu/noble/prod` repo), and only SDK
+  versions that really exist in any enabled repository are added to the
+  package list. Previously the missing `dotnet-sdk-9.0` (EOL STS) aborted
+  the complete apt transaction and nothing was installed at all.
+- **Portainer Agent no longer crash-loops under userns-remap hardening.**
+  `v-add-sys-portainer` now starts the agent with `--userns=host`; without it
+  the remapped container root cannot read `/var/run/docker.sock` (owned by
+  the real `root:docker`) and the agent restarts forever with
+  "permission denied", leaving Portainer CE without Docker access.
+- **Fork CLI scripts now receive their arguments.** `v-add-web-domain-app`,
+  `v-delete-web-domain-app`, `v-restart-web-domain-app`,
+  `v-change-web-domain-cgroup` and `v-update-web-domain-cgroup` were missing
+  the `# Argument definition` block (`user=$1; domain=$2; ...`), so every
+  positional argument arrived empty and the scripts failed with misleading
+  errors (e.g. "web domain  doesn't exist") — from the web UI as well.
+- **`memory_to_bytes()` is now defined before it is used.** In both
+  `v-change-web-domain-cgroup` and `v-update-web-domain-cgroup` the helper
+  was defined after the final `exit`, so it could never execute and all
+  `max_children` computations silently produced nothing.
+- **Custom object keys now persist.** `add_object_key` calls with a leading
+  `$` in the key/position arguments (`'$WEB_CGROUP_HIGH' '$TIME'`) made the
+  internal `sed` search for a literal `$TIME='` that never exists in the
+  conf file — a silent no-op that broke persistence of `WEB_CGROUP_*`,
+  `WEB_CPU_QUOTA`, `APP_BACKEND_PORT`, `APP_TYPE`, `GIT_DEPLOY_SECRET`,
+  `GIT_REPO` and `GIT_BRANCH` (and with it the HMAC webhook secret).
+- **App templates available on the nginx + PHP-FPM stack.** The `node-js`,
+  `dotnet`, `websocket` and `docker-ui` templates were only shipped to the
+  nginx-as-proxy template directory; they are now also installed to
+  `templates/web/nginx/php-fpm/`, where the recommended (and README
+  documented) stack reads them.
+- **`%app_port%` is now substituted in generated vhosts.** `func/domain.sh`
+  substituted `${app_port:-}` without ever loading the value from the domain
+  object, producing `proxy_pass http://127.0.0.1:;` and an invalid nginx
+  configuration. The renderer now loads `APP_BACKEND_PORT` before writing
+  the template.
+- **App templates listen on the correct ports.** They used `%proxy_port%` /
+  `%proxy_ssl_port%` (only set when Apache is behind nginx); on the
+  nginx + PHP-FPM stack these are empty and nginx rejects the config.
+  Switched to `%web_port%` / `%web_ssl_port%`.
+- **Per-site kernel cgroup limits are actually applied to app backends.**
+  `v-update-web-domain-cgroup` now sets persistent `MemoryHigh`, `MemoryMax`
+  and `CPUQuota` systemd properties on the dedicated
+  `hestia-app-<user>-<domain>.service` unit of Node.js / .NET / WebSocket
+  domains, as documented.
+- **PHP-FPM pool detection fixed.** The pool path was derived from the
+  backend template name (`PHP-7_4`) instead of the version directory
+  (`7.4`), so `/etc/php/PHP-7_4/fpm/...` never existed and per-site
+  `memory_limit` / `max_children` limits were never injected.
+
+### Changed
+
+- **Multi-PHP list trimmed to supported versions.** `--multiphp` now installs
+  PHP 7.4 - 8.5 only; the EOL 5.6 - 7.3 versions (no security updates since
+  years) are no longer pulled in by default.
+
+### Added
+
+- **`install/nexvia-apply-source.sh`** — official post-install overlay script.
+  Because the base installer installs the upstream Hestia packages from
+  apt.hestiacp.com, the fork's own code must be applied afterwards. The
+  script overlays `bin/`, `func/`, `web/` and templates onto
+  `/usr/local/hestia` with correct permissions, builds the web UI assets,
+  restarts the panel and optionally enables the NexviaCP extension services
+  (Docker hardening, Portainer, Redis, Memcached, phpPgAdmin SSO). The README
+  installation chapter was rewritten around this verified two-step flow and
+  now documents requirements, the FQDN hostname rule and troubleshooting
+  notes for real-server installations.
+
 ## [1.9.8] - Service Release
 
 ### Security

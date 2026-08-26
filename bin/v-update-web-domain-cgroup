@@ -12,13 +12,35 @@
 # Implementation:
 #   - Writes php_admin_value[memory_limit] into the domain's PHP-FPM pool so
 #     each PHP worker is bounded to the baseline memory.
-#   - Sets systemd cgroup properties on the PHP-FPM pool unit (when available)
-#     to enforce the kernel-level MemoryHigh/MemoryMax/CPUQuota envelope.
-#   - Falls back gracefully (no-op) when cgroups v2 / systemd scope is absent.
+#   - Applies real kernel-level MemoryHigh/MemoryMax/CPUQuota to the dedicated
+#     systemd unit of Node.js / .NET / WebSocket app backends.
+#   - Falls back gracefully (no-op) when no pool or app unit exists.
 
 #----------------------------------------------------------#
 #                Variables & Functions                     #
 #----------------------------------------------------------#
+
+# Convert a human memory size (256M, 1G, 2G) to bytes.
+# NOTE: must be defined before first use; a definition placed after the
+# final `exit` can never execute.
+memory_to_bytes() {
+	local val="$1"
+	local num unit
+	num=$(echo "$val" | grep -oE '^[0-9]+')
+	unit=$(echo "$val" | grep -oE '[A-Za-z]+$' | tr '[:lower:]' '[:upper:]')
+	case "$unit" in
+		K | KB) echo $((num * 1024)) ;;
+		M | MB) echo $((num * 1048576)) ;;
+		G | GB) echo $((num * 1073741824)) ;;
+		T | TB) echo $((num * 1099511627776)) ;;
+		*) echo "$num" ;;
+	esac
+}
+
+# Argument definition
+user=$1
+domain=$2
+domain_idn=$2
 
 # Includes
 # shellcheck source=/etc/hestiacp/hestia.conf
@@ -55,7 +77,16 @@ cpu_quota=$(get_object_value 'web' 'DOMAIN' "$domain" '$WEB_CPU_QUOTA')
 [ -z "$cpu_quota" ] && cpu_quota="unlimited"
 
 # Locate the domain's PHP-FPM pool configuration file.
+# The stored BACKEND is the backend TEMPLATE name (e.g. PHP-7_4), or the
+# literal "default" for domains that never switched away from the install
+# default, while the pool lives under the plain version directory
+# (e.g. /etc/php/8.5/fpm/...).
 backend_version=$(get_object_value 'web' 'DOMAIN' "$domain" '$BACKEND')
+if [ -z "$backend_version" ] || [ "$backend_version" = "default" ]; then
+	# Resolve the install default to the highest installed PHP-FPM version.
+	backend_version=$(ls -1 /etc/php/ 2>/dev/null | grep -E '^[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+fi
+backend_version=$(echo "$backend_version" | sed -e 's/^PHP-//' -e 's/_/./')
 pool_file=""
 if [ -n "$backend_version" ]; then
 	for candidate in \
@@ -89,8 +120,8 @@ if [ -n "$pool_file" ]; then
 		# the per-worker cap, the domain's total worst-case RSS stays within peak.
 		# Guard: peak must be >= baseline (validated upstream), and both bounded.
 		if [ "$mem_max" != "unlimited" ] && [ "$mem_high" != "unlimited" ]; then
-			peak_bytes=$(memory_to_bytes "$mem_max" 2>/dev/null)
-			high_bytes=$(memory_to_bytes "$mem_high" 2>/dev/null)
+			peak_bytes=$(memory_to_bytes "$mem_max")
+			high_bytes=$(memory_to_bytes "$mem_high")
 			if [ -n "$peak_bytes" ] && [ -n "$high_bytes" ] && [ "$high_bytes" -gt 0 ]; then
 				max_children=$((peak_bytes / high_bytes))
 				# Clamp to a sane range: at least 2 workers, at most 64.
@@ -101,7 +132,7 @@ if [ -n "$pool_file" ]; then
 		elif [ "$mem_max" != "unlimited" ]; then
 			# Baseline unlimited but peak set: fall back to a conservative 32MB
 			# per-worker reservation so the peak is still respected.
-			peak_bytes=$(memory_to_bytes "$mem_max" 2>/dev/null)
+			peak_bytes=$(memory_to_bytes "$mem_max")
 			if [ -n "$peak_bytes" ] && [ "$peak_bytes" -gt 0 ]; then
 				max_children=$((peak_bytes / 33554432))
 				[ "$max_children" -lt 2 ] && max_children=2
@@ -118,17 +149,39 @@ if [ -n "$pool_file" ]; then
 	fi
 fi
 
-# --- 2. CPU quota: applied at the USER level, not the PHP version service ---
-# NOTE: per-domain CPU isolation via systemd is structurally impossible here
+# --- 2. Node.js / .NET app backend: REAL per-site kernel cgroup limits ---
+# Unlike PHP-FPM (all pools of a version share one master service), each app
+# backend runs in its own dedicated systemd unit, so MemoryHigh / MemoryMax /
+# CPUQuota can be enforced per-site at the kernel level. Persistent
+# set-property values survive reboots and unit restarts.
+app_unit="hestia-app-${user}-${domain}.service"
+if systemctl cat "$app_unit" >/dev/null 2>&1; then
+	if [ "$mem_high" != "unlimited" ]; then
+		systemctl set-property "$app_unit" MemoryHigh="$mem_high" >/dev/null 2>&1 || true
+	else
+		systemctl set-property "$app_unit" MemoryHigh= >/dev/null 2>&1 || true
+	fi
+	if [ "$mem_max" != "unlimited" ]; then
+		systemctl set-property "$app_unit" MemoryMax="$mem_max" >/dev/null 2>&1 || true
+	else
+		systemctl set-property "$app_unit" MemoryMax= >/dev/null 2>&1 || true
+	fi
+	if [ "$cpu_quota" != "unlimited" ]; then
+		systemctl set-property "$app_unit" CPUQuota="$cpu_quota" >/dev/null 2>&1 || true
+	else
+		systemctl set-property "$app_unit" CPUQuota= >/dev/null 2>&1 || true
+	fi
+fi
+
+# --- 3. PHP CPU quota: applied at the USER level, not the PHP version service ---
+# NOTE: per-domain CPU isolation via systemd is structurally impossible for PHP
 # because all pools of a given PHP version share ONE master (php<X.Y>-fpm.service).
 # Setting CPUQuota on that unit would limit ALL sites on that PHP version — that
-# is the bug this section removes. CPU limiting is instead enforced per-USER at
-# the kernel level by v-update-user-cgroup (user-<uid>.slice CPUQuota), which is
-# the correct isolation boundary for CPU in this architecture.
-#
-# The stored WEB_CPU_QUOTA value is retained for the UI/reporting and for the
-# Node/.NET backend manager (which CAN apply a real per-site cgroup because each
-# such backend runs in its own dedicated systemd unit).
+# is the bug this section removes. CPU limiting for PHP sites is instead enforced
+# per-USER at the kernel level by v-update-user-cgroup (user-<uid>.slice
+# CPUQuota), which is the correct isolation boundary for CPU in this
+# architecture. The user-level quota is managed from the panel's user resource
+# limits (requires installing with --resourcelimit yes).
 
 #----------------------------------------------------------#
 #                       Hestia                             #
@@ -136,18 +189,3 @@ fi
 
 log_event "$OK" "$ARGUMENTS"
 exit
-
-# Helper: convert human memory size (256M, 1G, 2G) to bytes.
-memory_to_bytes() {
-	local val="$1"
-	local num unit
-	num=$(echo "$val" | grep -oE '^[0-9]+')
-	unit=$(echo "$val" | grep -oE '[A-Za-z]+$' | tr '[:lower:]' '[:upper:]')
-	case "$unit" in
-		K|KB) echo $((num * 1024)) ;;
-		M|MB) echo $((num * 1048576)) ;;
-		G|GB) echo $((num * 1073741824)) ;;
-		T|TB) echo $((num * 1099511627776)) ;;
-		*) echo "$num" ;;
-	esac
-}
