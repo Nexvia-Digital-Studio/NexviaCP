@@ -87,6 +87,11 @@ if (isset($_SESSION["user"])) {
 	unset($output, $return_var);
 	$_SESSION["login_shell"] = $data[$username]["SHELL"];
 	$_SESSION["role"] = $data[$username]["ROLE"];
+	// Keep session language in sync with the user's configured language so
+	// changes apply immediately, without requiring a logout and login.
+	if (!empty($data[$username]["LANGUAGE"])) {
+		$_SESSION["language"] = $data[$username]["LANGUAGE"];
+	}
 	unset($data, $username);
 }
 

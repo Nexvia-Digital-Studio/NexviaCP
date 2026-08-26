@@ -588,9 +588,9 @@
 							</div>
 							<div class="u-mb10">
 								<label for="v_pma_restrict" class="form-label">
-									<?= tohtml( _("Restrict phpMyAdmin to Hestia login")) ?>
+									<?= tohtml( _("Restrict phpMyAdmin to Nexvia login")) ?>
 									<span class="hint">
-										<?= tohtml( _("Blocks phpMyAdmin's own login form; only reachable via the phpMyAdmin link inside Hestia (requires SSO above).")) ?>
+										<?= tohtml( _("Blocks phpMyAdmin's own login form; only reachable via the phpMyAdmin link inside Nexvia (requires SSO above).")) ?>
 									</span>
 								</label>
 								<select

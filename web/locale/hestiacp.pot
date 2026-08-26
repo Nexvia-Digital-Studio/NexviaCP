@@ -26,7 +26,7 @@ msgstr ""
 #: ../../web/unsuspend/dns/index.php:44 ../../web/unsuspend/mail/index.php:18
 #: ../../web/unsuspend/mail/index.php:45 ../../web/schedule/backup/index.php:17
 #: ../../web/schedule/restore/index.php:70 ../../web/bulk/restore/index.php:78
-msgid "Error: Hestia did not return any output."
+msgid "Error: Nexvia did not return any output."
 msgstr ""
 
 #: ../../web/schedule/backup/incremental/index.php:17
