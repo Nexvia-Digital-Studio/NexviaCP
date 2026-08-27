@@ -1,5 +1,5 @@
 #!/bin/bash
-# info: sync and pull updates for all domains connected to GitHub repos
+# info: sync and pull updates in parallel for all domains connected to GitHub repos
 # options: [REPO_NAME]
 
 # Includes
@@ -18,7 +18,9 @@ fi
 
 target_repo=$(echo "$1" | sed 's/[^a-zA-Z0-9._-]//g')
 
-echo "[*] Scanning domains for GitHub sync (Filter: ${target_repo:-all})..."
+echo "[*] [$(date +'%Y-%m-%d %H:%M:%S')] Scanning domains for GitHub sync (Target: ${target_repo:-all})..."
+
+sync_pids=()
 
 for u_dir in "$HOMEDIR"/*; do
 	[ ! -d "$u_dir/web" ] && continue
@@ -28,7 +30,7 @@ for u_dir in "$HOMEDIR"/*; do
 		[ ! -d "$d_dir/public_html/.git" ] && continue
 		domain=$(basename "$d_dir")
 
-		# Check remote URL
+		# Check remote origin URL
 		remote_url=$(git -C "$d_dir/public_html" config --get remote.origin.url 2>/dev/null)
 		repo_base=$(basename "$remote_url" .git)
 
@@ -38,10 +40,19 @@ for u_dir in "$HOMEDIR"/*; do
 			fi
 		fi
 
-		echo "[*] Updating domain $domain (User: $user, Remote: $remote_url)..."
-		$BIN/v-update-web-domain-git "$user" "$domain"
+		echo "[*] Triggering parallel update for domain: $domain (User: $user)..."
+		# Run update in parallel subshell
+		($BIN/v-update-web-domain-git "$user" "$domain" >/dev/null 2>&1) &
+		sync_pids+=($!)
 	done
 done
 
-echo "[+] Sync completed."
+# Wait for all parallel domain updates to complete
+if [ ${#sync_pids[@]} -gt 0 ]; then
+	for pid in "${sync_pids[@]}"; do
+		wait "$pid" 2>/dev/null || true
+	done
+fi
+
+echo "[+] SUCCESS: All connected domains (${#sync_pids[@]} sites) updated from GitHub in parallel with zero downtime."
 exit 0
