@@ -118,13 +118,24 @@ find "$HESTIA/data/templates" -type f ! -name '*.sh' -exec chmod 644 {} \;
 find "$HESTIA/data/templates" -type f -name '*.sh' -exec chmod 755 {} \;
 
 #----------------------------------------------------------#
-#                 4. Restart the panel                      #
+#             4. Enforce fork branding config               #
+#----------------------------------------------------------#
+# The base installer lays down the upstream .deb, whose postinst writes
+# APP_NAME='Hestia Control Panel' into hestia.conf. syshealth only adds the
+# key when missing, so the stale upstream brand would otherwise survive and
+# show up in the browser title and outgoing mail.
+if [ -f "$HESTIA/conf/hestia.conf" ]; then
+	"$HESTIA/bin/v-change-sys-config-value" "APP_NAME" "Nexvia Control Panel" || true
+fi
+
+#----------------------------------------------------------#
+#                 5. Restart the panel                      #
 #----------------------------------------------------------#
 systemctl restart hestia || fail 'could not restart hestia service'
 echo "[+] NexviaCP source applied and the panel restarted."
 
 #----------------------------------------------------------#
-#        5. Optional NexviaCP extension services            #
+#        6. Optional NexviaCP extension services            #
 #----------------------------------------------------------#
 # These run the dedicated bin/ scripts that the base installer could not
 # call (the upstream .deb does not contain them).
