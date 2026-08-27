@@ -1,0 +1,361 @@
+<!-- Begin toolbar -->
+<div class="toolbar">
+	<div class="toolbar-inner">
+		<div class="toolbar-buttons">
+			<a class="button button-secondary button-back js-button-back" href="/list/web/">
+				<i class="fas fa-arrow-left icon-blue"></i><?= tohtml(__tr("Back to Web", "Web Sitelerine Dön")) ?>
+			</a>
+			<form method="post" action="/list/resources/" style="display:inline;" onsubmit="const b = this.querySelector('button'); b.disabled=true; b.innerHTML='<i class=\'fas fa-spinner fa-spin\'></i> ' + ('<?= (($_SESSION['language'] ?? '') === 'tr') ? "Optimize Ediliyor..." : "Optimizing..." ?>');">
+				<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
+				<input type="hidden" name="tune_all" value="1">
+				<button type="submit" class="button button-primary">
+					<i class="fas fa-wand-magic-sparkles"></i> <?= tohtml(__tr("Auto-Tune & Optimize Now", "Şimdi Akıllı Optimize Et")) ?>
+				</button>
+			</form>
+		</div>
+	</div>
+</div>
+<!-- End toolbar -->
+
+<div class="container">
+	<h1 class="u-text-center u-hide-desktop u-mt20 u-pr30 u-mb20 u-pl30">
+		<?= tohtml(__tr("Smart Resource Governance & Priority Matrix", "Akıllı Kaynak Yönetimi & Öncelik Matrisi")) ?>
+	</h1>
+
+	<?php show_alert_message($_SESSION); ?>
+
+	<!-- Top Stats Overview Grid -->
+	<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-bottom: 25px;">
+		<!-- Stat 1: Total Domains -->
+		<div class="card" style="padding: 18px; border-radius: 8px; border: 1px solid var(--border-color, #334155); background: var(--color-background, #fff);">
+			<div style="display:flex; justify-content:space-between; align-items:center;">
+				<div>
+					<small class="u-text-muted" style="font-size:11px; text-transform:uppercase; font-weight:bold; letter-spacing:0.5px;">
+						<?= tohtml(__tr("Monitored Domains", "İzlenen Siteler")) ?>
+					</small>
+					<h2 style="margin:5px 0 0 0; font-size:1.6rem; font-weight:bold;">
+						<?= (int)($summary["TOTAL_DOMAINS"] ?? 0) ?>
+					</h2>
+				</div>
+				<div style="width:40px; height:40px; border-radius:8px; background:rgba(56, 189, 248, 0.1); display:flex; align-items:center; justify-content:center;">
+					<i class="fas fa-globe fa-lg" style="color:var(--icon-color-blue, #38bdf8);"></i>
+				</div>
+			</div>
+			<div style="margin-top:10px; font-size:12px; color:var(--color-text-muted);">
+				⚡ <strong><?= (int)($summary["AUTO_MANAGED_COUNT"] ?? 0) ?></strong> <?= tohtml(__tr("Auto-Adaptive", "Otomatik Yönetilen")) ?>
+			</div>
+		</div>
+
+		<!-- Stat 2: Idle & Throttled (Eco-Savings) -->
+		<div class="card" style="padding: 18px; border-radius: 8px; border: 1px solid var(--border-color, #334155); background: var(--color-background, #fff);">
+			<div style="display:flex; justify-content:space-between; align-items:center;">
+				<div>
+					<small class="u-text-muted" style="font-size:11px; text-transform:uppercase; font-weight:bold; letter-spacing:0.5px;">
+						<?= tohtml(__tr("Eco-Idle (Throttled)", "Uykuda / Kısılan Siteler")) ?>
+					</small>
+					<h2 style="margin:5px 0 0 0; font-size:1.6rem; font-weight:bold; color:var(--icon-color-green, #22c55e);">
+						<?= (int)($summary["IDLE_COUNT"] ?? 0) + (int)($summary["THROTTLED_COUNT"] ?? 0) ?>
+					</h2>
+				</div>
+				<div style="width:40px; height:40px; border-radius:8px; background:rgba(34, 197, 94, 0.1); display:flex; align-items:center; justify-content:center;">
+					<i class="fas fa-leaf fa-lg" style="color:var(--icon-color-green, #22c55e);"></i>
+				</div>
+			</div>
+			<div style="margin-top:10px; font-size:12px; color:var(--color-text-muted);">
+				💤 <?= tohtml(__tr("Unused sites deeply throttled to 64M RAM", "Kullanılmayanlar 64M RAM'e kısıldı")) ?>
+			</div>
+		</div>
+
+		<!-- Stat 3: High-Traffic & Boosted -->
+		<div class="card" style="padding: 18px; border-radius: 8px; border: 1px solid var(--border-color, #334155); background: var(--color-background, #fff);">
+			<div style="display:flex; justify-content:space-between; align-items:center;">
+				<div>
+					<small class="u-text-muted" style="font-size:11px; text-transform:uppercase; font-weight:bold; letter-spacing:0.5px;">
+						<?= tohtml(__tr("High Demand / Boosted", "Yüksek Talep / Güçlendirilen")) ?>
+					</small>
+					<h2 style="margin:5px 0 0 0; font-size:1.6rem; font-weight:bold; color:var(--icon-color-orange, #f97316);">
+						<?= (int)($summary["BOOSTED_COUNT"] ?? 0) + (int)($summary["VIP_COUNT"] ?? 0) ?>
+					</h2>
+				</div>
+				<div style="width:40px; height:40px; border-radius:8px; background:rgba(249, 115, 22, 0.1); display:flex; align-items:center; justify-content:center;">
+					<i class="fas fa-rocket fa-lg" style="color:var(--icon-color-orange, #f97316);"></i>
+				</div>
+			</div>
+			<div style="margin-top:10px; font-size:12px; color:var(--color-text-muted);">
+				🚀 <?= tohtml(__tr("Active spikes receiving burst RAM/CPU", "Yoğun sitelere dinamik kaynak açıldı")) ?>
+			</div>
+		</div>
+
+		<!-- Stat 4: Memory Saved -->
+		<div class="card" style="padding: 18px; border-radius: 8px; border: 1px solid var(--border-color, #334155); background: var(--color-background, #fff);">
+			<div style="display:flex; justify-content:space-between; align-items:center;">
+				<div>
+					<small class="u-text-muted" style="font-size:11px; text-transform:uppercase; font-weight:bold; letter-spacing:0.5px;">
+						<?= tohtml(__tr("Reclaimed RAM Capacity", "Geri Kazanılan Bellek")) ?>
+					</small>
+					<h2 style="margin:5px 0 0 0; font-size:1.6rem; font-weight:bold; color:var(--icon-color-purple, #a855f7);">
+						~<?= (int)($summary["ESTIMATED_SAVED_RAM_MB"] ?? 0) ?> MB
+					</h2>
+				</div>
+				<div style="width:40px; height:40px; border-radius:8px; background:rgba(168, 85, 247, 0.1); display:flex; align-items:center; justify-content:center;">
+					<i class="fas fa-microchip fa-lg" style="color:var(--icon-color-purple, #a855f7);"></i>
+				</div>
+			</div>
+			<div style="margin-top:10px; font-size:12px; color:var(--color-text-muted);">
+				🛡️ <?= tohtml(__tr("Auto-throttling frees RAM for busy apps", "Kısılan siteler aktife alan açtı")) ?>
+			</div>
+		</div>
+	</div>
+
+	<!-- Information Collapsible Box -->
+	<details class="box-collapse u-mb20">
+		<summary class="box-collapse-header">
+			<i class="fas fa-circle-info u-mr10"></i><?= tohtml(__tr("How 5-Tier Smart Governance Works", "5 Kademeli Akıllı Kaynak Yönetimi Nasıl Çalışır?")) ?>
+		</summary>
+		<div class="box-collapse-content" style="font-size:0.9rem; line-height:1.5;">
+			<p class="u-mb10">
+				<?= tohtml(__tr("NexviaCP integrates Linux cgroups v2, PSI (Pressure Stall Information) and Nginx traffic log telemetry to automatically scale and throttle per-site resources without manual intervention:", "NexviaCP, Linux cgroups v2, PSI (bellek baskısı) ve Nginx trafik telemetrisini birleştirerek sitelerin kaynaklarını otomatik ölçeklendirir veya kısar:")) ?>
+			</p>
+			<ul style="list-style:disc; margin-left:20px; line-height:1.6;">
+				<li><strong>0 - <?= tohtml(__tr("Auto-Adaptive (Default):", "Akıllı Otomatik (Varsayılan):")) ?></strong> <?= tohtml(__tr("If a site is idle (>10m zero traffic), it is aggressively throttled to 64M RAM / 25% CPU (Eco-Idle). When traffic arrives, resources instantly expand up to 2G peak.", "Site kullanılmıyorsa (>10 dk istek yoksa) 64M RAM ve %25 CPU'ya kısılarak uykuya alınır. Ziyaretçi geldiğinde 2G tavana kadar anında genişler.")) ?></li>
+				<li><strong>1 - <?= tohtml(__tr("Low (Eco-Throttled):", "Düşük (Eco-Kısılmış):")) ?></strong> <?= tohtml(__tr("Test / staging sites. Capped strictly at 64M baseline RAM, 25% CPU quota.", "Test ve geliştirme siteleri. 64M RAM ve %25 CPU ile katı şekilde sınırlandırılır.")) ?></li>
+				<li><strong>2 - <?= tohtml(__tr("Normal (Standard):", "Normal (Standart):")) ?></strong> <?= tohtml(__tr("Standard production website. 256M baseline RAM, 50% CPU quota, 100 IO weight.", "Standart web siteleri. 256M normal RAM, %50 CPU ve 100 IO ağırlığı.")) ?></li>
+				<li><strong>3 - <?= tohtml(__tr("High Priority:", "Yüksek Öncelik:")) ?></strong> <?= tohtml(__tr("High-traffic stores & portals. 512M baseline RAM, 100% CPU quota (1 core), 300 IO weight.", "Yüksek trafikli portallar. 512M RAM, %100 CPU (1 tam çekirdek) ve 300 IO önceliği.")) ?></li>
+				<li><strong>4 - <?= tohtml(__tr("Mission Critical:", "Kritik Öncelik:")) ?></strong> <?= tohtml(__tr("Revenue-generating APIs. 1G baseline RAM, 200% CPU (2 cores), 700 IO weight.", "Kritik API ve e-ticaret sistemleri. 1G RAM, %200 CPU (2 çekirdek) ve 700 IO önceliği.")) ?></li>
+				<li><strong>5 - <?= tohtml(__tr("VIP Isolated (Maximum):", "Maksimum VIP İzolasyon:")) ?></strong> <?= tohtml(__tr("Uncapped CPU quota, 2G+ baseline RAM, 1000 Maximum NVMe I/O priority.", "Sınırsız CPU kotası, 2G+ RAM ve 1000 Maksimum NVMe SSD I/O önceliği.")) ?></li>
+			</ul>
+		</div>
+	</details>
+
+	<!-- Search & Filter Controls -->
+	<div class="card u-mb20" style="padding:15px; border:1px solid var(--border-color, #334155); border-radius:8px; background:var(--color-background, #fff);">
+		<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+			<div style="flex:1; min-width:240px;">
+				<input type="text" id="site-search-input" class="form-control" placeholder="<?= tohtml(__tr("Search domain name...", "Alan adı ara...")) ?>" onkeyup="filterDomainRows();" style="width:100%;">
+			</div>
+			<div style="display:flex; gap:10px; align-items:center;">
+				<label class="form-label u-text-bold" style="margin:0; font-size:12px;"><?= tohtml(__tr("Filter Status:", "Durum Filtresi:")) ?></label>
+				<select id="status-filter-select" class="form-select" onchange="filterDomainRows();">
+					<option value="all"><?= tohtml(__tr("All Sites", "Tüm Siteler")) ?> (<?= count($domains) ?>)</option>
+					<option value="idle"><?= tohtml(__tr("💤 Eco-Idle (Throttled)", "💤 Uykuda / Kısılan")) ?></option>
+					<option value="active"><?= tohtml(__tr("🔵 Active (Standard)", "🔵 Aktif")) ?></option>
+					<option value="boosted"><?= tohtml(__tr("🟢 High Demand (Boosted)", "🟢 Yüksek Talep")) ?></option>
+					<option value="vip"><?= tohtml(__tr("👑 VIP Isolated", "👑 VIP")) ?></option>
+				</select>
+			</div>
+		</div>
+	</div>
+
+	<!-- Comparative Sites Matrix Table -->
+	<div class="units-table" style="background:var(--color-background, #fff); border-radius:8px; border:1px solid var(--border-color, #334155); overflow:hidden;">
+		<div class="units-table-header" style="background:rgba(0,0,0,0.03); font-weight:bold;">
+			<div class="units-table-cell" style="flex: 2;"><?= tohtml(__tr("Domain & Stack", "Web Sitesi / Domain")) ?></div>
+			<div class="units-table-cell u-text-center" style="flex: 1.6;"><?= tohtml(__tr("Priority Tier (0-5)", "Öncelik Kademesi")) ?></div>
+			<div class="units-table-cell u-text-center" style="flex: 1.2;"><?= tohtml(__tr("Dynamic State", "Dinamik Durum")) ?></div>
+			<div class="units-table-cell" style="flex: 2;"><?= tohtml(__tr("RAM Allocation (High / Peak)", "RAM Tahsisi (High / Tavan)")) ?></div>
+			<div class="units-table-cell u-text-center" style="flex: 1;"><?= tohtml(__tr("CPU Quota", "CPU Kotası")) ?></div>
+			<div class="units-table-cell u-text-center" style="flex: 1;"><?= tohtml(__tr("Traffic (10m)", "Trafik (10dk)")) ?></div>
+			<div class="units-table-cell u-text-center" style="flex: 0.8;"><?= tohtml(__tr("Actions", "İşlem")) ?></div>
+		</div>
+
+		<?php if (empty($domains)): ?>
+			<div class="units-table-row u-text-center u-p20">
+				<p class="u-text-muted"><?= tohtml(__tr("No web domains configured yet.", "Henüz yapılandırılmış web sitesi bulunamadı.")) ?></p>
+			</div>
+		<?php else: ?>
+			<?php foreach ($domains as $dname => $ddata): 
+				$prio = (int)($ddata["PRIORITY"] ?? 0);
+				$status = $ddata["STATUS"] ?? "active";
+				$mem_high = $ddata["MEMORY_HIGH"] ?? "256M";
+				$mem_max = $ddata["MEMORY_MAX"] ?? "1G";
+				$cpu_q = $ddata["CPU_QUOTA"] ?? "100%";
+				$reqs = (int)($ddata["REQ_COUNT_10M"] ?? 0);
+				$u_owner = $ddata["USER"] ?? $user_plain;
+			?>
+				<div class="units-table-row domain-governance-row" data-domain="<?= tohtml(strtolower($dname)) ?>" data-status="<?= tohtml($status) ?>">
+					<!-- Domain Name -->
+					<div class="units-table-cell" style="flex: 2;">
+						<div style="display:flex; align-items:center; gap:8px;">
+							<i class="fas fa-globe icon-blue"></i>
+							<div>
+								<a href="http://<?= tohtml($dname) ?>:9080/" target="_blank" class="u-text-bold" style="color:var(--color-text); text-decoration:none;">
+									<?= tohtml($dname) ?>
+								</a>
+								<small class="u-text-muted" style="display:block; font-size:11px;">
+									<?= tohtml($u_owner) ?>
+								</small>
+							</div>
+						</div>
+					</div>
+
+					<!-- Priority Tier (0-5 Interactive Dropdown) -->
+					<div class="units-table-cell u-text-center" style="flex: 1.6;">
+						<form method="post" action="/list/resources/" style="margin:0;">
+							<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
+							<input type="hidden" name="change_priority" value="1">
+							<input type="hidden" name="prio_user" value="<?= tohtml($u_owner) ?>">
+							<input type="hidden" name="prio_domain" value="<?= tohtml($dname) ?>">
+							
+							<select name="prio_level" class="form-select" onchange="this.form.submit();" style="font-size:12px; padding:4px 8px; font-weight:bold; <?= $prio === 0 ? 'border-color:var(--icon-color-blue, #38bdf8); background:rgba(56,189,248,0.08);' : ($prio >= 4 ? 'border-color:var(--icon-color-orange, #f97316); background:rgba(249,115,22,0.08);' : '') ?>">
+								<option value="0" <?= $prio === 0 ? "selected" : "" ?>>⚡ 0 (<?= tohtml(__tr("Auto-Adaptive", "Akıllı Otomatik")) ?>)</option>
+								<option value="1" <?= $prio === 1 ? "selected" : "" ?>>🟢 1 (<?= tohtml(__tr("Low / Eco", "Düşük / Eco")) ?>)</option>
+								<option value="2" <?= $prio === 2 ? "selected" : "" ?>>🔵 2 (<?= tohtml(__tr("Normal", "Standart")) ?>)</option>
+								<option value="3" <?= $prio === 3 ? "selected" : "" ?>>🟣 3 (<?= tohtml(__tr("High", "Yüksek")) ?>)</option>
+								<option value="4" <?= $prio === 4 ? "selected" : "" ?>>🟠 4 (<?= tohtml(__tr("Critical", "Kritik")) ?>)</option>
+								<option value="5" <?= $prio === 5 ? "selected" : "" ?>>👑 5 (<?= tohtml(__tr("VIP Max", "Maksimum VIP")) ?>)</option>
+							</select>
+						</form>
+					</div>
+
+					<!-- Dynamic State Badge -->
+					<div class="units-table-cell u-text-center" style="flex: 1.2;">
+						<?php if ($status === "idle"): ?>
+							<span class="badge badge-secondary" style="font-size:11px; padding:4px 8px; background:rgba(100,116,139,0.15); color:var(--color-text-muted); border:1px solid rgba(100,116,139,0.3);">
+								💤 <?= tohtml(__tr("Eco-Idle (64M)", "Uykuda (64M)")) ?>
+							</span>
+						<?php elseif ($status === "boosted"): ?>
+							<span class="badge badge-warning" style="font-size:11px; padding:4px 8px; background:rgba(249,115,22,0.15); color:#ea580c; border:1px solid rgba(249,115,22,0.4);">
+								🚀 <?= tohtml(__tr("Boosted", "Yüksek Talep")) ?>
+							</span>
+						<?php elseif ($status === "vip"): ?>
+							<span class="badge badge-purple" style="font-size:11px; padding:4px 8px; background:rgba(168,85,247,0.15); color:#9333ea; border:1px solid rgba(168,85,247,0.4);">
+								👑 VIP
+							</span>
+						<?php elseif ($status === "throttled"): ?>
+							<span class="badge badge-info" style="font-size:11px; padding:4px 8px;">
+								🟡 <?= tohtml(__tr("Throttled", "Kısıtlanmış")) ?>
+							</span>
+						<?php else: ?>
+							<span class="badge badge-success" style="font-size:11px; padding:4px 8px; background:rgba(34,197,94,0.12); color:#16a34a; border:1px solid rgba(34,197,94,0.3);">
+								🔵 <?= tohtml(__tr("Active", "Aktif")) ?>
+							</span>
+						<?php endif; ?>
+					</div>
+
+					<!-- RAM Allocation -->
+					<div class="units-table-cell" style="flex: 2;">
+						<div style="font-size:12px; font-family:monospace; margin-bottom:4px;">
+							<strong style="color:var(--color-text);"><?= tohtml($mem_high) ?></strong> <span class="u-text-muted">/ <?= tohtml($mem_max) ?></span>
+						</div>
+						<div style="width:100%; height:6px; background:rgba(0,0,0,0.1); border-radius:3px; overflow:hidden;">
+							<?php
+								$width_pct = 25;
+								if ($status === "boosted" || $status === "vip") $width_pct = 85;
+								elseif ($status === "idle" || $status === "throttled") $width_pct = 15;
+								elseif ($prio >= 3) $width_pct = 60;
+							?>
+							<div style="width:<?= $width_pct ?>%; height:100%; background:<?= ($status === 'idle') ? 'var(--icon-color-green, #22c55e)' : (($status === 'boosted') ? 'var(--icon-color-orange, #f97316)' : 'var(--icon-color-blue, #38bdf8)') ?>; border-radius:3px;"></div>
+						</div>
+					</div>
+
+					<!-- CPU Quota -->
+					<div class="units-table-cell u-text-center" style="flex: 1;">
+						<span class="badge badge-info" style="font-family:monospace; font-size:11px; padding:3px 7px;">
+							<?= tohtml($cpu_q) ?>
+						</span>
+					</div>
+
+					<!-- Traffic (10m) -->
+					<div class="units-table-cell u-text-center" style="flex: 1;">
+						<span style="font-family:monospace; font-size:12px; font-weight:bold; <?= $reqs > 0 ? 'color:var(--icon-color-green, #22c55e);' : 'color:var(--color-text-muted);' ?>">
+							<?= $reqs ?> <?= tohtml(__tr("req", "istek")) ?>
+						</span>
+					</div>
+
+					<!-- Actions -->
+					<div class="units-table-cell u-text-center" style="flex: 0.8;">
+						<button type="button" class="button button-secondary button-small" onclick="openCustomTuneModal('<?= tohtml($u_owner) ?>', '<?= tohtml($dname) ?>', '<?= tohtml($mem_high) ?>', '<?= tohtml($mem_max) ?>', '<?= tohtml($cpu_q) ?>');" title="<?= tohtml(__tr("Fine-Tune Limits", "İnce Limit Ayarı")) ?>" style="padding:4px 8px; font-size:11px;">
+							<i class="fas fa-sliders"></i>
+						</button>
+					</div>
+				</div>
+			<?php endforeach; ?>
+		<?php endif; ?>
+	</div>
+</div>
+
+<!-- Modal: Fine-Grained Resource Limits Modal -->
+<div id="custom-tune-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.65); z-index:9999; justify-content:center; align-items:center;" onclick="if(event.target===this) closeCustomTuneModal();">
+	<div class="form-container" style="background:var(--color-background, #fff); max-width:500px; width:90%; border-radius:8px; padding:25px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+		<h2 class="u-mb15"><i class="fas fa-sliders icon-purple"></i> <?= tohtml(__tr("Fine-Tune Domain Limits", "Özel Limit Ayarı")) ?></h2>
+		<p class="u-text-muted u-mb20" style="font-size:0.88rem;">
+			<span id="modal-domain-label" class="u-text-bold"></span>
+		</p>
+
+		<form method="post" action="/list/resources/">
+			<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
+			<input type="hidden" name="save_custom_cgroup" value="1">
+			<input type="hidden" name="custom_user" id="modal-input-user" value="">
+			<input type="hidden" name="custom_domain" id="modal-input-domain" value="">
+
+			<div class="u-mb15">
+				<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("Baseline RAM (MemoryHigh)", "Normal Çalışma Sınırı (Baseline)")) ?></label>
+				<input type="text" name="custom_high" id="modal-input-high" class="form-control" placeholder="256M" required style="width:100%;">
+				<small class="u-text-muted"><?= tohtml(__tr("e.g. 64M, 256M, 512M, 1G", "Örn: 64M, 256M, 512M, 1G")) ?></small>
+			</div>
+
+			<div class="u-mb15">
+				<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("Peak RAM Ceiling (MemoryMax)", "Maksimum Tavan Sınırı (Peak)")) ?></label>
+				<input type="text" name="custom_max" id="modal-input-max" class="form-control" placeholder="1G" required style="width:100%;">
+				<small class="u-text-muted"><?= tohtml(__tr("e.g. 256M, 1G, 2G, 4G, unlimited", "Örn: 256M, 1G, 2G, 4G, unlimited")) ?></small>
+			</div>
+
+			<div class="u-mb20">
+				<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("CPU Quota (%)", "CPU Kotası (%)")) ?></label>
+				<input type="text" name="custom_cpu" id="modal-input-cpu" class="form-control" placeholder="100%" required style="width:100%;">
+				<small class="u-text-muted"><?= tohtml(__tr("25% = eco, 100% = 1 core, 200% = 2 cores, unlimited", "25% = eco, 100% = 1 çekirdek, 200% = 2 çekirdek, unlimited")) ?></small>
+			</div>
+
+			<div style="display:flex; justify-content:flex-end; gap:10px;">
+				<button type="button" class="button button-secondary" onclick="closeCustomTuneModal();">
+					<?= tohtml(__tr("Cancel", "İptal")) ?>
+				</button>
+				<button type="submit" class="button button-primary">
+					<i class="fas fa-floppy-disk"></i> <?= tohtml(__tr("Save Limits", "Limitleri Kaydet")) ?>
+				</button>
+			</div>
+		</form>
+	</div>
+</div>
+
+<script>
+function openCustomTuneModal(user, domain, high, max, cpu) {
+	document.getElementById('modal-input-user').value = user;
+	document.getElementById('modal-input-domain').value = domain;
+	document.getElementById('modal-domain-label').innerText = domain + ' (' + user + ')';
+	document.getElementById('modal-input-high').value = high;
+	document.getElementById('modal-input-max').value = max;
+	document.getElementById('modal-input-cpu').value = cpu;
+	document.getElementById('custom-tune-modal').style.display = 'flex';
+}
+
+function closeCustomTuneModal() {
+	document.getElementById('custom-tune-modal').style.display = 'none';
+}
+
+document.addEventListener('keydown', function(e) {
+	if (e.key === 'Escape') {
+		closeCustomTuneModal();
+	}
+});
+
+function filterDomainRows() {
+	const searchVal = document.getElementById('site-search-input').value.toLowerCase().trim();
+	const statusVal = document.getElementById('status-filter-select').value;
+	const rows = document.querySelectorAll('.domain-governance-row');
+
+	rows.forEach(row => {
+		const dname = row.getAttribute('data-domain') || '';
+		const dstatus = row.getAttribute('data-status') || '';
+
+		const matchesSearch = !searchVal || dname.includes(searchVal);
+		const matchesStatus = statusVal === 'all' || dstatus === statusVal || (statusVal === 'idle' && (dstatus === 'idle' || dstatus === 'throttled'));
+
+		if (matchesSearch && matchesStatus) {
+			row.style.display = 'flex';
+		} else {
+			row.style.display = 'none';
+		}
+	});
+}
+</script>

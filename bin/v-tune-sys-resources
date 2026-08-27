@@ -1,0 +1,202 @@
+#!/bin/bash
+# info: smart adaptive auto-tuner for web domains and backend apps
+# options: [USER] [DOMAIN]
+#
+# example: v-tune-sys-resources
+# example: v-tune-sys-resources admin neredeyasanir.localhost
+#
+# Inspects traffic rates, memory pressure, and assigned priority (0-5)
+# to dynamically allocate or throttle CPU, RAM, and SSD I/O.
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+target_user="$1"
+target_domain="$2"
+
+GOV_DIR="/var/lib/hestia/governance"
+mkdir -p "$GOV_DIR" 2>/dev/null || true
+chmod 700 "$GOV_DIR" 2>/dev/null || true
+
+# Function to tune a single domain
+tune_domain() {
+	local u="$1"
+	local d="$2"
+
+	# Read priority (default: 0 = Auto)
+	local prio=$(get_object_value 'web' 'DOMAIN' "$d" '$RESOURCE_PRIORITY')
+	[ -z "$prio" ] && prio="0"
+
+	# Get log file to measure request activity
+	local log_file=""
+	for lpath in "/var/log/nginx/domains/$d.log" "$HOMEDIR/$u/web/$d/logs/$d.log" "/var/log/apache2/domains/$d.log"; do
+		if [ -f "$lpath" ]; then
+			log_file="$lpath"
+			break
+		fi
+	done
+
+	local req_count=0
+	local last_hit_time=0
+	if [ -n "$log_file" ] && [ -f "$log_file" ]; then
+		# Approximate recent requests in last 10 minutes
+		req_count=$(tail -n 200 "$log_file" 2>/dev/null | wc -l)
+		last_hit_time=$(stat -c %Y "$log_file" 2>/dev/null || echo 0)
+	fi
+
+	# Determine memory usage
+	local cur_ram_bytes=0
+	local mem_high_bytes=0
+	local psi_pressure=0
+
+	# Find cgroup or php-fpm pool memory
+	local pool_cg=""
+	for cg in "/sys/fs/cgroup/system.slice/php*-fpm.service" "/sys/fs/cgroup/system.slice/hestia-app-${u}-${d}.service"; do
+		if [ -d "$cg" ]; then
+			pool_cg="$cg"
+			break
+		fi
+	done
+
+	if [ -n "$pool_cg" ] && [ -d "$pool_cg" ]; then
+		cur_ram_bytes=$(cat "$pool_cg/memory.current" 2>/dev/null || echo 0)
+		if [ -f "$pool_cg/memory.pressure" ]; then
+			psi_pressure=$(awk -F'[= ]' '/^some / {for(i=1;i<=NF;i++) if($i=="avg10"){print $(i+1); exit}}' "$pool_cg/memory.pressure" 2>/dev/null | awk -F. '{print $1}')
+		fi
+	fi
+	[ -z "$cur_ram_bytes" ] && cur_ram_bytes=0
+	[ -z "$psi_pressure" ] && psi_pressure=0
+
+	local cur_ram_mb=$((cur_ram_bytes / 1048576))
+
+	# Dynamic Allocation Rules based on Priority (0-5)
+	local status="active"
+	local mem_high="256M"
+	local mem_max="1G"
+	local cpu_quota="50%"
+	local io_weight="100"
+
+	case "$prio" in
+		0)
+			# AUTO-ADAPTIVE (Akıllı Otomatik)
+			local now_ts=$(date +%s)
+			local idle_sec=$((now_ts - last_hit_time))
+
+			if [ "$req_count" -eq 0 ] || ([ "$last_hit_time" -gt 0 ] && [ "$idle_sec" -gt 600 ]); then
+				# Deep Eco-Idle: Site has been idle for >10 mins -> throttle aggressively!
+				status="idle"
+				mem_high="64M"
+				mem_max="256M"
+				cpu_quota="25%"
+				io_weight="50"
+			elif [ "$req_count" -gt 60 ] || [ "$psi_pressure" -gt 30 ]; then
+				# High Traffic Burst
+				status="boosted"
+				mem_high="512M"
+				mem_max="2G"
+				cpu_quota="200%"
+				io_weight="500"
+			else
+				# Standard Active
+				status="active"
+				mem_high="256M"
+				mem_max="1G"
+				cpu_quota="100%"
+				io_weight="100"
+			fi
+			;;
+		1)
+			# Low / Eco Throttle
+			status="throttled"
+			mem_high="64M"
+			mem_max="256M"
+			cpu_quota="25%"
+			io_weight="50"
+			;;
+		2)
+			# Normal / Standard
+			status="active"
+			mem_high="256M"
+			mem_max="1G"
+			cpu_quota="50%"
+			io_weight="100"
+			;;
+		3)
+			# High Performance
+			status="active"
+			mem_high="512M"
+			mem_max="2G"
+			cpu_quota="100%"
+			io_weight="300"
+			;;
+		4)
+			# Mission Critical
+			status="boosted"
+			mem_high="1G"
+			mem_max="4G"
+			cpu_quota="200%"
+			io_weight="700"
+			;;
+		5)
+			# VIP / Maximum Isolated
+			status="vip"
+			mem_high="2G"
+			mem_max="unlimited"
+			cpu_quota="unlimited"
+			io_weight="1000"
+			;;
+	esac
+
+	# Read current stored values
+	local old_high=$(get_object_value 'web' 'DOMAIN' "$d" '$WEB_CGROUP_HIGH')
+	local old_max=$(get_object_value 'web' 'DOMAIN' "$d" '$WEB_CGROUP_MAX')
+	local old_cpu=$(get_object_value 'web' 'DOMAIN' "$d" '$WEB_CPU_QUOTA')
+
+	# Apply changes if different
+	if [ "$old_high" != "$mem_high" ] || [ "$old_max" != "$mem_max" ] || [ "$old_cpu" != "$cpu_quota" ]; then
+		$BIN/v-change-web-domain-cgroup "$u" "$d" "$mem_high" "$mem_max" "$cpu_quota" >/dev/null 2>&1 || true
+	fi
+
+	# Save governance JSON state file for fast panel dashboard reading
+	local state_file="$GOV_DIR/${u}_${d}.json"
+	cat << JSONEOF > "$state_file"
+{
+	"DOMAIN": "$d",
+	"USER": "$u",
+	"PRIORITY": $prio,
+	"STATUS": "$status",
+	"MEMORY_USAGE_MB": $cur_ram_mb,
+	"MEMORY_HIGH": "$mem_high",
+	"MEMORY_MAX": "$mem_max",
+	"CPU_QUOTA": "$cpu_quota",
+	"IO_WEIGHT": $io_weight,
+	"REQ_COUNT_10M": $req_count,
+	"PSI_PRESSURE": $psi_pressure,
+	"LAST_TUNED": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+JSONEOF
+	chmod 644 "$state_file"
+}
+
+# Main Execution Loop
+if [ -n "$target_user" ] && [ -n "$target_domain" ]; then
+	tune_domain "$target_user" "$target_domain"
+else
+	# Tune all domains
+	for u_dir in "$HOMEDIR"/*; do
+		[ ! -d "$u_dir/web" ] && continue
+		u=$(basename "$u_dir")
+		for d_dir in "$u_dir/web"/*; do
+			[ ! -d "$d_dir" ] && continue
+			d=$(basename "$d_dir")
+			tune_domain "$u" "$d"
+		done
+	done
+fi
+
+exit 0

@@ -1,0 +1,55 @@
+#!/bin/bash
+# info: set smart resource governance priority (0-5) for a web domain
+# options: USER DOMAIN PRIORITY
+#
+# example: v-set-web-domain-priority admin neredeyasanir.localhost 4
+#
+# Priority Tiers:
+#   0 = Auto-Adaptive (Dynamically scales between Eco-Idle and Boost based on traffic)
+#   1 = Low (Eco Throttle: 64M RAM, 25% CPU, 50 IO)
+#   2 = Normal (Standard: 256M RAM, 50% CPU, 100 IO)
+#   3 = High (High Performance: 512M RAM, 100% CPU, 300 IO)
+#   4 = Critical (Mission Critical: 1G RAM, 200% CPU, 700 IO)
+#   5 = VIP Isolated (Maximum Unlimited: 2G+ RAM, Uncapped CPU, 1000 IO)
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+check_args '3' "$#" 'USER DOMAIN PRIORITY'
+
+user=$1
+domain=$2
+priority=$3
+
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+# Validate priority integer 0 to 5
+if [[ ! "$priority" =~ ^[0-5]$ ]]; then
+	check_result "$E_INVALID" "Priority must be an integer between 0 (Auto) and 5 (VIP)"
+fi
+
+# Add key to web.conf if missing
+add_object_key 'web' 'DOMAIN' "$domain" 'RESOURCE_PRIORITY' 'TIME'
+
+# Update priority value in domain config
+update_object_value 'web' 'DOMAIN' "$domain" '$RESOURCE_PRIORITY' "$priority"
+
+# Trigger immediate auto-tune for this domain
+$BIN/v-tune-sys-resources "$user" "$domain" >/dev/null 2>&1 || true
+
+log_event "$OK" "Domain $domain resource priority set to Level $priority"
+echo "[+] SUCCESS: Domain $domain resource priority updated to Level $priority"
+exit 0

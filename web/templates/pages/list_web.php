@@ -218,15 +218,31 @@
 							}
 						}
 						?>
+						<?php
+							$d_prio = (int)($data[$key]['RESOURCE_PRIORITY'] ?? 0);
+							$prio_badges = [
+								0 => '<span class="badge badge-info" style="font-size:10px; margin-left:6px; padding:2px 5px;" title="Smart Auto-Adaptive (Dinamik Kaynak Ölçekleme)">⚡ Auto</span>',
+								1 => '<span class="badge badge-secondary" style="font-size:10px; margin-left:6px; padding:2px 5px;" title="Low (Eco-Kısılmış: 64M RAM)">🟢 Low</span>',
+								2 => '<span class="badge badge-info" style="font-size:10px; margin-left:6px; padding:2px 5px;" title="Normal Standart (256M RAM)">🔵 Normal</span>',
+								3 => '<span class="badge badge-purple" style="font-size:10px; margin-left:6px; padding:2px 5px;" title="Yüksek Öncelik (512M RAM / 1 Çekirdek)">🟣 High</span>',
+								4 => '<span class="badge badge-warning" style="font-size:10px; margin-left:6px; padding:2px 5px;" title="Kritik (1G RAM / 2 Çekirdek)">🟠 Critical</span>',
+								5 => '<span class="badge badge-purple" style="font-size:10px; margin-left:6px; padding:2px 5px;" title="VIP Sınırsız (2G+ RAM / Maksimum IO)">👑 VIP</span>'
+							];
+						?>
 						<a href="/edit/web/?<?= tohtml(http_build_query(["domain" => $key, "token" => $_SESSION['token']])) ?>" title="<?= tohtml( _("Edit Domain")) ?>: <?= tohtml($key) ?>">
 							<?= tohtml($key) ?>
-								<?php
-									if (!empty($alias_new) && !empty($data[$key]['ALIAS'])) {
-										$aliases = implode(', ', $alias_new);
-										echo "<p class='hint u-max-width300 u-text-truncate'>(" . tohtml($aliases) . ")</p>";
-									}
-								?>
+						</a>
+						<?php if (($_SESSION["userContext"] ?? "") === "admin"): ?>
+							<a href="/list/resources/" style="text-decoration:none;">
+								<?= $prio_badges[$d_prio] ?? $prio_badges[0] ?>
 							</a>
+						<?php endif; ?>
+						<?php
+							if (!empty($alias_new) && !empty($data[$key]['ALIAS'])) {
+								$aliases = implode(', ', $alias_new);
+								echo "<p class='hint u-max-width300 u-text-truncate'>(" . tohtml($aliases) . ")</p>";
+							}
+						?>
 						<?php } ?>
 				</div>
 				<div class="units-table-cell">

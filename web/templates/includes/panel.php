@@ -491,6 +491,21 @@
 							</ul>
 						</a>
 					</li>
+
+					<!-- Smart Resource Governance Tab (Admin Only) -->
+					<li class="main-menu-item">
+						<a class="main-menu-item-link <?php if ($TAB == "RESOURCES" || $TAB == "GOVERNANCE") { echo "active"; } ?>" href="/list/resources/" title="<?= $is_panel_tr ? "Akıllı Kaynak Yönetişimi & Öncelik Matrisi" : _("Smart Resource Governance & Priority Matrix") ?>">
+							<p class="main-menu-item-label"><?= $is_panel_tr ? "KAYNAK" : _("RESOURCES") ?><i class="fas fa-microchip"></i></p>
+							<ul class="main-menu-stats">
+								<li>
+									<?= $is_panel_tr ? "öncelik" : _("Priority") ?>: <?= $is_panel_tr ? "5 Kademe" : _("5-Tier") ?>
+								</li>
+								<li>
+									<?= $is_panel_tr ? "akıllı" : _("Auto-Tune") ?>: <?= $is_panel_tr ? "aktif" : _("Active") ?>
+								</li>
+							</ul>
+						</a>
+					</li>
 				<?php } ?>
 
 			</ul>
