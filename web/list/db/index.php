@@ -8,9 +8,15 @@ include $_SERVER["DOCUMENT_ROOT"] . "/inc/main.php";
 
 $is_tr = (($_SESSION['language'] ?? '') === 'tr' || ($_SESSION['LANGUAGE'] ?? '') === 'tr');
 
-// Action 1: Sync & Auto-Discover Unmapped Databases
+// Action 1: Sync & Auto-Discover Unmapped Databases (admin only — adopting
+// databases into an account must never be triggerable by regular users)
 if (!empty($_POST["action_sync_db"])) {
 	verify_csrf($_POST);
+	if ($_SESSION["userContext"] != "admin") {
+		$_SESSION["error_msg"] = $is_tr ? "Bu işlem yalnızca yönetici tarafından yapılabilir." : _("Access denied: administrator only.");
+		header("Location: /list/db/");
+		exit();
+	}
 	exec(HESTIA_CMD . "v-sync-sys-databases " . quoteshellarg($user), $s_out, $s_code);
 	if ($s_code === 0) {
 		$_SESSION["ok_msg"] = $is_tr ? "Veritabanları tarandı ve tüm aktif veritabanları sisteme eşitlendi." : _("Databases scanned and all active databases synchronized successfully.");
@@ -21,35 +27,37 @@ if (!empty($_POST["action_sync_db"])) {
 	exit();
 }
 
-// Action 2: DB Studio AJAX Explorer Endpoint
-if (!empty($_POST["action_explore_db"]) || !empty($_GET["action_explore_db"])) {
-	$req = !empty($_POST["action_explore_db"]) ? $_POST : $_GET;
-	
-	// CSRF check
-	if (!empty($_POST["action_explore_db"])) {
-		verify_csrf($_POST);
+// Action 2: DB Studio AJAX Explorer Endpoint (POST only + CSRF; the backend
+// script additionally verifies the database belongs to the requesting user)
+if (!empty($_POST["action_explore_db"])) {
+	verify_csrf($_POST);
+
+	$target_db = $_POST["db_name"] ?? "";
+	$target_table = $_POST["table_name"] ?? "";
+	$target_sql = $_POST["custom_sql"] ?? "";
+
+	// Defense in depth: reject anything the backend sanitizer would mangle
+	if (!preg_match('/^[a-zA-Z0-9_-]*$/', $target_db) || !preg_match('/^[a-zA-Z0-9_-]*$/', $target_table)) {
+		header('Content-Type: application/json; charset=utf-8');
+		echo json_encode(["status" => "error", "error" => "Invalid database or table name."]);
+		exit();
 	}
-	
-	$target_db = quoteshellarg($req["db_name"] ?? "");
-	$target_table = quoteshellarg($req["table_name"] ?? "");
-	$target_sql = quoteshellarg($req["custom_sql"] ?? "");
 
 	header('Content-Type: application/json; charset=utf-8');
-	exec(HESTIA_CMD . "v-explore-sys-database " . quoteshellarg($user) . " " . $target_db . " " . $target_table . " " . $target_sql, $exp_out, $exp_code);
+	exec(
+		HESTIA_CMD . "v-explore-sys-database " . quoteshellarg($user) . " " . quoteshellarg($target_db) . " " . quoteshellarg($target_table) . " " . quoteshellarg($target_sql),
+		$exp_out,
+		$exp_code
+	);
 	echo implode("\n", $exp_out);
 	exit();
 }
 
-// Auto-run discovery if user has 0 databases
+// Database auto-discovery is intentionally NOT auto-run anymore: silently
+// adopting unmapped server databases into whoever opens the page was a
+// cross-tenant takeover vector. Admins can run it explicitly via the button.
 exec(HESTIA_CMD . "v-list-databases " . quoteshellarg($user) . " json", $output, $return_var);
 $data = json_decode(implode("", $output), true) ?: [];
-
-if (empty($data)) {
-	exec(HESTIA_CMD . "v-sync-sys-databases " . quoteshellarg($user), $sync_out, $sync_code);
-	unset($output);
-	exec(HESTIA_CMD . "v-list-databases " . quoteshellarg($user) . " json", $output, $return_var);
-	$data = json_decode(implode("", $output), true) ?: [];
-}
 
 if ($_SESSION["userSortOrder"] == "name") {
 	ksort($data);

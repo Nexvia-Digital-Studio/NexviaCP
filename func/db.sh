@@ -479,6 +479,15 @@ get_database_values() {
 
 # Change MySQL database password
 change_mysql_password() {
+	# Never touch privileged/system database users, whatever the caller
+	case "$DBUSER" in
+		root | mariadb.sys | mysql.sys | debian-sys-maint)
+			echo "Error: refusing to change password of system database user '$DBUSER'"
+			log_event "$E_INVALID" "$ARGUMENTS"
+			exit "$E_INVALID"
+			;;
+	esac
+
 	mysql_connect $HOST
 
 	mysql_ver_sub=$(echo $mysql_ver | cut -d '.' -f1)

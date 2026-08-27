@@ -29,6 +29,18 @@ fi
 clean_db=$(echo "$database" | tr -cd 'a-zA-Z0-9_-')
 clean_table=$(echo "$table" | tr -cd 'a-zA-Z0-9_-')
 
+# Ownership check: the database must belong to the requesting user.
+# Only the root admin may explore databases outside their own account.
+# (same matching semantics as is_object_valid in func/main.sh; clean_db is
+# charset-restricted so the pattern cannot be influenced)
+if [ "${ROOT_USER:-admin}" != "$user" ]; then
+	USER_DB_CONF="$HESTIA/data/users/$user/db.conf"
+	if [ ! -f "$USER_DB_CONF" ] || ! grep -q "DB='$clean_db'" "$USER_DB_CONF"; then
+		echo '{"status": "error", "error": "Database not found in this account. Only your own databases can be explored."}'
+		exit 0
+	fi
+fi
+
 python3 - "$clean_db" "$clean_table" "$sql_query" << 'PYEOF'
 import sys, subprocess, json, re
 
@@ -128,16 +140,27 @@ if table:
 
 # 3. If custom SQL is requested
 if custom_sql:
-    # Security: only allow read-only queries
+    # Security: single read-only statement only.
     sql_clean = custom_sql.strip()
-    if not re.match(r'^(SELECT|SHOW|EXPLAIN|DESCRIBE|DESC)\s', sql_clean, re.IGNORECASE):
+    # Strip trailing semicolons so the LIMIT append stays valid
+    while sql_clean.endswith(";"):
+        sql_clean = sql_clean[:-1].rstrip()
+    if not re.match(r'^(SELECT|SHOW|EXPLAIN|DESCRIBE|DESC)(\s|\()', sql_clean, re.IGNORECASE):
         result["status"] = "error"
         result["error"] = "Only read-only queries (SELECT, SHOW, EXPLAIN, DESCRIBE) are permitted in DB Studio."
+    elif ";" in sql_clean:
+        # mysql -e executes every ';'-separated statement: never allow stacking
+        result["status"] = "error"
+        result["error"] = "Multiple statements are not allowed. Please run a single query."
+    elif re.search(r'(--|#|/\*)', sql_clean) or re.search(r'\bINTO\s+(OUTFILE|DUMPFILE)\b', sql_clean, re.IGNORECASE):
+        result["status"] = "error"
+        result["error"] = "Comments and INTO OUTFILE/DUMPFILE are not permitted."
     else:
         if not re.search(r'\bLIMIT\b', sql_clean, re.IGNORECASE):
             sql_clean += " LIMIT 50"
-        
-        sql_out, sql_err = run_mysql_with_headers(sql_clean, db)
+
+        # Read-only session: even a parser slip cannot write under this guard
+        sql_out, sql_err = run_mysql_with_headers("SET SESSION TRANSACTION READ ONLY; " + sql_clean, db)
         if sql_err and not sql_out:
             result["status"] = "error"
             result["error"] = sql_err

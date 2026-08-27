@@ -1,9 +1,16 @@
 #!/bin/bash
-# info: auto-discover and adopt unmapped MySQL/MariaDB and PostgreSQL databases
+# info: auto-discover and adopt unmapped MySQL/MariaDB databases for a user
 # options: [TARGET_USER]
 #
-# example: v-sync-sys-databases
-#          v-sync-sys-databases admin
+# example: v-sync-sys-databases admin
+#
+# Security rules:
+#   - Only databases whose name starts with the user's own prefix
+#     (username_) are adopted; foreign databases are never claimed.
+#   - Never registers DBUSER='root': a DB is adopted only when a matching
+#     non-root grantee can be resolved from information_schema.
+#   - Intended to be invoked by admins from the panel (web layer is
+#     admin-gated); the script itself also refuses non-root callers.
 
 # Includes
 # shellcheck source=/etc/hestiacp/hestia.conf
@@ -22,15 +29,28 @@ if [ "x$(id -u)" != 'x0' ]; then
 	exit 10
 fi
 
-# MySQL credentials
+is_format_valid 'user'
+is_object_valid 'user' 'USER' "$target_user"
+
+# MySQL credentials (defaults file only — never passwords on the command line)
 MYSQL_CMD="mysql"
+MYSQL_CNF=""
 if [ -f /root/.my.cnf ]; then
 	MYSQL_CMD="mysql --defaults-file=/root/.my.cnf"
 elif [ -f "$HESTIA/conf/mysql.conf" ]; then
 	# shellcheck source=/usr/local/hestia/conf/mysql.conf
 	source "$HESTIA/conf/mysql.conf"
-	[ -n "$HOST" ] && [ -n "$USER" ] && MYSQL_CMD="mysql -h $HOST -u $USER -p$PASSWORD"
+	if [ -n "$HOST" ] && [ -n "$USER" ]; then
+		MYSQL_CNF=$(mktemp /tmp/nexvia_mysql.XXXXXX)
+		chmod 600 "$MYSQL_CNF"
+		printf '[client]\nhost=%s\nuser=%s\npassword=%s\n' "$HOST" "$USER" "$PASSWORD" > "$MYSQL_CNF"
+		MYSQL_CMD="mysql --defaults-extra-file=$MYSQL_CNF"
+	fi
 fi
+cleanup() {
+	[ -n "$MYSQL_CNF" ] && shred -u "$MYSQL_CNF" 2>/dev/null
+}
+trap cleanup EXIT
 
 USER_DB_CONF="$HESTIA/data/users/$target_user/db.conf"
 mkdir -p "$(dirname "$USER_DB_CONF")" 2>/dev/null || true
@@ -38,6 +58,12 @@ mkdir -p "$(dirname "$USER_DB_CONF")" 2>/dev/null || true
 
 # System ignored databases
 IGNORED_DBS="information_schema|performance_schema|mysql|sys|phpmyadmin|roundcube"
+
+# Escape regex metacharacters so raw database names from SHOW DATABASES
+# can be used safely inside grep patterns
+escape_regex() {
+	printf '%s' "$1" | sed -e 's/[][\.*^$()+?{}|]/\\&/g'
+}
 
 # Discover MySQL databases
 db_list=$($MYSQL_CMD -s -N -e "SHOW DATABASES;" 2>/dev/null)
@@ -49,29 +75,48 @@ for db_name in $db_list; do
 		continue
 	fi
 
+	# Only adopt databases that belong to this user by naming convention
+	# (HestiaCP creates databases as <user>_<name>); anything else is
+	# another tenant's or a manually created database — never claim it.
+	if [[ "$db_name" != "${target_user}_"* ]]; then
+		continue
+	fi
+
 	# Check if already registered in any user's db.conf
-	if grep -q "DB='$db_name'" "$HESTIA/data/users/"*"/db.conf" 2>/dev/null; then
+	safe_db=$(escape_regex "$db_name")
+	if grep -q "DB='$safe_db'" "$USER_DB_CONF" 2>/dev/null; then
+		continue
+	fi
+	if grep -q "DB='$safe_db'" "$HESTIA/data/users/"*"/db.conf" 2>/dev/null; then
+		continue
+	fi
+
+	# Resolve a non-root grantee for this database; without one we cannot
+	# register a safe DBUSER, so the database is skipped.
+	esc_db=${db_name//\'/\'\'}
+	grantee=$($MYSQL_CMD -s -N -e "SELECT DISTINCT GRANTEE FROM information_schema.SCHEMA_PRIVILEGES WHERE TABLE_SCHEMA='$esc_db';" 2>/dev/null | grep -vE "^'(root|mariadb\.sys|mysql\.sys|debian-sys-maint)'@" | head -n1)
+	db_user=$(printf '%s' "$grantee" | cut -d"'" -f2)
+	if [ -z "$db_user" ] || [ "$db_user" = "root" ]; then
 		continue
 	fi
 
 	# Get database size in MB
-	db_size=$($MYSQL_CMD -s -N -e "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 1) FROM information_schema.TABLES WHERE table_schema='$db_name';" 2>/dev/null)
+	db_size=$($MYSQL_CMD -s -N -e "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 1) FROM information_schema.TABLES WHERE table_schema='$esc_db';" 2>/dev/null)
 	if [ -z "$db_size" ] || [ "$db_size" = "NULL" ]; then
 		db_size="1"
 	fi
 
-	db_user="root"
 	cur_time=$(date +%H:%M:%S)
 	cur_date=$(date +%Y-%m-%d)
 
 	# Register database to target_user's db.conf
 	echo "DB='$db_name' DBUSER='$db_user' HOST='localhost' TYPE='mysql' CHARSET='utf8mb4' U_DISK='$db_size' SUSPENDED='no' TIME='$cur_time' DATE='$cur_date'" >> "$USER_DB_CONF"
-	echo "[+] Discovered and registered database: $db_name (Size: ${db_size} MB) to user $target_user"
+	echo "[+] Discovered and registered database: $db_name (user: $db_user, size: ${db_size} MB) for account $target_user"
 	discovered_count=$((discovered_count + 1))
 done
 
 # Update user counters
 $BIN/v-update-user-counters "$target_user" >/dev/null 2>&1 || true
 
-echo "[+] Database Auto-Sync Complete: $discovered_count new database(s) adopted."
+echo "[+] Database Auto-Sync Complete: $discovered_count database(s) adopted (only ${target_user}_* with a matching grant)."
 exit 0
