@@ -14,7 +14,33 @@ if ($_SESSION["userContext"] != "admin") {
 
 $is_tr = (($_SESSION['language'] ?? '') === 'tr' || ($_SESSION['LANGUAGE'] ?? '') === 'tr');
 
-// Action: Update NexviaCP Core from GitHub
+// Action: AJAX Update NexviaCP Core from GitHub
+if (!empty($_GET["ajax_update"])) {
+	header("Content-Type: application/json");
+	if (verify_csrf($_GET)) {
+		exec(HESTIA_CMD . "v-update-sys-nexvia main", $up_out, $return_var);
+		if ($return_var == 0) {
+			echo json_encode([
+				"status" => "success",
+				"message" => $is_tr ? "NexviaCP çekirdeği başarıyla en güncel sürüme yükseltildi." : "NexviaCP core updated successfully.",
+				"output" => implode("\n", $up_out)
+			]);
+		} else {
+			http_response_code(500);
+			echo json_encode([
+				"status" => "error",
+				"message" => ($is_tr ? "Güncelleme sırasında hata oluştu: " : "Update error: ") . implode(" ", array_slice($up_out, -3)),
+				"output" => implode("\n", $up_out)
+			]);
+		}
+	} else {
+		http_response_code(403);
+		echo json_encode(["status" => "error", "message" => "Invalid CSRF token"]);
+	}
+	exit();
+}
+
+// Action: Regular Sync
 if (!empty($_GET["update_nexvia"])) {
 	if (verify_csrf($_GET)) {
 		exec(HESTIA_CMD . "v-update-sys-nexvia main", $up_out, $return_var);
