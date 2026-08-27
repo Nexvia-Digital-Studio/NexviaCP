@@ -1,0 +1,182 @@
+#!/bin/bash
+# info: assign dedicated Redis database or socket and auto-inject into domain .env
+# options: USER DOMAIN [REDIS_DB] [RESTART]
+#
+# example: v-add-web-domain-redis admin mysite.com auto yes
+#
+# Assigns a dedicated Redis database (0-15) or unix socket per domain.
+# Injects REDIS_HOST, REDIS_PORT, REDIS_DB, REDIS_SOCKET into the domain's .env
+# with strict chmod 600 permissions and user ownership.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+user=$1
+domain=$2
+domain_idn=$2
+redis_db=${3:-auto}
+restart=${4:-no}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER DOMAIN [REDIS_DB] [RESTART]'
+is_format_valid 'user' 'domain' 'restart'
+is_object_valid 'user' 'USER' "$user"
+is_object_unsuspended 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
+is_object_unsuspended 'web' 'DOMAIN' "$domain"
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "Error: Script can be executed only by root"
+	exit 10
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Check Redis connection endpoints
+REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
+REDIS_PORT="${REDIS_PORT:-6379}"
+REDIS_SOCKET=""
+
+for sock_path in /var/run/redis/redis-server.sock /var/run/redis/redis.sock /var/run/redis-server/redis.sock /tmp/redis.sock; do
+	if [ -S "$sock_path" ]; then
+		REDIS_SOCKET="$sock_path"
+		break
+	fi
+done
+
+# Allocate or validate Redis Database (0 - 15)
+if [ "$redis_db" = "auto" ] || [ -z "$redis_db" ]; then
+	# Collect currently allocated DB numbers from all web.conf files
+	used_dbs=""
+	if [ -d "$HESTIA/data/users" ]; then
+		used_dbs=$(grep -rhoP "REDIS_DB='[0-9]+'" $HESTIA/data/users/*/web.conf 2>/dev/null | grep -oP "[0-9]+" | sort -n | uniq)
+	fi
+	
+	# Find first free DB between 0 and 15
+	assigned_db=""
+	for d in $(seq 0 15); do
+		if ! echo "$used_dbs" | grep -qx "$d"; then
+			assigned_db="$d"
+			break
+		fi
+	done
+	
+	# If all 0-15 are currently in use, calculate deterministic hash modulo 16
+	if [ -z "$assigned_db" ]; then
+		hash_val=$(printf '%s' "$domain" | cksum | awk '{print $1}')
+		assigned_db=$((hash_val % 16))
+	fi
+	redis_db="$assigned_db"
+else
+	# Validate numeric range 0-15
+	if ! [[ "$redis_db" =~ ^[0-9]+$ ]] || [ "$redis_db" -lt 0 ] || [ "$redis_db" -gt 15 ]; then
+		echo "Error: Invalid Redis DB '$redis_db'. Must be an integer between 0 and 15 or 'auto'."
+		exit "$E_INVALID"
+	fi
+fi
+
+# Locate project document root and target .env paths
+docroot="$HOMEDIR/$user/web/$domain/public_html"
+if [ ! -d "$docroot" ]; then
+	mkdir -p "$docroot"
+	chown "$user:$user" "$docroot"
+fi
+
+env_targets=("$docroot/.env")
+
+# Also check private/.env or domain root .env if they exist
+if [ -d "$HOMEDIR/$user/web/$domain/private" ]; then
+	env_targets+=("$HOMEDIR/$user/web/$domain/private/.env")
+fi
+if [ -f "$HOMEDIR/$user/web/$domain/.env" ]; then
+	env_targets+=("$HOMEDIR/$user/web/$domain/.env")
+fi
+
+# Function to inject or update key in .env file safely
+inject_env_var() {
+	local file="$1"
+	local key="$2"
+	local val="$3"
+
+	touch "$file"
+	local tmp_env
+	tmp_env=$(mktemp /tmp/nexvia_env_XXXXXX)
+	chmod 600 "$tmp_env"
+
+	if [ -f "$file" ]; then
+		grep -v "^${key}=" "$file" > "$tmp_env" 2>/dev/null || true
+	fi
+	echo "${key}=\"${val}\"" >> "$tmp_env"
+	mv -f "$tmp_env" "$file"
+	chmod 600 "$file"
+	chown "$user:$user" "$file"
+}
+
+for env_file in "${env_targets[@]}"; do
+	inject_env_var "$env_file" "REDIS_HOST" "$REDIS_HOST"
+	inject_env_var "$env_file" "REDIS_PORT" "$REDIS_PORT"
+	inject_env_var "$env_file" "REDIS_DB" "$redis_db"
+	if [ -n "$REDIS_SOCKET" ]; then
+		inject_env_var "$env_file" "REDIS_SOCKET" "$REDIS_SOCKET"
+	fi
+	inject_env_var "$env_file" "CACHE_DRIVER" "redis"
+	inject_env_var "$env_file" "SESSION_DRIVER" "redis"
+done
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+# Save domain metadata in web.conf
+if [ -z "$REDIS_DB" ]; then
+	add_object_key "web" 'DOMAIN' "$domain" 'REDIS_DB' 'ALIAS'
+fi
+update_object_value 'web' 'DOMAIN' "$domain" '$REDIS_DB' "$redis_db"
+
+if [ -z "$REDIS_HOST" ]; then
+	add_object_key "web" 'DOMAIN' "$domain" 'REDIS_HOST' 'ALIAS'
+fi
+update_object_value 'web' 'DOMAIN' "$domain" '$REDIS_HOST' "$REDIS_HOST"
+
+if [ -z "$REDIS_PORT" ]; then
+	add_object_key "web" 'DOMAIN' "$domain" 'REDIS_PORT' 'ALIAS'
+fi
+update_object_value 'web' 'DOMAIN' "$domain" '$REDIS_PORT' "$REDIS_PORT"
+
+if [ -n "$REDIS_SOCKET" ]; then
+	if [ -z "$REDIS_SOCKET" ]; then
+		add_object_key "web" 'DOMAIN' "$domain" 'REDIS_SOCKET' 'ALIAS'
+	fi
+	update_object_value 'web' 'DOMAIN' "$domain" '$REDIS_SOCKET' "$REDIS_SOCKET"
+fi
+
+# Optional restart if requested
+if [ "$restart" = "yes" ]; then
+	systemctl restart redis-server 2>/dev/null || systemctl restart redis 2>/dev/null || true
+fi
+
+# Logging
+$BIN/v-log-action "$user" "Info" "Web" "Redis DB $redis_db assigned to domain $domain and credentials injected into .env."
+log_event "$OK" "$ARGUMENTS"
+
+echo "Redis DB $redis_db assigned to domain $domain."
+echo "Injected REDIS_HOST=$REDIS_HOST, REDIS_PORT=$REDIS_PORT, REDIS_DB=$redis_db into $docroot/.env (chmod 600)."
+exit 0

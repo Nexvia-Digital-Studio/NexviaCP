@@ -1,0 +1,339 @@
+#!/bin/bash
+# info: deploy temporary GitHub PR staging preview environment
+# options: USER BASE_DOMAIN PR_NUMBER [REPO] [BRANCH] [APP_MODE]
+#
+# example: v-deploy-github-pr admin example.com 12 Nexvia-Nerede-Yasanir
+#          v-deploy-github-pr admin acme.com 42 my-app pr-42 node
+#
+# This script creates an isolated preview environment (e.g. pr-12.example.com)
+# for a GitHub Pull Request with dedicated database, .env isolation, and stack build.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+user=$1
+base_domain=$2
+pr_number=$3
+repo_input=$4
+branch_input=$5
+app_mode=${6:-auto}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+# load config file
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '3' "$#" 'USER BASE_DOMAIN PR_NUMBER [REPO] [BRANCH] [APP_MODE]'
+is_format_valid 'user' 'base_domain'
+is_object_valid 'user' 'USER' "$user"
+is_object_unsuspended 'user' 'USER' "$user"
+
+# Validate PR number (must be integer)
+if [[ ! "$pr_number" =~ ^[0-9]+$ ]]; then
+	check_result "$E_INVALID" "PR_NUMBER must be a positive integer"
+fi
+
+# Ensure root execution
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+# Determine preview domain name (e.g. pr-12.example.com)
+clean_base=$(echo "$base_domain" | sed 's/^pr-[0-9]\+\.//')
+pr_domain="pr-${pr_number}.${clean_base}"
+
+# Resolve Git repository
+repo_url="$repo_input"
+if [ -z "$repo_url" ]; then
+	# Check if base domain has git remote configured
+	base_docroot="$HOMEDIR/$user/web/$base_domain/public_html"
+	if [ -d "$base_docroot/.git" ]; then
+		repo_url=$(git -C "$base_docroot" config --get remote.origin.url 2>/dev/null)
+		repo_input=$(basename "$repo_url" .git 2>/dev/null)
+	fi
+fi
+
+if [ -z "$repo_url" ]; then
+	check_result "$E_INVALID" "GitHub repository not specified and could not be inferred from $base_domain"
+fi
+
+# Build authenticated git URL if GITHUB_TOKEN is available
+auth_repo_url="$repo_url"
+if [[ ! "$repo_url" =~ ^https?:// ]] && [[ ! "$repo_url" =~ ^git@ ]]; then
+	if [ -n "$GITHUB_ORG" ]; then
+		repo_url="https://github.com/${GITHUB_ORG}/${repo_input}.git"
+	else
+		repo_url="https://github.com/${repo_input}.git"
+	fi
+fi
+
+if [ -n "$GITHUB_TOKEN" ] && [[ "$repo_url" =~ ^https://github.com/ ]]; then
+	clean_repo=$(echo "$repo_url" | sed -e 's|https://github.com/||' -e 's|\.git$||')
+	auth_repo_url="https://${GITHUB_TOKEN}@github.com/${clean_repo}.git"
+else
+	auth_repo_url="$repo_url"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+echo "[*] [PR-$pr_number] Step 1: Provisioning Web Domain $pr_domain for user $user..."
+
+# Check if web domain already exists; if not, create it
+if ! $BIN/v-list-web-domain "$user" "$pr_domain" >/dev/null 2>&1; then
+	$BIN/v-add-web-domain "$user" "$pr_domain" >/dev/null 2>&1
+	check_result $? "Failed to create web domain $pr_domain"
+fi
+
+docroot="$HOMEDIR/$user/web/$pr_domain/public_html"
+mkdir -p "$docroot"
+
+echo "[*] [PR-$pr_number] Step 2: Fetching Pull Request branch from GitHub..."
+
+# Secure temporary clone workspace
+tmp_dir=$(mktemp -d -t nexvia_pr_${pr_number}_XXXXXX)
+trap 'rm -rf "$tmp_dir"' EXIT
+tmp_clone="$tmp_dir/clone"
+mkdir -p "$tmp_clone"
+
+# Clone repository
+clone_success=0
+
+# Attempt 1: Fetch pull request ref (pull/PR_NUMBER/head)
+if git clone --depth 50 "$auth_repo_url" "$tmp_clone" 2>/dev/null; then
+	cd "$tmp_clone" || exit 1
+	if git fetch origin "pull/${pr_number}/head:pr-${pr_number}" 2>/dev/null; then
+		git checkout "pr-${pr_number}" >/dev/null 2>&1
+		clone_success=1
+	elif [ -n "$branch_input" ] && git checkout "$branch_input" 2>/dev/null; then
+		clone_success=1
+	elif git checkout "pr-${pr_number}" 2>/dev/null; then
+		clone_success=1
+	else
+		# Fallback to current default branch if PR ref not found
+		clone_success=1
+	fi
+fi
+
+if [ "$clone_success" -ne 1 ]; then
+	check_result "$E_CONNECT" "Failed to clone PR branch for $repo_input (PR #$pr_number)"
+fi
+
+# Backup existing .env if present
+env_backup="$tmp_dir/env_backup"
+[ -f "$docroot/.env" ] && cp "$docroot/.env" "$env_backup"
+
+# Copy cloned files to docroot
+rm -rf "$docroot"/* "$docroot"/.[!.]* 2>/dev/null || true
+cp -r "$tmp_clone"/* "$docroot"/ 2>/dev/null || true
+cp -r "$tmp_clone"/.[!.]* "$docroot"/ 2>/dev/null || true
+
+# Sanitize remote origin (strip any token)
+git -C "$docroot" remote set-url origin "$repo_url" 2>/dev/null || true
+
+echo "[*] [PR-$pr_number] Step 3: Setting up isolated .env configuration..."
+
+# Restore or initialize .env
+if [ -f "$env_backup" ]; then
+	mv "$env_backup" "$docroot/.env"
+elif [ -f "$HOMEDIR/$user/web/$base_domain/public_html/.env" ]; then
+	cp "$HOMEDIR/$user/web/$base_domain/public_html/.env" "$docroot/.env"
+elif [ -f "$docroot/.env.example" ]; then
+	cp "$docroot/.env.example" "$docroot/.env"
+else
+	touch "$docroot/.env"
+fi
+
+# Inject Global Key Vault secrets if available
+if [ -f "$HESTIA/conf/vault.conf" ]; then
+	while IFS= read -r vline || [ -n "$vline" ]; do
+		[[ "$vline" =~ ^[[:space:]]*# ]] && continue
+		[[ -z "$vline" ]] && continue
+		vkey=$(echo "$vline" | cut -d '=' -f 1 | tr -d ' \t\r\n')
+		if [ -n "$vkey" ] && ! grep -q "^${vkey}=" "$docroot/.env" 2>/dev/null; then
+			echo "$vline" >> "$docroot/.env"
+		fi
+	done < "$HESTIA/conf/vault.conf"
+fi
+
+# Inject PR preview environment metadata flags
+for env_entry in \
+	"IS_PR_PREVIEW=true" \
+	"PR_NUMBER=$pr_number" \
+	"BASE_DOMAIN=$base_domain" \
+	"APP_URL=https://$pr_domain" \
+	"APP_ENV=staging" \
+	"APP_DEBUG=true"; do
+	k=$(echo "$env_entry" | cut -d '=' -f 1)
+	if grep -q "^${k}=" "$docroot/.env" 2>/dev/null; then
+		sed -i "s|^${k}=.*|${env_entry}|g" "$docroot/.env"
+	else
+		echo "$env_entry" >> "$docroot/.env"
+	fi
+done
+
+echo "[*] [PR-$pr_number] Step 4: Provisioning isolated staging database..."
+
+# Check for SQL database schemas
+sql_file=""
+for f in "$docroot/schema.sql" "$docroot/database.sql" "$docroot/db.sql" "$docroot/install.sql" "$docroot/build/schema.sql"; do
+	if [ -f "$f" ]; then
+		sql_file="$f"
+		break
+	fi
+done
+
+clean_repo_slug=$(echo "${repo_input:-$clean_base}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g' | cut -c 1-6)
+db_short="pr${pr_number}_${clean_repo_slug}"
+full_db_name="${user}_${db_short}"
+db_pass=$(head /dev/urandom 2>/dev/null | tr -dc A-Za-z0-9 | head -c 16)
+[ -z "$db_pass" ] && db_pass="NxvPrPass$(date +%s)"
+
+# Create database if it doesn't already exist
+if ! $BIN/v-list-database "$user" "$full_db_name" >/dev/null 2>&1; then
+	echo "[*] Creating database $full_db_name..."
+	$BIN/v-add-database "$user" "$db_short" "$db_short" "$db_pass" >/dev/null 2>&1 || true
+fi
+
+# Import SQL schema if present
+if [ -n "$sql_file" ] && [ -f "$HESTIA/conf/mysql.conf" ]; then
+	echo "[*] Importing SQL schema into $full_db_name..."
+	mysql_pass=$(grep "^PASSWORD=" "$HESTIA/conf/mysql.conf" | cut -d "'" -f 2)
+	mariadb -u root -p"$mysql_pass" "$full_db_name" < "$sql_file" 2>/dev/null || true
+fi
+
+# Inject DB credentials into isolated .env
+for db_var in \
+	"DB_HOST=127.0.0.1" \
+	"DB_PORT=3306" \
+	"DB_NAME=$full_db_name" \
+	"DB_DATABASE=$full_db_name" \
+	"DB_USER=$full_db_name" \
+	"DB_USERNAME=$full_db_name" \
+	"DB_PASS=$db_pass" \
+	"DB_PASSWORD=$db_pass"; do
+	k=$(echo "$db_var" | cut -d '=' -f 1)
+	if grep -q "^${k}=" "$docroot/.env" 2>/dev/null; then
+		sed -i "s|^${k}=.*|${db_var}|g" "$docroot/.env"
+	else
+		echo "$db_var" >> "$docroot/.env"
+	fi
+done
+
+chmod 600 "$docroot/.env" 2>/dev/null || true
+chown -R "$user:$user" "$docroot"
+
+echo "[*] [PR-$pr_number] Step 5: Detecting application stack & building dependencies..."
+
+detected_type="php"
+if [ "$app_mode" = "dotnet" ] || ls "$docroot"/*.csproj &>/dev/null || ls "$docroot"/*.sln &>/dev/null; then
+	detected_type="dotnet"
+elif [ "$app_mode" = "node" ] || [ -f "$docroot/package.json" ]; then
+	if [ -d "$docroot/dist" ] && [ ! -f "$docroot/server.js" ] && [ ! -f "$docroot/app.js" ] && [ "$app_mode" = "react" ]; then
+		detected_type="react"
+	else
+		detected_type="node"
+	fi
+elif [ "$app_mode" = "react" ] || [ -d "$docroot/dist" ]; then
+	detected_type="react"
+elif [ -f "$docroot/artisan" ]; then
+	detected_type="laravel"
+fi
+
+[ "$app_mode" = "php" ] && detected_type="php"
+
+echo "[+] Application Stack Detected: $detected_type (Mode: $app_mode)"
+
+case "$detected_type" in
+	dotnet)
+		$BIN/v-change-web-domain-tpl "$user" "$pr_domain" "dotnet" >/dev/null 2>&1 || true
+		if ls "$docroot"/*.csproj &>/dev/null && command -v dotnet &>/dev/null; then
+			echo "[*] Building .NET PR project..."
+			su - "$user" -s /bin/bash -c "cd '$docroot' && dotnet publish -c Release -o '$docroot/publish'" 2>/dev/null || true
+			dll_file=$(find "$docroot/publish" -maxdepth 1 -name "*.dll" ! -name "Microsoft.*" ! -name "System.*" | head -n 1)
+			if [ -n "$dll_file" ]; then
+				dll_base=$(basename "$dll_file")
+				$BIN/v-add-web-domain-app "$user" "$pr_domain" dotnet "dotnet $docroot/publish/$dll_base" >/dev/null 2>&1 || true
+			fi
+		fi
+		;;
+	node)
+		$BIN/v-change-web-domain-tpl "$user" "$pr_domain" "node-js" >/dev/null 2>&1 || true
+		if [ -f "$docroot/package.json" ] && command -v npm &>/dev/null; then
+			echo "[*] Installing Node dependencies..."
+			su - "$user" -s /bin/bash -c "cd '$docroot' && npm install --production" 2>/dev/null || true
+		fi
+		entry_file="app.js"
+		[ -f "$docroot/server.js" ] && entry_file="server.js"
+		[ -f "$docroot/index.js" ] && entry_file="index.js"
+		$BIN/v-add-web-domain-app "$user" "$pr_domain" node "node $entry_file" >/dev/null 2>&1 || true
+		;;
+	react)
+		$BIN/v-change-web-domain-tpl "$user" "$pr_domain" "default" >/dev/null 2>&1 || true
+		if [ -f "$docroot/package.json" ] && command -v npm &>/dev/null; then
+			echo "[*] Building React / SPA static bundle..."
+			su - "$user" -s /bin/bash -c "cd '$docroot' && npm run build" 2>/dev/null || true
+			[ -d "$docroot/dist" ] && cp -rf "$docroot/dist"/* "$docroot"/ 2>/dev/null || true
+		fi
+		;;
+	laravel)
+		$BIN/v-change-web-domain-tpl "$user" "$pr_domain" "default" >/dev/null 2>&1 || true
+		if command -v composer &>/dev/null; then
+			echo "[*] Running composer install..."
+			su - "$user" -s /bin/bash -c "cd '$docroot' && composer install --no-dev -o" 2>/dev/null || true
+		fi
+		su - "$user" -s /bin/bash -c "cd '$docroot' && php artisan key:generate --force 2>/dev/null" || true
+		su - "$user" -s /bin/bash -c "cd '$docroot' && php artisan migrate --force 2>/dev/null" || true
+		;;
+	php)
+		$BIN/v-change-web-domain-tpl "$user" "$pr_domain" "default" >/dev/null 2>&1 || true
+		if [ -f "$docroot/composer.json" ] && command -v composer &>/dev/null; then
+			su - "$user" -s /bin/bash -c "cd '$docroot' && composer install --no-dev -o" 2>/dev/null || true
+		fi
+		;;
+esac
+
+# Record PR metadata in user configuration
+pr_meta_dir="$USER_DATA"
+mkdir -p "$pr_meta_dir"
+pr_meta_file="$pr_meta_dir/pr_environments.conf"
+
+# Remove existing record if any
+if [ -f "$pr_meta_file" ]; then
+	sed -i "/PR_DOMAIN='$pr_domain'/d" "$pr_meta_file"
+fi
+
+cat >> "$pr_meta_file" << EOF
+PR_NUMBER='$pr_number' BASE_DOMAIN='$base_domain' PR_DOMAIN='$pr_domain' REPO='$repo_input' BRANCH='${branch_input:-pr-$pr_number}' DB_NAME='$full_db_name' APP_TYPE='$detected_type' CREATED_AT='$(date +%s)' DATE='$(date +%Y-%m-%d)' TIME='$(date +%H:%M:%S)' STATUS='active'
+EOF
+chmod 600 "$pr_meta_file" 2>/dev/null || true
+
+# Hardening permissions
+chown -R "$user:$user" "$docroot"
+find "$docroot" -type d -exec chmod 755 {} + 2>/dev/null || true
+find "$docroot" -type f -exec chmod 644 {} + 2>/dev/null || true
+[ -f "$docroot/.env" ] && chmod 600 "$docroot/.env"
+[ -d "$docroot/.git" ] && chmod -R 700 "$docroot/.git"
+
+# Reload web server
+$BIN/v-restart-web 2>/dev/null || systemctl reload nginx 2>/dev/null || true
+
+echo "[+] SUCCESS: Staging preview environment deployed: https://$pr_domain (PR #$pr_number)"
+log_event "$OK" "GitHub PR #$pr_number deployed to $pr_domain ($detected_type, DB: $full_db_name)"
+
+exit 0

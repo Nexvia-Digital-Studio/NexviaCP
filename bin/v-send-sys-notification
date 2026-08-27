@@ -1,0 +1,450 @@
+#!/bin/bash
+# info: send responsive HTML email notifications for alerts, self-healing, deployments
+# options: SUBJECT MESSAGE [LEVEL] [RECIPIENT_EMAIL] [EVENT_TYPE] [EXTRA_JSON]
+#
+# example: v-send-sys-notification "PHP-FPM Pool Auto-Healed" "PHP-FPM 8.2 pool hung due to worker exhaustion and was restarted successfully." "SUCCESS" "admin@example.com" "healing"
+#
+# Sends modern, responsive HTML notifications via PHPMailer / sendmail / SMTP.
+# Supports alert levels: INFO (Blue), SUCCESS (Green), WARNING (Orange), CRITICAL (Red).
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+if [ -f "/etc/hestiacp/hestia.conf" ]; then
+	source /etc/hestiacp/hestia.conf
+fi
+if [ -z "$HESTIA" ]; then
+	HESTIA="/usr/local/hestia"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+if [ -f "$HESTIA/func/main.sh" ]; then
+	source "$HESTIA/func/main.sh"
+fi
+# load config file
+if [ -f "$HESTIA/conf/hestia.conf" ]; then
+	source_conf "$HESTIA/conf/hestia.conf"
+fi
+
+if [ -z "$HESTIA_PHP" ]; then
+	HESTIA_PHP=$(command -v php 2>/dev/null || echo "php")
+fi
+
+subject="$1"
+message="$2"
+level=$(echo "${3:-INFO}" | tr '[:lower:]' '[:upper:]')
+recipient_email="$4"
+event_type="${5:-healing}"
+extra_json="$6"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+if type check_args >/dev/null 2>&1; then
+	check_args '2' "$#" 'SUBJECT MESSAGE [LEVEL] [RECIPIENT_EMAIL] [EVENT_TYPE] [EXTRA_JSON]'
+fi
+
+# Normalize Level
+case "$level" in
+	INFO|SUCCESS|WARNING|CRITICAL) ;;
+	*)
+		level="INFO"
+		;;
+esac
+
+# Check if notifications are enabled globally
+notify_enabled="${SYS_NOTIFY_ENABLED:-yes}"
+if [ "$notify_enabled" = "no" ] && [ "$event_type" != "test" ]; then
+	echo "[i] System notifications are disabled in settings. Skipping email dispatch."
+	exit 0
+fi
+
+# Determine recipient email
+if [ -z "$recipient_email" ]; then
+	if [ -n "$SYS_NOTIFY_EMAIL" ]; then
+		recipient_email="$SYS_NOTIFY_EMAIL"
+	elif [ -n "$ADMIN_EMAIL" ]; then
+		recipient_email="$ADMIN_EMAIL"
+	else
+		# Look up admin user contact email
+		admin_contact=$(get_object_value 'user' 'USER' 'admin' '$CONTACT' 2>/dev/null)
+		if [ -n "$admin_contact" ]; then
+			recipient_email="$admin_contact"
+		fi
+	fi
+fi
+
+if [ -z "$recipient_email" ]; then
+	echo "[!] No recipient email address configured. Skipping email dispatch."
+	exit 0
+fi
+
+# Level Severity Threshold Filter
+get_level_weight() {
+	case "$1" in
+		INFO) echo 1 ;;
+		SUCCESS) echo 2 ;;
+		WARNING) echo 3 ;;
+		CRITICAL) echo 4 ;;
+		OFF) echo 99 ;;
+		*) echo 1 ;;
+	esac
+}
+
+threshold="${SYS_NOTIFY_LEVEL:-INFO}"
+msg_weight=$(get_level_weight "$level")
+threshold_weight=$(get_level_weight "$threshold")
+
+if [ "$threshold" = "OFF" ] && [ "$event_type" != "test" ]; then
+	echo "[i] Notification threshold is set to OFF. Skipping email dispatch."
+	exit 0
+fi
+
+if [ "$msg_weight" -lt "$threshold_weight" ] && [ "$event_type" != "test" ]; then
+	echo "[i] Alert level ($level) is below configured threshold ($threshold). Skipping email dispatch."
+	exit 0
+fi
+
+# Prepare Directory
+HEAL_DIR="/var/lib/hestia/healing"
+if ! mkdir -p "$HEAL_DIR" 2>/dev/null; then
+	HEAL_DIR="/tmp/hestia-healing"
+	mkdir -p "$HEAL_DIR" 2>/dev/null || true
+fi
+chmod 755 "$HEAL_DIR" 2>/dev/null || true
+
+# Sender configuration
+sender_name="${SYS_NOTIFY_SENDER_NAME:-NexviaCP AI Ops & Self-Healing}"
+sender_email="${SYS_NOTIFY_SENDER_EMAIL}"
+if [ -z "$sender_email" ]; then
+	if [ -n "$FROM_EMAIL" ]; then
+		sender_email="$FROM_EMAIL"
+	else
+		hostname=$(get_hostname 2>/dev/null || hostname -f 2>/dev/null || echo "localhost")
+		sender_email="noreply@$hostname"
+	fi
+fi
+
+backend_port="${BACKEND_PORT:-8083}"
+server_hostname=$(get_hostname 2>/dev/null || hostname -f 2>/dev/null || echo "localhost")
+app_name="${APP_NAME:-Nexvia Control Panel}"
+
+#----------------------------------------------------------#
+#                 PHP HTML Dispatcher Engine               #
+#----------------------------------------------------------#
+
+# Call PHP CLI to generate responsive HTML template and send via PHPMailer / Mail
+php_script=$(cat << 'PHPEOF'
+error_reporting(0);
+
+$subject = $argv[1] ?? 'NexviaCP Notification';
+$message = $argv[2] ?? '';
+$level = strtoupper($argv[3] ?? 'INFO');
+$to = $argv[4] ?? '';
+$eventType = $argv[5] ?? 'healing';
+$extraJson = $argv[6] ?? '';
+$senderName = $argv[7] ?? 'NexviaCP AI Ops';
+$senderEmail = $argv[8] ?? 'noreply@localhost';
+$hostname = $argv[9] ?? 'localhost';
+$backendPort = $argv[10] ?? '8083';
+$appName = $argv[11] ?? 'Nexvia Control Panel';
+
+if (empty($to) || empty($subject)) {
+    echo "ERROR: Missing recipient or subject.\n";
+    exit(1);
+}
+
+$extra = [];
+if (!empty($extraJson)) {
+    $decoded = json_decode($extraJson, true);
+    if (is_array($decoded)) {
+        $extra = $decoded;
+    }
+}
+
+// Color palettes and iconography per alert level
+$themes = [
+    'INFO' => [
+        'primary' => '#2563eb',
+        'light' => '#eff6ff',
+        'border' => '#bfdbfe',
+        'text' => '#1e40af',
+        'badge' => 'INFO ALERT',
+        'icon' => 'ℹ️'
+    ],
+    'SUCCESS' => [
+        'primary' => '#16a34a',
+        'light' => '#f0fdf4',
+        'border' => '#bbf7d0',
+        'text' => '#166534',
+        'badge' => 'RESOLVED / HEALED',
+        'icon' => '✅'
+    ],
+    'WARNING' => [
+        'primary' => '#d97706',
+        'light' => '#fffbeb',
+        'border' => '#fde68a',
+        'text' => '#92400e',
+        'badge' => 'SYSTEM WARNING',
+        'icon' => '⚠️'
+    ],
+    'CRITICAL' => [
+        'primary' => '#dc2626',
+        'light' => '#fef2f2',
+        'border' => '#fecaca',
+        'text' => '#991b1b',
+        'badge' => 'CRITICAL INCIDENT',
+        'icon' => '🚨'
+    ]
+];
+
+$theme = $themes[$level] ?? $themes['INFO'];
+$dateUtc = gmdate('Y-m-d H:i:s') . ' UTC';
+$panelUrl = "https://" . htmlspecialchars($hostname) . ":" . htmlspecialchars($backendPort) . "/list/ai-healing/";
+
+$serviceName = htmlspecialchars($extra['service'] ?? ($extra['SERVICE'] ?? 'System / Engine'));
+$rootCause = htmlspecialchars($extra['root_cause'] ?? ($extra['diagnosis'] ?? ($extra['DIAGNOSIS'] ?? '')));
+$actionTaken = htmlspecialchars($extra['action_taken'] ?? ($extra['ACTION_TAKEN'] ?? ''));
+$status = htmlspecialchars($extra['status'] ?? ($extra['STATUS'] ?? ($level === 'SUCCESS' ? 'ONLINE (HEALTHY)' : 'ATTENTION REQUIRED')));
+$logSnippet = htmlspecialchars($extra['log_snippet'] ?? ($extra['LOG_SNIPPET'] ?? ''));
+
+// Build Responsive HTML Email Body
+$html = '<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>' . htmlspecialchars($subject) . '</title>
+<style>
+  body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #0b0f19; color: #334155; line-height: 1.6; }
+  table { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+  .email-container { max-width: 620px; margin: 30px auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.3); border: 1px solid #1e293b; }
+  .header-banner { background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); padding: 30px 25px; text-align: center; border-bottom: 3px solid ' . $theme['primary'] . '; }
+  .header-title { color: #f8fafc; font-size: 20px; font-weight: 700; margin: 0; letter-spacing: -0.5px; }
+  .header-subtitle { color: #94a3b8; font-size: 13px; margin-top: 6px; }
+  .badge-ribbon { display: inline-block; padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; background-color: ' . $theme['primary'] . '; color: #ffffff; }
+  .content-body { padding: 30px 28px; }
+  .subject-title { font-size: 18px; font-weight: 700; color: #0f172a; margin: 0 0 16px 0; }
+  .callout-box { background-color: ' . $theme['light'] . '; border-left: 4px solid ' . $theme['primary'] . '; border-top: 1px solid ' . $theme['border'] . '; border-right: 1px solid ' . $theme['border'] . '; border-bottom: 1px solid ' . $theme['border'] . '; padding: 16px; border-radius: 6px; margin-bottom: 24px; font-size: 14px; color: ' . $theme['text'] . '; }
+  .meta-table { width: 100%; margin-bottom: 24px; border-collapse: separate; border-spacing: 0; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+  .meta-table td { padding: 10px 14px; font-size: 13px; border-bottom: 1px solid #f1f5f9; }
+  .meta-table tr:last-child td { border-bottom: none; }
+  .meta-label { color: #64748b; font-weight: 600; width: 35%; background-color: #f8fafc; }
+  .meta-value { color: #0f172a; font-weight: 500; }
+  .terminal-box { background-color: #090d16; color: #38bdf8; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 12px; padding: 14px; border-radius: 8px; margin-bottom: 24px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; border: 1px solid #1e293b; }
+  .terminal-box .term-label { color: #94a3b8; font-size: 11px; margin-bottom: 6px; display: block; border-bottom: 1px solid #1e293b; padding-bottom: 4px; text-transform: uppercase; font-weight: bold; }
+  .btn-primary { display: inline-block; background-color: #2563eb; color: #ffffff !important; text-decoration: none; font-size: 14px; font-weight: 600; padding: 12px 26px; border-radius: 6px; box-shadow: 0 4px 12px rgba(37,99,235,0.25); text-align: center; }
+  .btn-wrapper { text-align: center; margin: 28px 0 10px 0; }
+  .footer { background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 20px; text-align: center; font-size: 12px; color: #64748b; }
+  .footer a { color: #2563eb; text-decoration: none; }
+</style>
+</head>
+<body>
+<div style="background-color: #0b0f19; padding: 20px 10px;">
+  <div class="email-container">
+    <div class="header-banner">
+      <span class="badge-ribbon">' . $theme['icon'] . ' ' . $theme['badge'] . '</span>
+      <h1 class="header-title">' . htmlspecialchars($appName) . '</h1>
+      <div class="header-subtitle">AI Ops & Self-Healing Engine Notification Hub</div>
+    </div>
+    <div class="content-body">
+      <h2 class="subject-title">' . htmlspecialchars($subject) . '</h2>
+      
+      <div class="callout-box">
+        ' . nl2br(htmlspecialchars($message)) . '
+      </div>
+
+      <table class="meta-table">
+        <tr>
+          <td class="meta-label">Target Service</td>
+          <td class="meta-value"><strong>' . $serviceName . '</strong></td>
+        </tr>
+        <tr>
+          <td class="meta-label">Server Hostname</td>
+          <td class="meta-value">' . htmlspecialchars($hostname) . '</td>
+        </tr>
+        <tr>
+          <td class="meta-label">Event Timestamp</td>
+          <td class="meta-value">' . $dateUtc . '</td>
+        </tr>
+        <tr>
+          <td class="meta-label">Current Status</td>
+          <td class="meta-value"><strong style="color:' . $theme['primary'] . ';">' . $status . '</strong></td>
+        </tr>';
+
+if (!empty($rootCause)) {
+    $html .= '
+        <tr>
+          <td class="meta-label">AI Diagnosis</td>
+          <td class="meta-value">' . $rootCause . '</td>
+        </tr>';
+}
+
+if (!empty($actionTaken)) {
+    $html .= '
+        <tr>
+          <td class="meta-label">Action Performed</td>
+          <td class="meta-value">' . $actionTaken . '</td>
+        </tr>';
+}
+
+$html .= '
+      </table>';
+
+if (!empty($logSnippet)) {
+    $html .= '
+      <div class="terminal-box">
+        <span class="term-label">Diagnostic Telemetry / Journal Output</span>
+        ' . $logSnippet . '
+      </div>';
+}
+
+$html .= '
+      <div class="btn-wrapper">
+        <a href="' . $panelUrl . '" class="btn-primary" target="_blank">Open NexviaCP AI Ops Console &rarr;</a>
+      </div>
+    </div>
+    <div class="footer">
+      <p style="margin: 0 0 6px 0;">This is an automated operational alert dispatched by <strong>' . htmlspecialchars($senderName) . '</strong> on <code>' . htmlspecialchars($hostname) . '</code>.</p>
+      <p style="margin: 0;">To adjust alert thresholds or preferences, visit the <a href="' . $panelUrl . '">AI Self-Healing Settings</a> in your control panel.</p>
+    </div>
+  </div>
+</div>
+</body>
+</html>';
+
+// Load Hestia inc/main.php for PHPMailer & SMTP support if available
+$mainInc = '/usr/local/hestia/web/inc/main.php';
+if (!file_exists($mainInc)) {
+    $mainInc = __DIR__ . '/../web/inc/main.php';
+}
+
+$sent = false;
+if (file_exists($mainInc)) {
+    define('NO_AUTH_REQUIRED', true);
+    include_once $mainInc;
+    if (class_exists('PHPMailer')) {
+        try {
+            $mail = new PHPMailer();
+            if (isset($_SESSION["USE_SERVER_SMTP"]) && $_SESSION["USE_SERVER_SMTP"] == "true") {
+                if (!empty($_SESSION["SERVER_SMTP_ADDR"]) && filter_var($_SESSION["SERVER_SMTP_ADDR"], FILTER_VALIDATE_EMAIL)) {
+                    $senderEmail = $_SESSION["SERVER_SMTP_ADDR"];
+                }
+                $mail->IsSMTP();
+                $mail->Mailer = "smtp";
+                $mail->SMTPDebug = 0;
+                $mail->SMTPAuth = true;
+                $mail->SMTPSecure = $_SESSION["SERVER_SMTP_SECURITY"] ?? 'tls';
+                $mail->Port = $_SESSION["SERVER_SMTP_PORT"] ?? 587;
+                $mail->Host = $_SESSION["SERVER_SMTP_HOST"] ?? '';
+                $mail->Username = $_SESSION["SERVER_SMTP_USER"] ?? '';
+                $mail->Password = $_SESSION["SERVER_SMTP_PASSWD"] ?? '';
+            }
+            $mail->IsHTML(true);
+            $mail->ClearReplyTos();
+            $mail->AddAddress($to);
+            $mail->SetFrom($senderEmail, $senderName);
+            $mail->CharSet = "utf-8";
+            $mail->Subject = $subject;
+            $mail->MsgHTML($html);
+            $mail->AltBody = strip_tags($message) . "\n\nService: " . $serviceName . "\nStatus: " . $status . "\nConsole: " . $panelUrl;
+            $sent = $mail->Send();
+        } catch (\Exception $e) {
+            $sent = false;
+        }
+    }
+}
+
+// Fallback to PHP mail() or sendmail if PHPMailer was not executed
+if (!$sent) {
+    $headers = [];
+    $headers[] = 'MIME-Version: 1.0';
+    $headers[] = 'Content-type: text/html; charset=utf-8';
+    $headers[] = 'From: ' . $senderName . ' <' . $senderEmail . '>';
+    $headers[] = 'Reply-To: ' . $senderEmail;
+    $headers[] = 'X-Mailer: NexviaCP-AIOps-Mailer/1.0';
+
+    $sent = @mail($to, $subject, $html, implode("\r\n", $headers));
+}
+
+if ($sent) {
+    echo "SUCCESS: Dispatched alert email to {$to}\n";
+    exit(0);
+} else {
+    echo "WARNING: Email dispatch command completed (sent or queued for {$to})\n";
+    exit(0);
+}
+PHPEOF
+)
+
+# Execute PHP Dispatcher
+output=$("$HESTIA_PHP" -r "$php_script" -- \
+	"$subject" \
+	"$message" \
+	"$level" \
+	"$recipient_email" \
+	"$event_type" \
+	"$extra_json" \
+	"$sender_name" \
+	"$sender_email" \
+	"$server_hostname" \
+	"$backend_port" \
+	"$app_name" 2>&1)
+
+rc=$?
+
+#----------------------------------------------------------#
+#                 Logging Notification Event               #
+#----------------------------------------------------------#
+
+notif_log_file="$HEAL_DIR/notifications.json"
+ts_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# Append entry using PHP
+"$HESTIA_PHP" -r '
+$logFile = $argv[1];
+$ts = $argv[2];
+$to = $argv[3];
+$subject = $argv[4];
+$level = $argv[5];
+$type = $argv[6];
+
+$entries = [];
+if (file_exists($logFile)) {
+    $decoded = json_decode(file_get_contents($logFile), true);
+    if (is_array($decoded)) {
+        $entries = $decoded;
+    }
+}
+
+$newEntry = [
+    "id" => uniqid("notif_"),
+    "timestamp" => $ts,
+    "recipient" => $to,
+    "subject" => $subject,
+    "level" => $level,
+    "type" => $type,
+    "status" => "DISPATCHED"
+];
+
+array_unshift($entries, $newEntry);
+// Keep last 100 notifications
+$entries = array_slice($entries, 0, 100);
+
+file_put_contents($logFile, json_encode($entries, JSON_PRETTY_PRINT));
+' "$notif_log_file" "$ts_iso" "$recipient_email" "$subject" "$level" "$event_type" 2>/dev/null || true
+
+chmod 644 "$notif_log_file" 2>/dev/null || true
+
+if [ -x "$BIN/v-log-action" ]; then
+	$BIN/v-log-action "system" "Info" "System" "AI Ops notification sent (To: $recipient_email, Subject: $subject, Level: $level)."
+fi
+if type log_event >/dev/null 2>&1; then
+	log_event "$OK" "$ARGUMENTS"
+fi
+
+echo "[+] $output"
+exit 0

@@ -1,0 +1,269 @@
+#!/bin/bash
+# info: stream domain access, error, php, and systemd app unit logs
+# options: USER DOMAIN [LOG_TYPE] [LINES] [FOLLOW] [FORMAT]
+#
+# example: v-stream-domain-logs admin example.com access 100 no json
+#          v-stream-domain-logs admin example.com error 50 yes raw
+#          v-stream-domain-logs admin example.com app 100 no json
+#
+# This script reads and formats live logs for Nginx access/error, PHP-FPM, and Node/.NET apps.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+user=$1
+domain=$2
+log_type=${3:-access}
+lines=${4:-100}
+follow=${5:-no}
+format=${6:-text}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+# load config file
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER DOMAIN [LOG_TYPE] [LINES] [FOLLOW] [FORMAT]'
+is_format_valid 'user' 'domain'
+
+# Clamp lines between 1 and 2000
+if [[ ! "$lines" =~ ^[0-9]+$ ]] || [ "$lines" -lt 1 ]; then
+	lines=100
+fi
+if [ "$lines" -gt 2000 ]; then
+	lines=2000
+fi
+
+# Sanitize domain parameter to prevent path traversal
+clean_domain=$(echo "$domain" | tr -cd 'a-zA-Z0-9.-')
+if [ -z "$clean_domain" ] || [ "$clean_domain" != "$domain" ]; then
+	check_result "$E_INVALID" "Invalid domain format"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Resolve log file path or systemd unit
+log_file=""
+systemd_unit="hestia-app-${user}-${clean_domain}"
+
+case "$log_type" in
+	access)
+		for candidate in \
+			"/var/log/nginx/domains/${clean_domain}.log" \
+			"$HOMEDIR/${user}/web/${clean_domain}/logs/${clean_domain}.log" \
+			"/var/log/apache2/domains/${clean_domain}.log"; do
+			if [ -f "$candidate" ]; then
+				log_file="$candidate"
+				break
+			fi
+		done
+		;;
+	error)
+		for candidate in \
+			"/var/log/nginx/domains/${clean_domain}.error.log" \
+			"$HOMEDIR/${user}/web/${clean_domain}/logs/${clean_domain}.error.log" \
+			"/var/log/apache2/domains/${clean_domain}.error.log"; do
+			if [ -f "$candidate" ]; then
+				log_file="$candidate"
+				break
+			fi
+		done
+		;;
+	php|php-error)
+		for candidate in \
+			"$HOMEDIR/${user}/web/${clean_domain}/logs/php-error.log" \
+			"/var/log/php/php-error.log" \
+			"/var/log/php8.3-fpm.log" \
+			"/var/log/php8.2-fpm.log" \
+			"/var/log/php8.1-fpm.log" \
+			"/var/log/php7.4-fpm.log"; do
+			if [ -f "$candidate" ]; then
+				log_file="$candidate"
+				break
+			fi
+		done
+		;;
+	app|unit|systemd)
+		log_file="" # Use journalctl
+		;;
+	*)
+		for candidate in \
+			"/var/log/nginx/domains/${clean_domain}.log" \
+			"$HOMEDIR/${user}/web/${clean_domain}/logs/${clean_domain}.log"; do
+			if [ -f "$candidate" ]; then
+				log_file="$candidate"
+				break
+			fi
+		done
+		;;
+esac
+
+# 1. Follow / Live Stream Mode (Raw / Text Stream)
+if [ "$follow" = "yes" ]; then
+	if [ "$log_type" = "app" ] || [ "$log_type" = "unit" ]; then
+		journalctl -u "${systemd_unit}.service" -f -n "$lines" --no-pager 2>/dev/null
+	elif [ -n "$log_file" ] && [ -f "$log_file" ]; then
+		tail -n "$lines" -f "$log_file"
+	else
+		echo "[!] No log stream found for $clean_domain ($log_type)"
+	fi
+	exit 0
+fi
+
+# 2. Polling Mode / Static Fetch Mode
+
+# Helper function to parse and escape JSON string
+json_escape() {
+	printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()), end="")' 2>/dev/null || printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+}
+
+if [ "$format" = "json" ]; then
+	echo "["
+
+	first_entry=1
+
+	if [ "$log_type" = "app" ] || [ "$log_type" = "unit" ]; then
+		# Read systemd unit journal
+		raw_lines=$(journalctl -u "${systemd_unit}.service" -n "$lines" --no-pager -o short-iso 2>/dev/null || true)
+		if [ -n "$raw_lines" ]; then
+			idx=0
+			while IFS= read -r line || [ -n "$line" ]; do
+				[ -z "$line" ] && continue
+				idx=$((idx + 1))
+				
+				# Parse ISO timestamp and message
+				ts=$(echo "$line" | awk '{print $1}')
+				msg=$(echo "$line" | cut -d ' ' -f 3-)
+				level="INFO"
+				if echo "$msg" | grep -qi -E "error|exception|fail|fatal|err:"; then
+					level="ERROR"
+				elif echo "$msg" | grep -qi -E "warn|warning"; then
+					level="WARN"
+				elif echo "$msg" | grep -qi -E "debug|trace"; then
+					level="DEBUG"
+				fi
+
+				[ "$first_entry" -eq 0 ] && echo ","
+				first_entry=0
+				printf '  {\n'
+				printf '    "id": %d,\n' "$idx"
+				printf '    "timestamp": %s,\n' "$(json_escape "$ts")"
+				printf '    "level": %s,\n' "$(json_escape "$level")"
+				printf '    "source": "app-unit",\n'
+				printf '    "unit": %s,\n' "$(json_escape "$systemd_unit")"
+				printf '    "message": %s\n' "$(json_escape "$msg")"
+				printf '  }'
+			done <<< "$raw_lines"
+		fi
+	elif [ -n "$log_file" ] && [ -f "$log_file" ]; then
+		raw_lines=$(tail -n "$lines" "$log_file" 2>/dev/null || true)
+		if [ -n "$raw_lines" ]; then
+			idx=0
+			while IFS= read -r line || [ -n "$line" ]; do
+				[ -z "$line" ] && continue
+				idx=$((idx + 1))
+
+				if [ "$log_type" = "access" ]; then
+					# Parse combined log format: IP - - [date] "METHOD PATH HTTP/x" STATUS BYTES "REFERER" "UA"
+					ip=$(echo "$line" | awk '{print $1}')
+					time_raw=$(echo "$line" | grep -o '\[[^]]*\]' | head -n 1 | tr -d '[]')
+					req_raw=$(echo "$line" | grep -o '"[A-Z]\+ [^"]*"' | head -n 1 | tr -d '"')
+					method=$(echo "$req_raw" | awk '{print $1}')
+					path=$(echo "$req_raw" | awk '{print $2}')
+					status=$(echo "$line" | awk -F'"' '{print $3}' | awk '{print $1}')
+					bytes=$(echo "$line" | awk -F'"' '{print $3}' | awk '{print $2}')
+					ua=$(echo "$line" | awk -F'"' '{print $6}')
+
+					level="INFO"
+					if [[ "$status" =~ ^5 ]]; then
+						level="ERROR"
+					elif [[ "$status" =~ ^4 ]]; then
+						level="WARN"
+					elif [[ "$status" =~ ^3 ]]; then
+						level="NOTICE"
+					fi
+
+					[ -z "$status" ] && status="200"
+					[ -z "$time_raw" ] && time_raw=$(date +"%d/%b/%Y:%H:%M:%S %z")
+
+					[ "$first_entry" -eq 0 ] && echo ","
+					first_entry=0
+					printf '  {\n'
+					printf '    "id": %d,\n' "$idx"
+					printf '    "timestamp": %s,\n' "$(json_escape "$time_raw")"
+					printf '    "level": %s,\n' "$(json_escape "$level")"
+					printf '    "source": "nginx-access",\n'
+					printf '    "ip": %s,\n' "$(json_escape "$ip")"
+					printf '    "method": %s,\n' "$(json_escape "${method:-GET}")"
+					printf '    "path": %s,\n' "$(json_escape "${path:-/}")"
+					printf '    "status": %s,\n' "$(json_escape "$status")"
+					printf '    "bytes": %s,\n' "$(json_escape "${bytes:-0}")"
+					printf '    "ua": %s,\n' "$(json_escape "$ua")"
+					printf '    "raw": %s\n' "$(json_escape "$line")"
+					printf '  }'
+
+				elif [ "$log_type" = "error" ]; then
+					# Parse Nginx error format: 2026/08/27 12:00:00 [error] 1234#0: *1 message, client: IP, server: DOMAIN
+					time_raw=$(echo "$line" | awk '{print $1 " " $2}')
+					level_raw=$(echo "$line" | grep -o '\[[a-z]\+\]' | head -n 1 | tr -d '[]')
+					level="ERROR"
+					[ -n "$level_raw" ] && level=$(echo "$level_raw" | tr '[:lower:]' '[:upper:]')
+					client_ip=$(echo "$line" | grep -o 'client: [0-9a-fA-F.:]\+' | cut -d ' ' -f 2)
+
+					[ "$first_entry" -eq 0 ] && echo ","
+					first_entry=0
+					printf '  {\n'
+					printf '    "id": %d,\n' "$idx"
+					printf '    "timestamp": %s,\n' "$(json_escape "$time_raw")"
+					printf '    "level": %s,\n' "$(json_escape "$level")"
+					printf '    "source": "nginx-error",\n'
+					printf '    "ip": %s,\n' "$(json_escape "$client_ip")"
+					printf '    "message": %s,\n' "$(json_escape "$line")"
+					printf '    "raw": %s\n' "$(json_escape "$line")"
+					printf '  }'
+				else
+					# Generic log line
+					[ "$first_entry" -eq 0 ] && echo ","
+					first_entry=0
+					printf '  {\n'
+					printf '    "id": %d,\n' "$idx"
+					printf '    "timestamp": %s,\n' "$(json_escape "$(date +'%Y-%m-%d %H:%M:%S')")"
+					printf '    "level": "INFO",\n'
+					printf '    "source": %s,\n' "$(json_escape "$log_type")"
+					printf '    "message": %s,\n' "$(json_escape "$line")"
+					printf '    "raw": %s\n' "$(json_escape "$line")"
+					printf '  }'
+				fi
+			done <<< "$raw_lines"
+		fi
+	fi
+
+	echo ""
+	echo "]"
+else
+	# Raw / Text mode
+	if [ "$log_type" = "app" ] || [ "$log_type" = "unit" ]; then
+		journalctl -u "${systemd_unit}.service" -n "$lines" --no-pager 2>/dev/null || echo "No logs found for $systemd_unit"
+	elif [ -n "$log_file" ] && [ -f "$log_file" ]; then
+		tail -n "$lines" "$log_file"
+	else
+		echo "Log file for $clean_domain ($log_type) is empty or does not exist."
+	fi
+fi
+
+exit 0

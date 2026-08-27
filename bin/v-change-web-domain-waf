@@ -1,0 +1,19 @@
+#!/bin/bash
+# info: change web domain WAF mode
+# options: USER DOMAIN MODE [RESTART]
+#
+# example: v-change-web-domain-waf admin example.com aggressive yes
+#
+# This script changes domain WAF mode (off/detect/block/aggressive).
+
+user=$1
+domain=$2
+mode=$3
+restart=${4:-no}
+
+# Includes
+source /etc/hestiacp/hestia.conf
+source $HESTIA/func/main.sh
+
+$BIN/v-add-web-domain-waf "$user" "$domain" "$mode" "$restart"
+exit $?

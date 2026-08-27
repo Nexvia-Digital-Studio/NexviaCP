@@ -1,0 +1,216 @@
+#!/bin/bash
+# info: configure domain GeoIP and IP access rules (whitelist/blacklist)
+# options: USER DOMAIN [ACTION] [COUNTRIES] [IPS] [RESTART]
+#
+# example: v-set-web-domain-geoip admin example.com deny "RU,CN,KP,IR" "1.2.3.4,5.6.7.0/24" yes
+#
+# This script sets country and IP based access controls for Nginx domain vhosts.
+# Supported actions:
+#   deny   - Blacklist mode: blocks specified countries & IPs
+#   allow  - Whitelist mode: permits only specified countries & IPs (blocks others)
+#   off    - Disables GeoIP & IP blocking rules
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+user=$1
+domain=$2
+action=${3:-deny}
+countries=${4:-""}
+ips=${5:-""}
+restart=${6:-no}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER DOMAIN [ACTION] [COUNTRIES] [IPS] [RESTART]'
+is_format_valid 'user' 'domain' 'restart'
+is_object_valid 'user' 'USER' "$user"
+is_object_unsuspended 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
+is_object_unsuspended 'web' 'DOMAIN' "$domain"
+
+# Normalize action
+action=$(echo "$action" | tr '[:upper:]' '[:lower:]')
+
+if ! [[ "$action" =~ ^(deny|allow|off|none|disable)$ ]]; then
+	echo "Error: Invalid action '$action'. Valid actions are: deny, allow, off."
+	exit "$E_INVALID"
+fi
+
+if [ "$action" = "none" ] || [ "$action" = "disable" ]; then
+	action="off"
+fi
+
+# Clean countries string (remove spaces, uppercase)
+countries=$(echo "$countries" | tr -d ' ' | tr '[:lower:]' '[:upper:]')
+if [ "$countries" = "NONE" ] || [ "$countries" = "OFF" ]; then
+	countries=""
+fi
+
+# Clean IPs string (remove spaces)
+ips=$(echo "$ips" | tr -d ' ')
+if [ "$ips" = "none" ] || [ "$ips" = "NONE" ] || [ "$ips" = "off" ]; then
+	ips=""
+fi
+
+# If mode is allow/deny but both countries and IPs are empty, default to off
+if [ "$action" != "off" ] && [ -z "$countries" ] && [ -z "$ips" ]; then
+	action="off"
+fi
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Load domain data
+parse_object_kv_list $(grep "DOMAIN='$domain'" $USER_DATA/web.conf)
+
+domain_conf_dir="$HOMEDIR/$user/conf/web/$domain"
+mkdir -p "$domain_conf_dir"
+
+geoip_conf="$domain_conf_dir/nginx.conf_geoip"
+sgeoip_conf="$domain_conf_dir/nginx.ssl.conf_geoip"
+
+cur_date=$(date +'%Y-%m-%d %H:%M:%S')
+
+if [ "$action" = "off" ]; then
+	rm -f "$geoip_conf" "$sgeoip_conf"
+else
+	# Format countries regex pattern: e.g. RU|CN|KP
+	country_regex=$(echo "$countries" | sed 's/,/|/g')
+
+	cat << EOF > "$geoip_conf"
+#=========================================================================#
+# NexviaCP Enterprise Threat Shield - GeoIP & IP Access Control           #
+# Domain: $domain | Mode: $(echo "$action" | tr '[:lower:]' '[:upper:]')
+# Countries: ${countries:-"None"} | IPs: ${ips:-"None"}
+# Generated: $cur_date                                                    #
+#=========================================================================#
+EOF
+
+	if [ "$action" = "deny" ]; then
+		# 1. IP Deny Directives
+		if [ -n "$ips" ]; then
+			echo "" >> "$geoip_conf"
+			echo "# IP Blacklist" >> "$geoip_conf"
+			IFS=',' read -ra IP_ARRAY <<< "$ips"
+			for ip_addr in "${IP_ARRAY[@]}"; do
+				[[ -z "$ip_addr" ]] && continue
+				echo "deny $ip_addr;" >> "$geoip_conf"
+			done
+		fi
+
+		# 2. Country Blacklist
+		if [ -n "$country_regex" ]; then
+			cat << EOF >> "$geoip_conf"
+
+# Country Blacklist (Cloudflare, MaxMind GeoIP / GeoIP2)
+if (\$http_cf_ipcountry ~* "^($country_regex)$") {
+    return 403;
+}
+if (\$geoip_country_code ~* "^($country_regex)$") {
+    return 403;
+}
+if (\$geoip2_data_country_code ~* "^($country_regex)$") {
+    return 403;
+}
+EOF
+		fi
+
+	elif [ "$action" = "allow" ]; then
+		cat << EOF >> "$geoip_conf"
+
+set \$geoip_allowed "0";
+
+EOF
+		# Country Whitelist
+		if [ -n "$country_regex" ]; then
+			cat << EOF >> "$geoip_conf"
+# Country Whitelist (Cloudflare, MaxMind GeoIP / GeoIP2)
+if (\$http_cf_ipcountry ~* "^($country_regex)$") {
+    set \$geoip_allowed "1";
+}
+if (\$geoip_country_code ~* "^($country_regex)$") {
+    set \$geoip_allowed "1";
+}
+if (\$geoip2_data_country_code ~* "^($country_regex)$") {
+    set \$geoip_allowed "1";
+}
+EOF
+		fi
+
+		# Always permit loopback and RFC 1918 private subnets
+		cat << EOF >> "$geoip_conf"
+
+# Local & Internal Subnets Always Permitted
+if (\$remote_addr ~* "^(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|::1)") {
+    set \$geoip_allowed "1";
+}
+EOF
+
+		# Explicit Whitelisted IPs
+		if [ -n "$ips" ]; then
+			ip_regex=$(echo "$ips" | sed 's/\./\\./g' | sed 's/,/|/g')
+			cat << EOF >> "$geoip_conf"
+
+# Explicit IP Whitelist
+if (\$remote_addr ~* "^($ip_regex)$") {
+    set \$geoip_allowed "1";
+}
+EOF
+		fi
+
+		cat << EOF >> "$geoip_conf"
+
+if (\$geoip_allowed = "0") {
+    return 403;
+}
+EOF
+	fi
+
+	# Replicate configuration for SSL vhost
+	cp -f "$geoip_conf" "$sgeoip_conf"
+
+	# Set strict ownership and permissions
+	chown root:$user "$geoip_conf" "$sgeoip_conf"
+	chmod 640 "$geoip_conf" "$sgeoip_conf"
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+# Ensure keys exist in web.conf
+add_object_key 'web' 'DOMAIN' "$domain" 'GEOIP_MODE' 'TIME'
+add_object_key 'web' 'DOMAIN' "$domain" 'GEOIP_COUNTRIES' 'TIME'
+add_object_key 'web' 'DOMAIN' "$domain" 'GEOIP_IPS' 'TIME'
+
+# Update values
+update_object_value 'web' 'DOMAIN' "$domain" '$GEOIP_MODE' "$action"
+update_object_value 'web' 'DOMAIN' "$domain" '$GEOIP_COUNTRIES' "$countries"
+update_object_value 'web' 'DOMAIN' "$domain" '$GEOIP_IPS' "$ips"
+
+# Restart web server if requested
+$BIN/v-restart-web "$restart"
+check_result $? "Web server restart failed" > /dev/null
+
+# Logging
+$BIN/v-log-action "$user" "Info" "Web" "GeoIP access rules updated for $domain (Mode: $action, Countries: ${countries:-'None'})."
+log_event "$OK" "$ARGUMENTS"
+
+exit 0

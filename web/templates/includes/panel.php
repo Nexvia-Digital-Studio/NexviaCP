@@ -208,6 +208,14 @@
 									<span class="top-bar-menu-link-label u-hide-desktop"><?= _("Docker Manager") ?></span>
 								</a>
 							</li>
+
+							<!-- AI Ops & Self-Healing Hub — admin only -->
+							<li class="top-bar-menu-item">
+								<a title="<?= _("AI Ops & Self-Healing Hub") ?>" class="top-bar-menu-link <?php if ($TAB == "AI_HEALING") { echo "active"; } ?>" href="/list/ai-healing/">
+									<i class="fas fa-heart-pulse icon-green"></i>
+									<span class="top-bar-menu-link-label u-hide-desktop"><?= _("AI Self-Healing") ?></span>
+								</a>
+							</li>
 							<?php } ?>
 
 							<!-- Server Settings -->
@@ -235,6 +243,12 @@
 } ?>" href="/list/log/">
 										<i class="fas fa-clock-rotate-left"></i>
 										<span class="top-bar-menu-link-label u-hide-desktop"><?= _("Logs") ?></span>
+									</a>
+								</li>
+								<li class="top-bar-menu-item">
+									<a title="<?= function_exists('__tr') ? __tr("Live Stream Logs", "Canlı Günlük Akışı") : _("Live Logs") ?>" class="top-bar-menu-link" href="/list/logs/">
+										<i class="fas fa-terminal icon-green"></i>
+										<span class="top-bar-menu-link-label u-hide-desktop"><?= _("Live Logs") ?></span>
 									</a>
 								</li>
 							<?php } else { ?>
@@ -502,6 +516,51 @@
 								</li>
 								<li>
 									<?= $is_panel_tr ? "akıllı" : _("Auto-Tune") ?>: <?= $is_panel_tr ? "aktif" : _("Active") ?>
+								</li>
+							</ul>
+						</a>
+					</li>
+
+					<!-- Cache & Performance Optimizer Tab (Admin Only) -->
+					<li class="main-menu-item">
+						<a class="main-menu-item-link <?php if ($TAB == "CACHE" || $TAB == "PERFORMANCE") { echo "active"; } ?>" href="/list/cache/" title="<?= $is_panel_tr ? "Performans, Redis & Veritabanı Optimize Edici" : _("Performance, Cache & Database Optimizer") ?>">
+							<p class="main-menu-item-label"><?= $is_panel_tr ? "ÖNBELLEK" : _("CACHE") ?><i class="fas fa-gauge-high"></i></p>
+							<ul class="main-menu-stats">
+								<li>
+									<?= $is_panel_tr ? "redis" : _("Redis") ?>: <?= $is_panel_tr ? "izole" : _("Isolated") ?>
+								</li>
+								<li>
+									<?= $is_panel_tr ? "ai sql" : _("AI SQL") ?>: <span class="u-text-bold">⚡</span>
+								</li>
+							</ul>
+						</a>
+					</li>
+
+					<!-- AI Ops & Self-Healing Hub Tab (Admin Only) -->
+					<li class="main-menu-item">
+						<a class="main-menu-item-link <?php if ($TAB == "AI_HEALING" || $TAB == "HEALING") { echo "active"; } ?>" href="/list/ai-healing/" title="<?= $is_panel_tr ? "AI Ops, Oto-Onarım & E-Posta Bildirim Merkezi" : _("AI Ops, Self-Healing Engine & HTML Notification Hub") ?>">
+							<p class="main-menu-item-label"><?= $is_panel_tr ? "AI OTO-ONARIM" : _("AI HEALING") ?><i class="fas fa-heart-pulse"></i></p>
+							<ul class="main-menu-stats">
+								<li>
+									<?= $is_panel_tr ? "durum" : _("Status") ?>: <?= $is_panel_tr ? "aktif" : _("Active") ?>
+								</li>
+								<li>
+									<?= $is_panel_tr ? "bildirim" : _("Alerts") ?>: <?= $is_panel_tr ? "HTML" : _("HTML") ?>
+								</li>
+							</ul>
+						</a>
+					</li>
+
+					<!-- Threat Shield & WAF Security Tab (Admin Only) -->
+					<li class="main-menu-item">
+						<a class="main-menu-item-link <?php if ($TAB == "WAF" || $TAB == "SECURITY" || $TAB == "THREATS") { echo "active"; } ?>" href="/list/waf/" title="<?= $is_panel_tr ? "Kurumsal Tehdit Kalkanı, WAF & Zararlı Kod Tarayıcı" : _("Enterprise Threat Shield, WAF & Malware Scanner") ?>">
+							<p class="main-menu-item-label"><?= $is_panel_tr ? "GÜVENLİK" : _("SHIELD") ?><i class="fas fa-shield-halved"></i></p>
+							<ul class="main-menu-stats">
+								<li>
+									<?= $is_panel_tr ? "waf" : _("WAF") ?>: <?= $is_panel_tr ? "Aktif" : _("Active") ?>
+								</li>
+								<li>
+									<?= $is_panel_tr ? "tarayıcı" : _("Scanner") ?>: <?= $is_panel_tr ? "Hazır" : _("Ready") ?>
 								</li>
 							</ul>
 						</a>

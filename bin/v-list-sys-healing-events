@@ -1,0 +1,215 @@
+#!/bin/bash
+# info: return timeline of past self-healing events, uptime stats, and recent alert logs
+# options: [FORMAT]
+#
+# example: v-list-sys-healing-events
+# example: v-list-sys-healing-events json
+#
+# Returns timeline of past self-healing events, AI diagnosis reports, live service states,
+# and recent email alert logs as JSON or plain text.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+if [ -f "/etc/hestiacp/hestia.conf" ]; then
+	source /etc/hestiacp/hestia.conf
+fi
+if [ -z "$HESTIA" ]; then
+	HESTIA="/usr/local/hestia"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+if [ -f "$HESTIA/func/main.sh" ]; then
+	source "$HESTIA/func/main.sh"
+fi
+# load config file
+if [ -f "$HESTIA/conf/hestia.conf" ]; then
+	source_conf "$HESTIA/conf/hestia.conf"
+fi
+
+if [ -z "$HESTIA_PHP" ]; then
+	HESTIA_PHP=$(command -v php 2>/dev/null || echo "php")
+fi
+
+format="${1:-json}"
+
+# Healing directories
+HEAL_DIR="/var/lib/hestia/healing"
+if ! mkdir -p "$HEAL_DIR" 2>/dev/null; then
+	HEAL_DIR="/tmp/hestia-healing"
+	mkdir -p "$HEAL_DIR" 2>/dev/null || true
+fi
+
+events_file="$HEAL_DIR/events.json"
+summary_file="$HEAL_DIR/summary.json"
+notif_file="$HEAL_DIR/notifications.json"
+
+[ ! -f "$events_file" ] && echo "[]" > "$events_file" 2>/dev/null || true
+[ ! -f "$notif_file" ] && echo "[]" > "$notif_file" 2>/dev/null || true
+
+# Generate live status for monitored services
+"$HESTIA_PHP" -r '
+$format = $argv[1] ?? "json";
+$healDir = $argv[2] ?? "/var/lib/hestia/healing";
+$eventsFile = "$healDir/events.json";
+$summaryFile = "$healDir/summary.json";
+$notifFile = "$healDir/notifications.json";
+
+// Read configs from env / hestia.conf
+$confFile = "/usr/local/hestia/conf/hestia.conf";
+$conf = [];
+if (file_exists($confFile)) {
+    $lines = file($confFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    foreach ($lines as $line) {
+        if (strpos($line, "=") !== false && substr(trim($line), 0, 1) !== "#") {
+            list($k, $v) = explode("=", $line, 2);
+            $conf[trim($k)] = trim(trim($v), "\x22\x27");
+        }
+    }
+}
+
+// Fallback configs
+$notifyEmail = $conf["SYS_NOTIFY_EMAIL"] ?? ($conf["ADMIN_EMAIL"] ?? "");
+$notifyLevel = $conf["SYS_NOTIFY_LEVEL"] ?? "INFO";
+$notifySenderName = $conf["SYS_NOTIFY_SENDER_NAME"] ?? "NexviaCP AI Ops";
+$notifySenderEmail = $conf["SYS_NOTIFY_SENDER_EMAIL"] ?? ($conf["FROM_EMAIL"] ?? "");
+$notifyEnabled = $conf["SYS_NOTIFY_ENABLED"] ?? "yes";
+$healingEnabled = $conf["SYS_HEALING_ENABLED"] ?? "yes";
+
+// Read events
+$events = [];
+if (file_exists($eventsFile)) {
+    $events = json_decode(file_get_contents($eventsFile), true) ?: [];
+}
+
+// Read notifications
+$notifications = [];
+if (file_exists($notifFile)) {
+    $notifications = json_decode(file_get_contents($notifFile), true) ?: [];
+}
+
+// Read summary or generate dynamically
+$summary = [];
+if (file_exists($summaryFile)) {
+    $summary = json_decode(file_get_contents($summaryFile), true) ?: [];
+}
+
+// Live Core & App Services Inspection
+$services = [];
+$serviceList = ["nginx", "mariadb", "mysql", "redis-server", "memcached", "named", "bind9", "exim4", "dovecot"];
+
+// PHP versions
+$phpFpmUnits = glob("/lib/systemd/system/php*-fpm.service") ?: [];
+foreach ($phpFpmUnits as $pf) {
+    $base = basename($pf, ".service");
+    if (!in_array($base, $serviceList)) {
+        $serviceList[] = $base;
+    }
+}
+
+// Systemd App Units (Node / .NET / Python)
+$appUnits = glob("/etc/systemd/system/hestia-app-*.service") ?: [];
+foreach ($appUnits as $au) {
+    $base = basename($au, ".service");
+    $serviceList[] = $base;
+}
+
+$activeCount = 0;
+$totalChecked = 0;
+
+foreach ($serviceList as $sName) {
+    $unitPath1 = "/lib/systemd/system/{$sName}.service";
+    $unitPath2 = "/etc/systemd/system/{$sName}.service";
+    if (!file_exists($unitPath1) && !file_exists($unitPath2)) {
+        continue;
+    }
+    $totalChecked++;
+    $isActive = trim(@shell_exec("systemctl is-active " . escapeshellarg($sName) . " 2>/dev/null") ?? "inactive");
+    $isFailed = trim(@shell_exec("systemctl is-failed " . escapeshellarg($sName) . " 2>/dev/null") ?? "unknown");
+    
+    $statusLabel = "ACTIVE";
+    if ($isFailed === "failed" || $isActive === "failed") {
+        $statusLabel = "FAILED";
+    } elseif ($isActive === "activating") {
+        $statusLabel = "RESTARTING";
+    } elseif ($isActive !== "active") {
+        $statusLabel = "INACTIVE";
+    }
+
+    if ($isActive === "active") {
+        $activeCount++;
+    }
+
+    $sType = "core";
+    if (strpos($sName, "hestia-app-") === 0) {
+        $sType = "app";
+    } elseif (strpos($sName, "php") === 0 && strpos($sName, "-fpm") !== false) {
+        $sType = "php-fpm";
+    }
+
+    $services[] = [
+        "name" => $sName,
+        "type" => $sType,
+        "active" => ($isActive === "active"),
+        "status" => $statusLabel
+    ];
+}
+
+$now = time();
+$heals24h = 0;
+foreach ($events as $ev) {
+    $evTime = strtotime($ev["timestamp"] ?? 0);
+    if ($evTime >= ($now - 86400)) {
+        $heals24h++;
+    }
+}
+
+$summaryData = [
+    "ENGINE_STATUS" => ($healingEnabled === "yes") ? "ACTIVE" : "DISABLED",
+    "LAST_SCAN_TIME" => $summary["LAST_SCAN_TIME"] ?? date("c"),
+    "MONITORED_SERVICES_COUNT" => $totalChecked,
+    "ACTIVE_SERVICES_COUNT" => $activeCount,
+    "TOTAL_HEALING_EVENTS" => count($events),
+    "HEALS_LAST_24H" => $heals24h,
+    "SYSTEM_HEALTH" => ($activeCount === $totalChecked && $totalChecked > 0) ? "HEALTHY" : "ATTENTION"
+];
+
+$payload = [
+    "summary" => $summaryData,
+    "settings" => [
+        "SYS_NOTIFY_EMAIL" => $notifyEmail,
+        "SYS_NOTIFY_LEVEL" => $notifyLevel,
+        "SYS_NOTIFY_SENDER_NAME" => $notifySenderName,
+        "SYS_NOTIFY_SENDER_EMAIL" => $notifySenderEmail,
+        "SYS_NOTIFY_ENABLED" => $notifyEnabled,
+        "SYS_HEALING_ENABLED" => $healingEnabled
+    ],
+    "services" => $services,
+    "events" => $events,
+    "notifications" => $notifications
+];
+
+if ($format === "plain") {
+    echo "========================================================\n";
+    echo " NexviaCP AI Ops & Self-Healing Telemetry Report        \n";
+    echo "========================================================\n";
+    echo "Engine Status:     " . $summaryData["ENGINE_STATUS"] . "\n";
+    echo "System Health:     " . $summaryData["SYSTEM_HEALTH"] . "\n";
+    echo "Monitored Services:" . $summaryData["MONITORED_SERVICES_COUNT"] . " (Active: $activeCount)\n";
+    echo "Heals (Last 24h):  " . $summaryData["HEALS_LAST_24H"] . "\n";
+    echo "Total Events:      " . $summaryData["TOTAL_HEALING_EVENTS"] . "\n";
+    echo "Alert Recipient:   " . $notifyEmail . " [Threshold: " . $notifyLevel . "]\n\n";
+    echo "--- Recent Healing Timeline Events ---\n";
+    foreach (array_slice($events, 0, 10) as $e) {
+        echo "[" . ($e["timestamp"] ?? "") . "] " . ($e["level"] ?? "") . " - " . ($e["service"] ?? "") . " (" . ($e["type"] ?? "") . ")\n";
+        echo "  Diagnosis: " . ($e["diagnosis"] ?? "") . "\n";
+        echo "  Action:    " . ($e["action_taken"] ?? "") . " -> " . ($e["status"] ?? "") . "\n";
+    }
+} else {
+    echo json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+}
+' "$format" "$HEAL_DIR"
+
+exit 0

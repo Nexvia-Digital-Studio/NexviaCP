@@ -1,0 +1,139 @@
+#!/bin/bash
+# info: configure recipient email and alert settings for AI Ops and system healing
+# options: EMAIL [LEVEL] [SENDER_NAME] [SENDER_EMAIL] [ENABLED]
+#
+# example: v-set-sys-notification-email admin@example.com WARNING "NexviaCP AI Ops" alerts@example.com yes
+#
+# Configures the administrator notification email address, minimum alert severity threshold,
+# sender identity, and global notification status.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+if [ -f "/etc/hestiacp/hestia.conf" ]; then
+	source /etc/hestiacp/hestia.conf
+fi
+if [ -z "$HESTIA" ]; then
+	HESTIA="/usr/local/hestia"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+if [ -f "$HESTIA/func/main.sh" ]; then
+	source "$HESTIA/func/main.sh"
+fi
+# load config file
+if [ -f "$HESTIA/conf/hestia.conf" ]; then
+	source_conf "$HESTIA/conf/hestia.conf"
+fi
+
+if [ -z "$BIN" ]; then
+	BIN="$HESTIA/bin"
+fi
+
+email=$1
+level=$(echo "${2:-INFO}" | tr '[:lower:]' '[:upper:]')
+sender_name=${3:-"NexviaCP AI Healing Engine"}
+sender_email=$4
+enabled=$(echo "${5:-yes}" | tr '[:upper:]' '[:lower:]')
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+if type check_args >/dev/null 2>&1; then
+	check_args '1' "$#" 'EMAIL [LEVEL] [SENDER_NAME] [SENDER_EMAIL] [ENABLED]'
+fi
+
+# Ensure root user
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: v-set-sys-notification-email can be executed only by root user"
+	exit 10
+fi
+
+# Perform verification if read-only mode is enabled
+if type check_hestia_demo_mode >/dev/null 2>&1; then
+	check_hestia_demo_mode
+fi
+
+# Validate email format
+if [[ ! "$email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+	if type check_result >/dev/null 2>&1; then
+		check_result "$E_INVALID" "Invalid recipient email address format: $email"
+	else
+		echo "ERROR: Invalid recipient email address format: $email"
+		exit 2
+	fi
+fi
+
+# Validate level
+case "$level" in
+	INFO|SUCCESS|WARNING|CRITICAL|OFF) ;;
+	*)
+		level="INFO"
+		;;
+esac
+
+# Validate enabled flag
+if [ "$enabled" != "yes" ] && [ "$enabled" != "no" ]; then
+	enabled="yes"
+fi
+
+# Default sender email to FROM_EMAIL or noreply@hostname
+if [ -z "$sender_email" ]; then
+	if [ -n "$FROM_EMAIL" ]; then
+		sender_email="$FROM_EMAIL"
+	else
+		hostname=$(get_hostname 2>/dev/null || hostname -f 2>/dev/null || echo "localhost")
+		sender_email="noreply@$hostname"
+	fi
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+if [ -x "$BIN/v-change-sys-config-value" ]; then
+	$BIN/v-change-sys-config-value "SYS_NOTIFY_EMAIL" "$email"
+	$BIN/v-change-sys-config-value "SYS_NOTIFY_LEVEL" "$level"
+	$BIN/v-change-sys-config-value "SYS_NOTIFY_SENDER_NAME" "$sender_name"
+	$BIN/v-change-sys-config-value "SYS_NOTIFY_SENDER_EMAIL" "$sender_email"
+	$BIN/v-change-sys-config-value "SYS_NOTIFY_ENABLED" "$enabled"
+fi
+
+# Create healing directory if needed
+HEAL_DIR="/var/lib/hestia/healing"
+if ! mkdir -p "$HEAL_DIR" 2>/dev/null; then
+	HEAL_DIR="/tmp/hestia-healing"
+	mkdir -p "$HEAL_DIR" 2>/dev/null || true
+fi
+chmod 755 "$HEAL_DIR" 2>/dev/null || true
+
+# Update settings json file for fast reading
+settings_file="$HEAL_DIR/settings.json"
+cat << JSONEOF > "$settings_file"
+{
+	"SYS_NOTIFY_EMAIL": "$email",
+	"SYS_NOTIFY_LEVEL": "$level",
+	"SYS_NOTIFY_SENDER_NAME": "$sender_name",
+	"SYS_NOTIFY_SENDER_EMAIL": "$sender_email",
+	"SYS_NOTIFY_ENABLED": "$enabled",
+	"UPDATED_AT": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+JSONEOF
+chmod 644 "$settings_file" 2>/dev/null || true
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+if [ -x "$BIN/v-log-action" ]; then
+	$BIN/v-log-action "system" "Info" "System" "AI Ops notification settings updated (Recipient: $email, Level: $level, Enabled: $enabled)."
+fi
+if type log_event >/dev/null 2>&1; then
+	log_event "$OK" "$ARGUMENTS"
+fi
+
+echo "[+] Notification settings saved successfully: $email (Threshold: $level, Status: $enabled)"
+exit 0

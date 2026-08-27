@@ -199,7 +199,7 @@ function syshealth_update_system_config_format() {
 	# SYSTEM CONFIGURATION
 	# Create array of known keys in configuration file
 	system="system"
-	known_keys="ANTISPAM_SYSTEM ANTIVIRUS_SYSTEM API_ALLOWED_IP API BACKEND_PORT BACKUP_GZIP BACKUP_MODE BACKUP_SYSTEM CRON_SYSTEM DB_PMA_ALIAS DB_SYSTEM DISK_QUOTA DNS_SYSTEM ENFORCE_SUBDOMAIN_OWNERSHIP FILE_MANAGER FIREWALL_EXTENSION FIREWALL_SYSTEM FTP_SYSTEM IMAP_SYSTEM INACTIVE_SESSION_TIMEOUT LANGUAGE LOGIN_STYLE MAIL_SYSTEM PROXY_PORT PROXY_SSL_PORT PROXY_SYSTEM RELEASE_BRANCH STATS_SYSTEM THEME UPDATE_HOSTNAME_SSL UPGRADE_SEND_EMAIL UPGRADE_SEND_EMAIL_LOG WEB_BACKEND WEBMAIL_ALIAS WEBMAIL_SYSTEM WEB_PORT WEB_RGROUPS WEB_SSL WEB_SSL_PORT WEB_SYSTEM WEB_TERMINAL WEB_TERMINAL_PORT VERSION DISABLE_IP_CHECK"
+	known_keys="ANTISPAM_SYSTEM ANTIVIRUS_SYSTEM API_ALLOWED_IP API BACKEND_PORT BACKUP_GZIP BACKUP_MODE BACKUP_SYSTEM CRON_SYSTEM DB_PMA_ALIAS DB_SYSTEM DISK_QUOTA DNS_SYSTEM ENFORCE_SUBDOMAIN_OWNERSHIP FILE_MANAGER FIREWALL_EXTENSION FIREWALL_SYSTEM FTP_SYSTEM IMAP_SYSTEM INACTIVE_SESSION_TIMEOUT LANGUAGE LOGIN_STYLE MAIL_SYSTEM PROXY_PORT PROXY_SSL_PORT PROXY_SYSTEM RELEASE_BRANCH STATS_SYSTEM THEME UPDATE_HOSTNAME_SSL UPGRADE_SEND_EMAIL UPGRADE_SEND_EMAIL_LOG WEB_BACKEND WEBMAIL_ALIAS WEBMAIL_SYSTEM WEB_PORT WEB_RGROUPS WEB_SSL WEB_SSL_PORT WEB_SYSTEM WEB_TERMINAL WEB_TERMINAL_PORT VERSION DISABLE_IP_CHECK SYS_NOTIFY_EMAIL SYS_NOTIFY_LEVEL SYS_NOTIFY_SENDER_NAME SYS_NOTIFY_SENDER_EMAIL SYS_NOTIFY_ENABLED SYS_HEALING_ENABLED"
 	write_kv_config_file
 	unset system
 	unset known_keys
@@ -587,6 +587,32 @@ function syshealth_repair_system_config() {
 	if [[ -z $(check_key_exists 'CF_ZONE_ID') ]]; then
 		echo "[ ! ] Adding missing variable to hestia.conf: CF_ZONE_ID ('')"
 		$BIN/v-change-sys-config-value "CF_ZONE_ID" ""
+	fi
+
+	# NexviaCP AI Ops & Self-Healing Hub
+	if [[ -z $(check_key_exists 'SYS_NOTIFY_EMAIL') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: SYS_NOTIFY_EMAIL ('')"
+		$BIN/v-change-sys-config-value "SYS_NOTIFY_EMAIL" ""
+	fi
+	if [[ -z $(check_key_exists 'SYS_NOTIFY_LEVEL') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: SYS_NOTIFY_LEVEL ('INFO')"
+		$BIN/v-change-sys-config-value "SYS_NOTIFY_LEVEL" "INFO"
+	fi
+	if [[ -z $(check_key_exists 'SYS_NOTIFY_SENDER_NAME') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: SYS_NOTIFY_SENDER_NAME ('NexviaCP AI Healing Engine')"
+		$BIN/v-change-sys-config-value "SYS_NOTIFY_SENDER_NAME" "NexviaCP AI Healing Engine"
+	fi
+	if [[ -z $(check_key_exists 'SYS_NOTIFY_SENDER_EMAIL') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: SYS_NOTIFY_SENDER_EMAIL ('')"
+		$BIN/v-change-sys-config-value "SYS_NOTIFY_SENDER_EMAIL" ""
+	fi
+	if [[ -z $(check_key_exists 'SYS_NOTIFY_ENABLED') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: SYS_NOTIFY_ENABLED ('yes')"
+		$BIN/v-change-sys-config-value "SYS_NOTIFY_ENABLED" "yes"
+	fi
+	if [[ -z $(check_key_exists 'SYS_HEALING_ENABLED') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: SYS_HEALING_ENABLED ('yes')"
+		$BIN/v-change-sys-config-value "SYS_HEALING_ENABLED" "yes"
 	fi
 
 	touch $HESTIA/conf/hestia.conf.new

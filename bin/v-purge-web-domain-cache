@@ -1,0 +1,170 @@
+#!/bin/bash
+# info: purge Redis database keys and flush Nginx fastcgi/proxy microcache for a domain
+# options: USER DOMAIN [CACHE_TYPE]
+#
+# example: v-purge-web-domain-cache admin mysite.com all
+#
+# CACHE_TYPE options:
+#   all     : Flush Redis DB + Nginx FastCGI microcache + Proxy cache + OPcache (default)
+#   redis   : Flush only domain's dedicated Redis database keys
+#   nginx   : Flush Nginx FastCGI and proxy microcache
+#   fastcgi : Flush Nginx FastCGI microcache only
+#   proxy   : Flush Nginx Proxy cache only
+#   opcache : Reload PHP-FPM / reset OPcache
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+user=$1
+domain=$2
+domain_idn=$2
+cache_type=${3:-all}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER DOMAIN [CACHE_TYPE]'
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+is_object_unsuspended 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
+is_object_unsuspended 'web' 'DOMAIN' "$domain"
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "Error: Script can be executed only by root"
+	exit 10
+fi
+
+# Load domain data
+parse_object_kv_list $(grep "DOMAIN='$domain'" $USER_DATA/web.conf 2>/dev/null)
+
+purged_items=()
+bytes_cleared=0
+
+# Helper to find Redis CLI and auth if needed
+get_redis_cmd() {
+	local redis_auth=""
+	for conf_file in /etc/redis/redis.conf /etc/redis/redis-server.conf; do
+		if [ -f "$conf_file" ]; then
+			local pass
+			pass=$(grep -E "^\s*requirepass\s+" "$conf_file" | awk '{print $2}' | tr -d '"' | tr -d "'" | head -n1)
+			if [ -n "$pass" ]; then
+				redis_auth="-a $pass --no-auth-warning"
+				break
+			fi
+		fi
+	done
+
+	if command -v redis-cli >/dev/null 2>&1; then
+		echo "redis-cli $redis_auth"
+	else
+		echo ""
+	fi
+}
+
+# 1. PURGE REDIS CACHE
+if [[ "$cache_type" == "all" || "$cache_type" == "redis" ]]; then
+	redis_target_db="$REDIS_DB"
+	
+	# Fallback: check .env if REDIS_DB not in web.conf
+	if [ -z "$redis_target_db" ] && [ -f "$HOMEDIR/$user/web/$domain/public_html/.env" ]; then
+		redis_target_db=$(grep -E "^REDIS_DB=" "$HOMEDIR/$user/web/$domain/public_html/.env" 2>/dev/null | cut -d '=' -f2 | tr -d '"' | tr -d "'" | tr -d ' ')
+	fi
+
+	redis_cmd=$(get_redis_cmd)
+	if [ -n "$redis_cmd" ] && [ -n "$redis_target_db" ]; then
+		key_count=$($redis_cmd -n "$redis_target_db" DBSIZE 2>/dev/null | awk '{print $1}')
+		$redis_cmd -n "$redis_target_db" FLUSHDB async >/dev/null 2>&1 || $redis_cmd -n "$redis_target_db" FLUSHDB >/dev/null 2>&1
+		purged_items+=("Redis DB $redis_target_db flushed (${key_count:-0} keys)")
+	elif [ -n "$redis_cmd" ] && [ -z "$redis_target_db" ]; then
+		pattern="*${domain}*"
+		keys=$($redis_cmd --scan --pattern "$pattern" 2>/dev/null)
+		if [ -n "$keys" ]; then
+			echo "$keys" | xargs -r $redis_cmd DEL >/dev/null 2>&1
+			purged_items+=("Redis keys matching '$pattern' cleared")
+		else
+			purged_items+=("Redis (No DB allocated / no matching keys)")
+		fi
+	fi
+fi
+
+# 2. PURGE FASTCGI MICROCACHE
+if [[ "$cache_type" == "all" || "$cache_type" == "nginx" || "$cache_type" == "fastcgi" ]]; then
+	fastcgi_dirs=(
+		"/var/cache/nginx/micro/$domain"
+		"/var/cache/nginx/fastcgi/$domain"
+		"/var/cache/nginx/$domain"
+	)
+
+	for dir in "${fastcgi_dirs[@]}"; do
+		if [ -d "$dir" ]; then
+			size_before=$(du -sb "$dir" 2>/dev/null | awk '{print $1}')
+			bytes_cleared=$((bytes_cleared + ${size_before:-0}))
+			find "$dir" -mindepth 1 -delete 2>/dev/null || rm -rf "$dir"/* 2>/dev/null
+			mkdir -p "$dir"
+			chown www-data:root "$dir" 2>/dev/null || chown nginx:root "$dir" 2>/dev/null || true
+			chmod 640 "$dir" 2>/dev/null || true
+			purged_items+=("FastCGI microcache cleared ($dir)")
+		fi
+	done
+fi
+
+# 3. PURGE PROXY CACHE
+if [[ "$cache_type" == "all" || "$cache_type" == "nginx" || "$cache_type" == "proxy" ]]; then
+	proxy_dirs=(
+		"/var/cache/nginx/proxy/$domain"
+		"/var/cache/nginx/proxy"
+	)
+	for dir in "${proxy_dirs[@]}"; do
+		if [ -d "$dir" ]; then
+			if [ "$dir" == "/var/cache/nginx/proxy/$domain" ]; then
+				size_before=$(du -sb "$dir" 2>/dev/null | awk '{print $1}')
+				bytes_cleared=$((bytes_cleared + ${size_before:-0}))
+				find "$dir" -mindepth 1 -delete 2>/dev/null || true
+				purged_items+=("Proxy cache ($dir)")
+			fi
+		fi
+	done
+fi
+
+# 4. OPCACHE / PHP PURGE
+if [[ "$cache_type" == "all" || "$cache_type" == "opcache" ]]; then
+	for fpm in /var/run/php/php*-fpm-$domain.sock /run/php/php*-fpm.sock /var/run/php/php*-fpm.sock; do
+		if [ -e "$fpm" ]; then
+			php_ver=$(echo "$fpm" | grep -oP "php[0-9]+\.[0-9]+" | head -n1)
+			if [ -n "$php_ver" ]; then
+				systemctl reload "${php_ver}-fpm" 2>/dev/null || true
+			fi
+		fi
+	done
+	purged_items+=("PHP OPcache reloaded")
+fi
+
+# Logging
+$BIN/v-log-action "$user" "Info" "Web" "Purged cache for domain $domain ($cache_type)."
+log_event "$OK" "$ARGUMENTS"
+
+echo "Cache purge completed for $domain ($cache_type):"
+for item in "${purged_items[@]}"; do
+	echo " - $item"
+done
+if [ "$bytes_cleared" -gt 0 ]; then
+	human_size=$(numfmt --to=iec-i --suffix=B $bytes_cleared 2>/dev/null || echo "${bytes_cleared} bytes")
+	echo "Total disk cache cleared: $human_size"
+fi
+
+exit 0

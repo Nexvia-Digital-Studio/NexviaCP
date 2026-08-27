@@ -1,0 +1,240 @@
+#!/bin/bash
+# info: configure domain Web Application Firewall (WAF) mode
+# options: USER DOMAIN [MODE] [RESTART]
+#
+# example: v-add-web-domain-waf admin example.com block yes
+#
+# This script configures domain-level WAF modes (off/detect/block/aggressive)
+# and generates Nginx security filter rules against SQLi, XSS, RFI/LFI,
+# directory traversal, sensitive environment probes, and malicious scanners.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+user=$1
+domain=$2
+mode=${3:-block}
+restart=${4:-no}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER DOMAIN [MODE] [RESTART]'
+is_format_valid 'user' 'domain' 'restart'
+is_object_valid 'user' 'USER' "$user"
+is_object_unsuspended 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
+is_object_unsuspended 'web' 'DOMAIN' "$domain"
+
+# Normalize mode to lowercase
+mode=$(echo "$mode" | tr '[:upper:]' '[:lower:]')
+
+if ! [[ "$mode" =~ ^(off|detect|block|aggressive)$ ]]; then
+	echo "Error: Invalid WAF mode '$mode'. Valid modes are: off, detect, block, aggressive."
+	exit "$E_INVALID"
+fi
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Load domain data
+parse_object_kv_list $(grep "DOMAIN='$domain'" $USER_DATA/web.conf)
+
+domain_conf_dir="$HOMEDIR/$user/conf/web/$domain"
+mkdir -p "$domain_conf_dir"
+
+waf_conf="$domain_conf_dir/nginx.conf_waf"
+swaf_conf="$domain_conf_dir/nginx.ssl.conf_waf"
+
+cur_date=$(date +'%Y-%m-%d %H:%M:%S')
+
+if [ "$mode" = "off" ]; then
+	rm -f "$waf_conf" "$swaf_conf"
+else
+	# Generate Nginx WAF configuration content based on mode
+	case "$mode" in
+		detect)
+			cat << EOF > "$waf_conf"
+#=========================================================================#
+# NexviaCP Enterprise Threat Shield - WAF (DETECT / MONITOR MODE)         #
+# Domain: $domain | Mode: DETECT                                          #
+# Generated: $cur_date                                                    #
+#=========================================================================#
+
+set \$waf_detected "0";
+set \$waf_threat_type "none";
+
+if (\$query_string ~* "(union.*select|select.*from|insert.*into|delete.*from|drop\s+table|update.*set|benchmark\s*\(|sleep\s*\(|extractvalue|load_file|sysibm|information_schema|load_data|into\s+outfile|group_concat|order\s+by\s+[0-9]+|(--|#|\/\*).*union)") {
+    set \$waf_detected "1";
+    set \$waf_threat_type "SQL_INJECTION";
+}
+
+if (\$query_string ~* "(<script|%3Cscript|javascript:|vbscript:|data:text/html|onload\s*=|onerror\s*=|document\.cookie|document\.location|window\.location|eval\s*\(|alert\s*\()") {
+    set \$waf_detected "1";
+    set \$waf_threat_type "CROSS_SITE_SCRIPTING";
+}
+
+if (\$query_string ~* "(\.\./|\.\.\\|etc/passwd|etc/shadow|proc/self|boot\.ini|win\.ini|php://|file://|data://|expect://|zip://)") {
+    set \$waf_detected "1";
+    set \$waf_threat_type "FILE_INCLUSION";
+}
+
+if (\$request_uri ~* "(\.\./|\.\.\\|/etc/passwd|/proc/self|/boot\.ini|/win\.ini|php://|/\.env|/\.git|/\.svn|/\.aws)") {
+    set \$waf_detected "1";
+    set \$waf_threat_type "PATH_TRAVERSAL_PROBE";
+}
+
+if (\$http_user_agent ~* "(sqlmap|havij|nikto|acunetix|nessus|openvas|arachni|masscan|zgrab|censys|shodan|dirbuster|gobuster|wpscan|burpsuite|nmap|morfeus|paros|fuzz)") {
+    set \$waf_detected "1";
+    set \$waf_threat_type "BAD_BOT_SCANNER";
+}
+
+add_header X-WAF-Mode "detect" always;
+add_header X-WAF-Status "monitoring" always;
+add_header X-WAF-Detected \$waf_threat_type always;
+EOF
+			;;
+
+		block)
+			cat << EOF > "$waf_conf"
+#=========================================================================#
+# NexviaCP Enterprise Threat Shield - WAF (BLOCK / ACTIVE DEFENSE)        #
+# Domain: $domain | Mode: BLOCK                                           #
+# Generated: $cur_date                                                    #
+#=========================================================================#
+
+# 1. SQL Injection Protection
+if (\$query_string ~* "(union.*select|select.*from|insert.*into|delete.*from|drop\s+table|update.*set|benchmark\s*\(|sleep\s*\(|extractvalue|load_file|sysibm|information_schema|load_data|into\s+outfile|group_concat|order\s+by\s+[0-9]+|(--|#|\/\*).*union)") {
+    return 403;
+}
+
+# 2. Cross-Site Scripting (XSS) Protection
+if (\$query_string ~* "(<script|%3Cscript|javascript:|vbscript:|data:text/html|onload\s*=|onerror\s*=|document\.cookie|document\.location|window\.location|eval\s*\(|alert\s*\()") {
+    return 403;
+}
+
+# 3. Remote / Local File Inclusion (RFI/LFI) & Path Traversal
+if (\$query_string ~* "(\.\./|\.\.\\|etc/passwd|etc/shadow|proc/self|boot\.ini|win\.ini|php://|file://|data://|expect://|zip://)") {
+    return 403;
+}
+if (\$request_uri ~* "(\.\./|\.\.\\|/etc/passwd|/proc/self|/boot\.ini|/win\.ini|php://)") {
+    return 403;
+}
+
+# 4. Sensitive Files & Configuration Probes
+if (\$request_uri ~* "(/\.env|/\.git|/\.svn|/\.hg|/\.bzr|/\.aws|/\.ssh|/\.vscode|/\.idea|/\.DS_Store|/wp-config\.php\.bak|/config\.json\.bak|/\.user\.ini)") {
+    return 403;
+}
+
+# 5. Malicious Bots, Crawlers & Vulnerability Scanners
+if (\$http_user_agent ~* "(sqlmap|havij|nikto|acunetix|nessus|openvas|arachni|masscan|zgrab|censys|shodan|dirbuster|gobuster|wpscan|burpsuite|nmap|morfeus|paros|fuzz)") {
+    return 403;
+}
+
+add_header X-WAF-Mode "block" always;
+add_header X-WAF-Shield "Protected by NexviaCP Threat Shield" always;
+EOF
+			;;
+
+		aggressive)
+			cat << EOF > "$waf_conf"
+#=========================================================================#
+# NexviaCP Enterprise Threat Shield - WAF (AGGRESSIVE / MAXIMUM SHIELD)   #
+# Domain: $domain | Mode: AGGRESSIVE                                      #
+# Generated: $cur_date                                                    #
+#=========================================================================#
+
+# 1. Unsafe HTTP Methods Block
+if (\$request_method ~* "^(TRACE|TRACK|DEBUG)$") {
+    return 405;
+}
+
+# 2. Strict SQL Injection Filters (Query String & Request URI)
+if (\$query_string ~* "(union.*select|select.*from|insert.*into|delete.*from|drop\s+table|update.*set|benchmark\s*\(|sleep\s*\(|extractvalue|load_file|sysibm|information_schema|load_data|into\s+outfile|group_concat|order\s+by\s+[0-9]+|(--|#|\/\*).*union|0x[0-9a-fA-F]+)") {
+    return 403;
+}
+if (\$request_uri ~* "(eval\(|<script|union\+select|%27%20OR%20|%22%20OR%20|select%20.*\+from|select\+.*\+from|benchmark\(|sleep\()") {
+    return 403;
+}
+
+# 3. Strict XSS & Script Injection Filters
+if (\$query_string ~* "(<script|%3Cscript|javascript:|vbscript:|data:text/html|onload\s*=|onerror\s*=|document\.cookie|document\.location|window\.location|eval\s*\(|alert\s*\(|<iframe|<object|<embed|<applet)") {
+    return 403;
+}
+
+# 4. RFI / LFI / Directory Traversal & Remote Wrapper Block
+if (\$query_string ~* "(\.\./|\.\.\\|etc/passwd|etc/shadow|proc/self|boot\.ini|win\.ini|php://|file://|data://|expect://|zip://|phar://|glob://)") {
+    return 403;
+}
+if (\$request_uri ~* "(\.\./|\.\.\\|/etc/passwd|/proc/self|/boot\.ini|/win\.ini|php://|phar://)") {
+    return 403;
+}
+
+# 5. Dangerous File Extensions & Backup Files Probe Protection
+if (\$request_uri ~* "\.(sql|bak|old|orig|log|conf|ini|yml|yaml|tar|tgz|gz|zip|rar|7z|backup|swp|dist|env|key|pem|crt)$") {
+    return 403;
+}
+if (\$request_uri ~* "(/\.env|/\.git|/\.svn|/\.hg|/\.bzr|/\.aws|/\.ssh|/\.vscode|/\.idea|/\.DS_Store|/wp-config\.php\.bak|/config\.json\.bak|/\.user\.ini)") {
+    return 403;
+}
+
+# 6. Malicious Bots, Automated Scraping & Automated Script Tools
+if (\$http_user_agent ~* "(sqlmap|havij|nikto|acunetix|nessus|openvas|arachni|masscan|zgrab|censys|shodan|dirbuster|gobuster|wpscan|burpsuite|nmap|morfeus|paros|fuzz|libwww-perl|python-requests|aiohttp|winhttp|mechanize|indy\s*library|go-http-client|zulu|phpcrawl)") {
+    return 403;
+}
+
+# 7. Strict Security Headers Enforcement
+add_header X-Frame-Options "SAMEORIGIN" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header X-XSS-Protection "1; mode=block" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header X-WAF-Mode "aggressive" always;
+add_header X-WAF-Shield "Active (NexviaCP Maximum Shield)" always;
+EOF
+			;;
+	esac
+
+	# Replicate configuration for SSL vhost
+	cp -f "$waf_conf" "$swaf_conf"
+
+	# Set strict ownership and permissions
+	chown root:$user "$waf_conf" "$swaf_conf"
+	chmod 640 "$waf_conf" "$swaf_conf"
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+# Ensure keys exist in web.conf
+add_object_key 'web' 'DOMAIN' "$domain" 'WAF' 'TIME'
+add_object_key 'web' 'DOMAIN' "$domain" 'WAF_UPDATED' 'TIME'
+
+# Update values
+update_object_value 'web' 'DOMAIN' "$domain" '$WAF' "$mode"
+update_object_value 'web' 'DOMAIN' "$domain" '$WAF_UPDATED' "$cur_date"
+
+# Restart web server if requested
+$BIN/v-restart-web "$restart"
+check_result $? "Web server restart failed" > /dev/null
+
+# Logging
+$BIN/v-log-action "$user" "Info" "Web" "WAF mode set to $mode (Domain: $domain)."
+log_event "$OK" "$ARGUMENTS"
+
+exit 0

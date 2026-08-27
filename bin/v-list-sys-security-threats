@@ -1,0 +1,76 @@
+#!/bin/bash
+# info: list aggregated system security threats and WAF posture
+# options: [USER] [FORMAT]
+#
+# example: v-list-sys-security-threats json
+# example: v-list-sys-security-threats admin json
+#
+# This script aggregates WAF protection status, malware scan reports,
+# blocked security events from Nginx, and banned IP lists as JSON.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+arg1=$1
+arg2=$2
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+# Handle arguments: check if arg1 is a format or a user
+if [[ "$arg1" =~ ^(json|shell|plain|csv)$ ]]; then
+	user="all"
+	format="$arg1"
+else
+	user="${arg1:-all}"
+	format="${arg2:-json}"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Select PHP binary
+if [ -x "$HESTIA_PHP" ]; then
+	PHP_BIN="$HESTIA_PHP"
+elif command -v php > /dev/null 2>&1; then
+	PHP_BIN=$(command -v php)
+elif [ -x "/usr/bin/php" ]; then
+	PHP_BIN="/usr/bin/php"
+else
+	echo "Error: PHP binary not found."
+	exit "$E_NOTEXIST"
+fi
+
+collector_script="$HESTIA/func/internal/security_threats_collector.php"
+if [ ! -f "$collector_script" ]; then
+	collector_script="$(dirname "$(dirname "$0")")/func/internal/security_threats_collector.php"
+fi
+
+# Execute threats aggregator
+export HESTIA
+data=$("$PHP_BIN" "$collector_script" "$user")
+
+case "$format" in
+	json)
+		echo "$data"
+		;;
+	shell|plain)
+		echo "================================================================"
+		echo "          NEXVIACP ENTERPRISE THREAT SHIELD STATUS"
+		echo "================================================================"
+		echo "$data"
+		;;
+	csv)
+		echo "$data"
+		;;
+esac
+
+exit 0

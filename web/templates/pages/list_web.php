@@ -10,6 +10,9 @@
 					<button type="button" class="button button-secondary" onclick="document.getElementById('github-web-modal').style.display='flex'">
 						<i class="fab fa-github icon-blue"></i><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "GitHub'dan Site Kur" : _("Deploy from GitHub")) ?>
 					</button>
+					<a href="/list/waf/" class="button button-secondary">
+						<i class="fas fa-shield-halved icon-blue"></i><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Tehdit Kalkanı & WAF" : _("Threat Shield & WAF")) ?>
+					</a>
 				<?php } ?>
 			<?php } ?>
 		</div>
@@ -318,11 +321,11 @@
 							<li class="units-table-row-action shortcut-l" data-key-action="href">
 								<a
 									class="units-table-row-action-link"
-									href="/list/web-log/?<?= tohtml(http_build_query(["domain" => $key, "type" => "access"])) ?>#"
-									title="<?= tohtml( _("View Logs")) ?>"
+									href="/list/logs/?<?= tohtml(http_build_query(["domain" => $key, "type" => "access"])) ?>"
+									title="<?= tohtml(function_exists('__tr') ? __tr("Live Stream Logs", "Canlı Günlük Akışı") : _("Live Logs")) ?>"
 								>
-									<i class="fas fa-binoculars icon-purple"></i>
-									<span class="u-hide-desktop"><?= tohtml( _("View Logs")) ?></span>
+									<i class="fas fa-terminal icon-purple"></i>
+									<span class="u-hide-desktop"><?= tohtml( _("Live Logs")) ?></span>
 								</a>
 							</li>
 							<li class="units-table-row-action shortcut-s" data-key-action="js">

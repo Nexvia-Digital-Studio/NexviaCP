@@ -1,0 +1,127 @@
+#!/bin/bash
+# info: delete and tear down temporary GitHub PR staging preview environment
+# options: USER BASE_DOMAIN [PR_NUMBER]
+#
+# example: v-delete-github-pr admin example.com 12
+#          v-delete-github-pr admin pr-12.example.com
+#
+# This script tears down the temporary PR preview environment, deletes the
+# isolated database, stops systemd app units, and cleans up configurations.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+user=$1
+arg2=$2
+arg3=$3
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+# load config file
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER BASE_DOMAIN [PR_NUMBER]'
+is_format_valid 'user'
+is_object_valid 'user' 'USER' "$user"
+
+# Ensure root execution
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+# Determine pr_domain and pr_number
+if [ -n "$arg3" ]; then
+	base_domain="$arg2"
+	pr_number="$arg3"
+	clean_base=$(echo "$base_domain" | sed 's/^pr-[0-9]\+\.//')
+	pr_domain="pr-${pr_number}.${clean_base}"
+else
+	# Pattern: pr-12.example.com
+	pr_domain="$arg2"
+	if [[ "$pr_domain" =~ ^pr-([0-9]+)\.(.+)$ ]]; then
+		pr_number="${BASH_REMATCH[1]}"
+		base_domain="${BASH_REMATCH[2]}"
+	else
+		pr_number=""
+		base_domain="$pr_domain"
+	fi
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+echo "[*] Tearing down PR staging preview environment: $pr_domain (User: $user)..."
+
+pr_meta_file="$USER_DATA/pr_environments.conf"
+db_to_delete=""
+
+# Check if metadata exists for this PR
+if [ -f "$pr_meta_file" ]; then
+	meta_line=$(grep "PR_DOMAIN='$pr_domain'" "$pr_meta_file" | tail -n 1)
+	if [ -n "$meta_line" ]; then
+		db_to_delete=$(echo "$meta_line" | grep -o "DB_NAME='[^']*'" | cut -d "'" -f 2)
+	fi
+fi
+
+# If db_to_delete wasn't found in metadata, fallback to standard naming pattern
+if [ -z "$db_to_delete" ] && [ -n "$pr_number" ]; then
+	if [ -f "$USER_DATA/db.conf" ]; then
+		db_match=$(grep "DB='${user}_pr${pr_number}" "$USER_DATA/db.conf" | head -n 1 | grep -o "DB='[^']*'" | cut -d "'" -f 2)
+		[ -n "$db_match" ] && db_to_delete="$db_match"
+	fi
+fi
+
+# 1. Stop and remove isolated systemd app unit if active
+unit_name="hestia-app-${user}-${pr_domain}"
+if [ -f "/etc/systemd/system/${unit_name}.service" ] || systemctl is-active --quiet "$unit_name" 2>/dev/null; then
+	echo "[*] Stopping and removing isolated app backend unit: $unit_name..."
+	if [ -x "$BIN/v-delete-web-domain-app" ]; then
+		$BIN/v-delete-web-domain-app "$user" "$pr_domain" >/dev/null 2>&1 || true
+	else
+		systemctl stop "$unit_name" 2>/dev/null || true
+		systemctl disable "$unit_name" 2>/dev/null || true
+		rm -f "/etc/systemd/system/${unit_name}.service"
+		systemctl daemon-reload 2>/dev/null || true
+	fi
+fi
+
+# 2. Delete isolated staging database
+if [ -n "$db_to_delete" ]; then
+	clean_db_short=$(echo "$db_to_delete" | sed "s/^${user}_//")
+	echo "[*] Deleting isolated staging database: $db_to_delete..."
+	$BIN/v-delete-database "$user" "$clean_db_short" >/dev/null 2>&1 || true
+fi
+
+# 3. Delete staging web domain
+if $BIN/v-list-web-domain "$user" "$pr_domain" >/dev/null 2>&1; then
+	echo "[*] Deleting web domain: $pr_domain..."
+	$BIN/v-delete-web-domain "$user" "$pr_domain" 'no' >/dev/null 2>&1 || true
+fi
+
+# 4. Clean metadata tracking file
+if [ -f "$pr_meta_file" ]; then
+	sed -i "/PR_DOMAIN='$pr_domain'/d" "$pr_meta_file"
+fi
+
+# 5. Reload web server
+$BIN/v-restart-web 2>/dev/null || systemctl reload nginx 2>/dev/null || true
+
+echo "[+] SUCCESS: PR preview environment $pr_domain has been completely torn down."
+log_event "$OK" "GitHub PR preview environment $pr_domain deleted (DB: ${db_to_delete:-none})"
+
+exit 0

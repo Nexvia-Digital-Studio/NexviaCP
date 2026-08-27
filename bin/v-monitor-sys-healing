@@ -1,0 +1,454 @@
+#!/bin/bash
+# info: background daemon/cron for AI Ops, self-healing engine, and error recovery
+# options: [ACTION]
+#
+# example: v-monitor-sys-healing
+# example: v-monitor-sys-healing force
+#
+# Inspects 500/502 Bad Gateway bursts, stuck PHP-FPM pools, and crashed Node/.NET systemd services.
+# Automatically heals/restarts failing services safely, generates root-cause diagnosis,
+# and dispatches responsive HTML email notifications.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+if [ -f "/etc/hestiacp/hestia.conf" ]; then
+	source /etc/hestiacp/hestia.conf
+fi
+if [ -z "$HESTIA" ]; then
+	HESTIA="/usr/local/hestia"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+if [ -f "$HESTIA/func/main.sh" ]; then
+	source "$HESTIA/func/main.sh"
+fi
+# load config file
+if [ -f "$HESTIA/conf/hestia.conf" ]; then
+	source_conf "$HESTIA/conf/hestia.conf"
+fi
+
+if [ -z "$HESTIA_PHP" ]; then
+	HESTIA_PHP=$(command -v php 2>/dev/null || echo "php")
+fi
+if [ -z "$BIN" ]; then
+	BIN="$HESTIA/bin"
+fi
+
+action="${1:-check}"
+
+# Ensure root user
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: v-monitor-sys-healing can be executed only by root user"
+	exit 10
+fi
+
+# Check if healing is enabled in configuration
+healing_enabled="${SYS_HEALING_ENABLED:-yes}"
+if [ "$healing_enabled" = "no" ] && [ "$action" != "force" ]; then
+	echo "[i] AI Self-Healing engine is currently disabled in hestia.conf."
+	exit 0
+fi
+
+# Healing directories
+HEAL_DIR="/var/lib/hestia/healing"
+if ! mkdir -p "$HEAL_DIR" 2>/dev/null; then
+	HEAL_DIR="/tmp/hestia-healing"
+	mkdir -p "$HEAL_DIR" 2>/dev/null || true
+fi
+chmod 755 "$HEAL_DIR" 2>/dev/null || true
+
+events_file="$HEAL_DIR/events.json"
+summary_file="$HEAL_DIR/summary.json"
+cooldown_file="$HEAL_DIR/cooldown.json"
+
+[ ! -f "$events_file" ] && echo "[]" > "$events_file" 2>/dev/null || true
+[ ! -f "$cooldown_file" ] && echo "{}" > "$cooldown_file" 2>/dev/null || true
+
+# Anti-spam cooldown check (default: 15 minutes = 900 seconds)
+is_in_cooldown() {
+	local svc_key="$1"
+	local cooldown_sec="${2:-900}"
+	local now_ts=$(date +%s)
+
+	local last_ts=$("$HESTIA_PHP" -r '
+		$file = $argv[1];
+		$key = $argv[2];
+		if (file_exists($file)) {
+			$data = json_decode(file_get_contents($file), true) ?: [];
+			echo $data[$key] ?? 0;
+		} else {
+			echo 0;
+		}
+	' "$cooldown_file" "$svc_key" 2>/dev/null || echo 0)
+
+	if [ "$action" = "force" ]; then
+		return 1
+	fi
+
+	local diff=$((now_ts - last_ts))
+	if [ "$diff" -lt "$cooldown_sec" ]; then
+		return 0 # is in cooldown
+	else
+		return 1 # not in cooldown
+	fi
+}
+
+set_cooldown() {
+	local svc_key="$1"
+	local now_ts=$(date +%s)
+	"$HESTIA_PHP" -r '
+		$file = $argv[1];
+		$key = $argv[2];
+		$ts = (int)$argv[3];
+		$data = file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
+		$data[$key] = $ts;
+		file_put_contents($file, json_encode($data));
+	' "$cooldown_file" "$svc_key" "$now_ts" 2>/dev/null || true
+}
+
+# Record healing event and trigger notification
+log_healing_event() {
+	local service="$1"
+	local event_type="$2"
+	local level="$3"
+	local diagnosis="$4"
+	local action_taken="$5"
+	local status="$6"
+	local log_snippet="$7"
+	local domain="$8"
+
+	local ts_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+	# Append structured event to events.json
+	"$HESTIA_PHP" -r '
+		$eventsFile = $argv[1];
+		$newEv = [
+			"id" => uniqid("heal_"),
+			"timestamp" => $argv[2],
+			"service" => $argv[3],
+			"domain" => $argv[4],
+			"type" => $argv[5],
+			"level" => $argv[6],
+			"diagnosis" => $argv[7],
+			"action_taken" => $argv[8],
+			"status" => $argv[9],
+			"log_snippet" => $argv[10]
+		];
+		$events = file_exists($eventsFile) ? (json_decode(file_get_contents($eventsFile), true) ?: []) : [];
+		array_unshift($events, $newEv);
+		$events = array_slice($events, 0, 100);
+		file_put_contents($eventsFile, json_encode($events, JSON_PRETTY_PRINT));
+	' "$events_file" "$ts_iso" "$service" "$domain" "$event_type" "$level" "$diagnosis" "$action_taken" "$status" "$log_snippet" 2>/dev/null || true
+
+	chmod 644 "$events_file" 2>/dev/null || true
+
+	# Construct extra JSON for email
+	local extra_json
+	extra_json=$("$HESTIA_PHP" -r '
+		echo json_encode([
+			"service" => $argv[1],
+			"domain" => $argv[2],
+			"root_cause" => $argv[3],
+			"action_taken" => $argv[4],
+			"status" => $argv[5],
+			"log_snippet" => $argv[6]
+		]);
+	' "$service" "$domain" "$diagnosis" "$action_taken" "$status" "$log_snippet" 2>/dev/null || echo "{}")
+
+	local email_subject="[AI Ops $level] Self-Healing: $service ($event_type)"
+	local email_body="NexviaCP AI Self-Healing Engine detected an incident with $service. Root Cause: $diagnosis. Action: $action_taken. Current Status: $status."
+
+	# Dispatch rich HTML email notification
+	if [ -x "$BIN/v-send-sys-notification" ]; then
+		$BIN/v-send-sys-notification "$email_subject" "$email_body" "$level" "" "healing" "$extra_json" >/dev/null 2>&1 || true
+	fi
+
+	if [ -x "$BIN/v-log-action" ]; then
+		$BIN/v-log-action "system" "$level" "System" "AI Self-Healing triggered for $service: $diagnosis -> $action_taken ($status)"
+	fi
+}
+
+healed_count=0
+checked_count=0
+
+#----------------------------------------------------------#
+#   1. Inspect Crashed Node.js / .NET / App Systemd Units  #
+#----------------------------------------------------------#
+
+for unit_file in /etc/systemd/system/hestia-app-*.service; do
+	[ ! -f "$unit_file" ] && continue
+	unit_name=$(basename "$unit_file" .service)
+	unit_service="${unit_name}.service"
+	((checked_count++))
+
+	# Extract user and domain from hestia-app-USER-DOMAIN
+	domain_part=$(echo "$unit_name" | sed 's/^hestia-app-[^-]*-//')
+	user_part=$(echo "$unit_name" | awk -F'-' '{print $3}')
+
+	is_active=$(systemctl is-active "$unit_service" 2>/dev/null || echo "inactive")
+	is_failed=$(systemctl is-failed "$unit_service" 2>/dev/null || echo "unknown")
+
+	# If service is failed, auto-restarting in loop, or inactive
+	if [ "$is_failed" = "failed" ] || [ "$is_active" = "failed" ] || [ "$is_active" = "activating" ] || [ "$is_active" = "inactive" ]; then
+		# Check cooldown
+		if is_in_cooldown "$unit_name"; then
+			continue
+		fi
+
+		# Diagnose root cause via journalctl
+		raw_logs=$(journalctl -u "$unit_service" -n 12 --no-pager 2>/dev/null)
+		diagnosis="Process exited unexpectedly or encountered a crash loop."
+		root_cause_type="APP_CRASH_LOOP"
+
+		if echo "$raw_logs" | grep -qi "EADDRINUSE"; then
+			diagnosis="Port collision detected (EADDRINUSE). Another zombie process held the allocated port."
+			root_cause_type="PORT_CONFLICT"
+		elif echo "$raw_logs" | grep -qi "out of memory\|kill\|oom"; then
+			diagnosis="Process was terminated by Linux kernel OOM (Out of Memory) killer due to memory exhaustion."
+			root_cause_type="OOM_KILLED"
+		elif echo "$raw_logs" | grep -qi "cannot find module\|module_not_found"; then
+			diagnosis="Runtime missing dependency module error."
+			root_cause_type="MISSING_DEPENDENCY"
+		elif echo "$raw_logs" | grep -qi "unhandledexception\|nullreferenceexception\|fatal"; then
+			diagnosis="Unhandled application runtime exception."
+			root_cause_type="UNHANDLED_EXCEPTION"
+		fi
+
+		# Safe Healing Action
+		systemctl reset-failed "$unit_service" >/dev/null 2>&1 || true
+
+		# If port conflict, try to find and terminate stale orphan process on this app's port
+		app_port=$(grep -E 'PORT=[0-9]+' "$unit_file" 2>/dev/null | head -n1 | sed -E 's/.*PORT=([0-9]+).*/\1/')
+		if [ -n "$app_port" ]; then
+			orphan_pid=$(lsof -t -i :"$app_port" 2>/dev/null || true)
+			if [ -n "$orphan_pid" ]; then
+				kill -9 $orphan_pid 2>/dev/null || true
+			fi
+		fi
+
+		# Restart unit
+		systemctl restart "$unit_service" >/dev/null 2>&1
+		sleep 1.5
+
+		# Verify recovery
+		post_active=$(systemctl is-active "$unit_service" 2>/dev/null || echo "inactive")
+		if [ "$post_active" = "active" ]; then
+			action_taken="Cleared failed state, released allocated port $app_port, and restarted systemd app unit. Service restored successfully."
+			status="ONLINE (HEALTHY)"
+			level="SUCCESS"
+			((healed_count++))
+		else
+			action_taken="Attempted reset and restart of systemd app unit, but process failed to stay active."
+			status="DEGRADED / CRITICAL"
+			level="CRITICAL"
+		fi
+
+		set_cooldown "$unit_name"
+		log_healing_event "$unit_name" "$root_cause_type" "$level" "$diagnosis" "$action_taken" "$status" "$raw_logs" "$domain_part"
+	fi
+done
+
+#----------------------------------------------------------#
+#   2. Inspect PHP-FPM Pools (Hanging / Unresponsive / Dead)
+#----------------------------------------------------------#
+
+php_versions=""
+if [ -x "$BIN/v-list-sys-php" ]; then
+	php_versions=$($BIN/v-list-sys-php plain 2>/dev/null)
+fi
+if [ -z "$php_versions" ]; then
+	# Fallback search
+	php_versions=$(ls -d /etc/php/*/fpm 2>/dev/null | awk -F/ '{print $4}')
+fi
+
+for ver in $php_versions; do
+	fpm_svc="php${ver}-fpm"
+	((checked_count++))
+	fpm_active=$(systemctl is-active "$fpm_svc" 2>/dev/null || echo "inactive")
+
+	needs_healing=0
+	fpm_diagnosis=""
+	fpm_cause="FPM_INACTIVE"
+
+	if [ "$fpm_active" != "active" ]; then
+		needs_healing=1
+		fpm_diagnosis="PHP-FPM $ver master daemon was dead or in failed state."
+		fpm_cause="FPM_DAEMON_CRASH"
+	else
+		# Check if socket file is present and not locked
+		sock_file="/run/php/php${ver}-fpm.sock"
+		if [ -S "$sock_file" ]; then
+			fpm_logs=$(journalctl -u "$fpm_svc" -n 10 --no-pager 2>/dev/null)
+			if echo "$fpm_logs" | grep -qi "server reached pm.max_children setting"; then
+				if echo "$fpm_logs" | tail -n 5 | grep -qi "max_children"; then
+					needs_healing=1
+					fpm_diagnosis="PHP-FPM $ver pool saturated (pm.max_children reached). Workers hanging or stalled."
+					fpm_cause="FPM_POOL_STALL"
+				fi
+			fi
+		fi
+	fi
+
+	if [ "$needs_healing" -eq 1 ]; then
+		if is_in_cooldown "$fpm_svc"; then
+			continue
+		fi
+
+		systemctl reset-failed "$fpm_svc" >/dev/null 2>&1 || true
+		systemctl restart "$fpm_svc" >/dev/null 2>&1
+		sleep 1
+
+		post_fpm_active=$(systemctl is-active "$fpm_svc" 2>/dev/null || echo "inactive")
+		if [ "$post_fpm_active" = "active" ]; then
+			fpm_action="Reset failed daemon state and reloaded PHP-FPM $ver master process with fresh worker threads."
+			fpm_status="ONLINE (HEALTHY)"
+			fpm_level="SUCCESS"
+			((healed_count++))
+		else
+			fpm_action="Failed to revive PHP-FPM $ver daemon."
+			fpm_status="CRITICAL"
+			fpm_level="CRITICAL"
+		fi
+
+		set_cooldown "$fpm_svc"
+		raw_fpm_logs=$(journalctl -u "$fpm_svc" -n 12 --no-pager 2>/dev/null)
+		log_healing_event "$fpm_svc" "$fpm_cause" "$fpm_level" "$fpm_diagnosis" "$fpm_action" "$fpm_status" "$raw_fpm_logs" "php${ver}"
+	fi
+done
+
+#----------------------------------------------------------#
+#   3. Inspect 500 / 502 / 504 Bad Gateway Error Bursts    #
+#----------------------------------------------------------#
+
+nginx_error_log="/var/log/nginx/error.log"
+if [ -f "$nginx_error_log" ]; then
+	recent_502s=$(tail -n 50 "$nginx_error_log" 2>/dev/null | grep -E 'connect\(\) failed|Connection refused|upstream prematurely closed|104: Connection reset|no live upstreams' | tail -n 10)
+	
+	if [ -n "$recent_502s" ]; then
+		affected_domain=$(echo "$recent_502s" | grep -oE 'host: "[^"]+"' | head -n1 | sed 's/host: "//; s/"//')
+		[ -z "$affected_domain" ] && affected_domain="global"
+
+		if ! is_in_cooldown "nginx_502_${affected_domain}" 600; then
+			((checked_count++))
+			gw_diagnosis="Nginx detected 502 Bad Gateway / Connection Refused spikes communicating with upstream application backends."
+			
+			if nginx -t >/dev/null 2>&1; then
+				systemctl reload nginx >/dev/null 2>&1 || true
+				
+				if [ "$affected_domain" != "global" ]; then
+					for u_svc in /etc/systemd/system/hestia-app-*${affected_domain}*.service; do
+						if [ -f "$u_svc" ]; then
+							systemctl restart "$(basename "$u_svc")" >/dev/null 2>&1 || true
+						fi
+					done
+				fi
+
+				gw_action="Reloaded Nginx reverse proxy configuration and recycled backend worker channels."
+				gw_status="RECOVERED"
+				gw_level="WARNING"
+				((healed_count++))
+
+				set_cooldown "nginx_502_${affected_domain}"
+				log_healing_event "nginx" "BAD_GATEWAY_SPIKE" "$gw_level" "$gw_diagnosis" "$gw_action" "$gw_status" "$recent_502s" "$affected_domain"
+			fi
+		fi
+	fi
+fi
+
+#----------------------------------------------------------#
+#   4. Inspect Core Daemons (MariaDB, Redis, Nginx, Mail)  #
+#----------------------------------------------------------#
+
+core_services=("nginx" "mariadb" "mysql" "redis-server" "memcached" "named" "bind9" "exim4" "dovecot")
+
+for core_svc in "${core_services[@]}"; do
+	if [ -f "/lib/systemd/system/${core_svc}.service" ] || [ -f "/etc/systemd/system/${core_svc}.service" ]; then
+		((checked_count++))
+		c_active=$(systemctl is-active "$core_svc" 2>/dev/null || echo "inactive")
+		c_failed=$(systemctl is-failed "$core_svc" 2>/dev/null || echo "unknown")
+
+		if [ "$c_failed" = "failed" ]; then
+			if is_in_cooldown "$core_svc"; then
+				continue
+			fi
+
+			core_diag="Core infrastructure service $core_svc entered a failed state unexpectedly."
+			systemctl reset-failed "$core_svc" >/dev/null 2>&1 || true
+			systemctl restart "$core_svc" >/dev/null 2>&1
+			sleep 1.5
+
+			post_c_active=$(systemctl is-active "$core_svc" 2>/dev/null || echo "inactive")
+			if [ "$post_c_active" = "active" ]; then
+				core_action="Cleared failed systemd unit latch and restarted $core_svc service successfully."
+				core_status="ONLINE (HEALTHY)"
+				core_level="SUCCESS"
+				((healed_count++))
+			else
+				core_action="Attempted automatic recovery of $core_svc, but service remains degraded."
+				core_status="CRITICAL"
+				core_level="CRITICAL"
+			fi
+
+			set_cooldown "$core_svc"
+			c_logs=$(journalctl -u "$core_svc" -n 12 --no-pager 2>/dev/null)
+			log_healing_event "$core_svc" "CORE_SERVICE_RECOVERY" "$core_level" "$core_diag" "$core_action" "$core_status" "$c_logs" "system"
+		fi
+	fi
+done
+
+#----------------------------------------------------------#
+#   5. Write Summary Telemetry File                        #
+#----------------------------------------------------------#
+
+scan_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+"$HESTIA_PHP" -r '
+	$summaryFile = $argv[1];
+	$eventsFile = $argv[2];
+	$scanTs = $argv[3];
+	$checkedCount = (int)$argv[4];
+	$healedCount = (int)$argv[5];
+
+	$events = file_exists($eventsFile) ? (json_decode(file_get_contents($eventsFile), true) ?: []) : [];
+	$totalEvents = count($events);
+
+	$now = time();
+	$heals24h = 0;
+	$criticalCount = 0;
+	foreach ($events as $ev) {
+		$evTime = strtotime($ev["timestamp"] ?? 0);
+		if ($evTime >= ($now - 86400)) {
+			$heals24h++;
+		}
+		if (($ev["level"] ?? "") === "CRITICAL" && ($ev["status"] ?? "") !== "ONLINE (HEALTHY)") {
+			$criticalCount++;
+		}
+	}
+
+	$healthStatus = "HEALTHY";
+	if ($criticalCount > 0) {
+		$healthStatus = "CRITICAL";
+	} elseif ($heals24h > 5) {
+		$healthStatus = "RECOVERED";
+	}
+
+	$summary = [
+		"ENGINE_STATUS" => "ACTIVE",
+		"LAST_SCAN_TIME" => $scanTs,
+		"MONITORED_SERVICES_COUNT" => $checkedCount,
+		"TOTAL_HEALING_EVENTS" => $totalEvents,
+		"HEALS_LAST_24H" => $heals24h,
+		"RECENT_SCAN_HEALED" => $healedCount,
+		"SYSTEM_HEALTH" => $healthStatus
+	];
+
+	file_put_contents($summaryFile, json_encode($summary, JSON_PRETTY_PRINT));
+' "$summary_file" "$events_file" "$scan_ts" "$checked_count" "$healed_count" 2>/dev/null || true
+
+chmod 644 "$summary_file" 2>/dev/null || true
+
+echo "[+] AI Ops Self-Healing Scan completed at $scan_ts: $checked_count services inspected, $healed_count auto-healed."
+exit 0

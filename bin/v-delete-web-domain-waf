@@ -1,0 +1,18 @@
+#!/bin/bash
+# info: disable web domain WAF rules
+# options: USER DOMAIN [RESTART]
+#
+# example: v-delete-web-domain-waf admin example.com yes
+#
+# This script disables domain WAF protection rules.
+
+user=$1
+domain=$2
+restart=${3:-no}
+
+# Includes
+source /etc/hestiacp/hestia.conf
+source $HESTIA/func/main.sh
+
+$BIN/v-add-web-domain-waf "$user" "$domain" "off" "$restart"
+exit $?
