@@ -143,6 +143,11 @@ encrypt_file() {
 		-pass pass:"$pass" \
 		-in "$input_file" \
 		-out "$output_file" 2>/dev/null
+	
+	# Generate SHA-256 integrity checksum for cloud verification
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$output_file" | awk '{print $1}' > "${output_file}.sha256" 2>/dev/null || true
+	fi
 }
 
 # Decrypt single backup file with AES-256-CBC & PBKDF2
