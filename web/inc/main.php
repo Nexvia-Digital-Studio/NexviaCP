@@ -1,4 +1,15 @@
 <?php
+// Harden the session cookie before the session is started: HttpOnly (no JS
+// access), SameSite=Lax (mitigates CSRF in cross-site POSTs) and Secure when
+// the request is served over HTTPS.
+session_set_cookie_params([
+	'lifetime' => 0,
+	'path' => '/',
+	'httponly' => true,
+	'samesite' => 'Lax',
+	'secure' => !empty($_SERVER['HTTPS']),
+]);
+
 session_start();
 
 use PHPMailer\PHPMailer\PHPMailer;
@@ -534,7 +545,16 @@ function load_hestia_config() {
 	exec(HESTIA_CMD . "v-list-sys-config json", $output, $return_var);
 	$data = json_decode(implode("", $output), true);
 	$sys_arr = $data["config"];
+	// Secret config values must never land in the session of every user.
+	// They are replaced by a "<KEY>_SET" boolean so the UI can still render
+	// a "configured" state without exposing the raw credential.
+	$secret_keys = ["GITHUB_TOKEN"];
 	foreach ($sys_arr as $key => $value) {
+		if (in_array($key, $secret_keys, true)) {
+			$_SESSION[$key . "_SET"] = !empty($value);
+			unset($_SESSION[$key]);
+			continue;
+		}
 		$_SESSION[$key] = $value;
 	}
 }

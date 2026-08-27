@@ -89,7 +89,7 @@
 							class="form-control"
 							name="v_github_token"
 							id="v_github_token"
-							value="<?= !empty($v_github_token) ? '••••••••••••••••••••••••••••••••' : '' ?>"
+							value="<?= (!empty($v_github_token) || !empty($_SESSION["GITHUB_TOKEN_SET"])) ? '••••••••••••••••••••••••••••••••' : '' ?>"
 							placeholder="github_pat_xxxx..."
 							required
 						>
