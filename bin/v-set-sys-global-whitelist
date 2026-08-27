@@ -44,7 +44,15 @@ case "$action" in
 	remove|delete)
 		[ -z "$ip_input" ] && check_result "$E_INVALID" "IP address required"
 		clean_ip=$(echo "$ip_input" | tr -cd '0-9a-fA-F:./')
-		sed -i "/^$clean_ip$/d" "$WHITELIST_FILE" 2>/dev/null || true
+		# Exact fixed-string line removal (safe for IPs and CIDRs, dots
+		# and slashes are not treated as regex metacharacters).
+		tmp_whitelist=$(mktemp "$WHITELIST_DIR/.global_whitelist_XXXXXX") || check_result "$E_INVALID" "failed to create temporary file"
+		file_owner=$(stat -c '%U:%G' "$WHITELIST_FILE" 2>/dev/null || echo 'root:root')
+		file_perms=$(stat -c '%a' "$WHITELIST_FILE" 2>/dev/null || echo '600')
+		grep -vxF "$clean_ip" "$WHITELIST_FILE" > "$tmp_whitelist" 2>/dev/null || true
+		mv -f "$tmp_whitelist" "$WHITELIST_FILE"
+		chown "$file_owner" "$WHITELIST_FILE" 2>/dev/null || true
+		chmod "$file_perms" "$WHITELIST_FILE" 2>/dev/null || true
 		echo "[+] Removed IP $clean_ip from global whitelist."
 		;;
 	set)

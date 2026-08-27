@@ -73,9 +73,8 @@ fi
 
 # Generate temporary rclone configuration for reliable multi-cloud transfer
 generate_rclone_conf() {
-	local rclone_tmp_dir="/tmp/nexvia_rclone_$$"
-	mkdir -p "$rclone_tmp_dir"
-	chmod 700 "$rclone_tmp_dir"
+	local rclone_tmp_dir
+	rclone_tmp_dir=$(mktemp -d)
 	local conf_file="$rclone_tmp_dir/rclone.conf"
 
 	case "$PROVIDER" in
@@ -136,7 +135,9 @@ encrypt_file() {
 	local pass="$3"
 
 	if [ -z "$pass" ]; then
-		pass="NxvAesKey_Default_${ACCOUNT_ID:-Hestia}"
+		echo "ERROR: ENCRYPTION_KEY is not set. Refusing to encrypt with a guessable default key." >&2
+		echo "       Set ENCRYPTION_KEY in $CLOUD_CONF (via the configure action) and re-run." >&2
+		return 1
 	fi
 
 	openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 \
@@ -157,7 +158,9 @@ decrypt_file() {
 	local pass="$3"
 
 	if [ -z "$pass" ]; then
-		pass="NxvAesKey_Default_${ACCOUNT_ID:-Hestia}"
+		echo "ERROR: ENCRYPTION_KEY is not set. Cannot decrypt without the key the backup was encrypted with." >&2
+		echo "       Legacy installs encrypted with 'NxvAesKey_Default_<ACCOUNT_ID>' - set ENCRYPTION_KEY to that value to restore old backups." >&2
+		return 1
 	fi
 
 	openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
@@ -219,7 +222,7 @@ case "$action" in
 		fi
 
 		# Test probe file
-		probe_file="/tmp/nexvia_probe_$$.tmp"
+		probe_file=$(mktemp)
 		echo "NexviaCP Cloud Backup Probe - $(date)" > "$probe_file"
 		probe_dest="probe_test_${RANDOM}.tmp"
 
@@ -294,9 +297,7 @@ case "$action" in
 		fi
 
 		# Prepare temp working space for encrypted uploads
-		tmp_sync_dir="/tmp/nexvia_sync_$$"
-		mkdir -p "$tmp_sync_dir"
-		chmod 700 "$tmp_sync_dir"
+		tmp_sync_dir=$(mktemp -d)
 		trap 'rm -rf "$tmp_sync_dir"' EXIT
 
 		rconf=$(generate_rclone_conf)
@@ -310,7 +311,11 @@ case "$action" in
 			if [ "$ENCRYPTION_ENABLED" = "yes" ]; then
 				echo "[*] Encrypting $bname with AES-256-CBC (PBKDF2)..."
 				enc_target="$tmp_sync_dir/${bname}.aes"
-				encrypt_file "$bfile" "$enc_target" "$ENCRYPTION_KEY"
+				if ! encrypt_file "$bfile" "$enc_target" "$ENCRYPTION_KEY"; then
+					rm -rf "$(dirname "$rconf")"
+					echo "[-] FAILED: Encryption aborted (no ENCRYPTION_KEY configured). Nothing was uploaded."
+					exit "${E_INVALID:-2}"
+				fi
 				upload_target="$enc_target"
 				remote_name="${bname}.aes"
 			fi
@@ -405,7 +410,10 @@ case "$action" in
 
 		echo "[*] Downloading cloud backup: $target_file..."
 		rconf=$(generate_rclone_conf)
-		dl_tmp="/tmp/dl_$$.tmp"
+		dl_tmp=$(mktemp)
+		# Remove the pre-created file so the download must recreate it
+		# (keeps the "file exists == download succeeded" check below meaningful)
+		rm -f "$dl_tmp"
 
 		if command -v rclone &>/dev/null; then
 			rclone --config "$rconf" copyto "remote:${BUCKET}/${target_file}" "$dl_tmp" 2>/dev/null
@@ -427,7 +435,11 @@ case "$action" in
 		final_tar="$BACKUP_DIR/$(basename "$target_file" | sed -e 's/\.aes$//' -e 's/\.enc$//')"
 		if [[ "$target_file" =~ \.(aes|enc)$ ]]; then
 			echo "[*] Decrypting AES-256 backup archive..."
-			decrypt_file "$dl_tmp" "$final_tar" "$ENCRYPTION_KEY"
+			if ! decrypt_file "$dl_tmp" "$final_tar" "$ENCRYPTION_KEY"; then
+				rm -f "$dl_tmp"
+				echo "[-] FAILED: Decryption aborted (missing or wrong ENCRYPTION_KEY)."
+				exit "${E_INVALID:-2}"
+			fi
 			rm -f "$dl_tmp"
 		else
 			mv "$dl_tmp" "$final_tar"
@@ -447,6 +459,61 @@ case "$action" in
 		p_secret=$7
 		p_enc_key=$8
 		p_retention=${9:-14}
+
+		# Validate provider against the supported list
+		if ! [[ "$p_provider" =~ ^(r2|s3|gdrive|b2|wasabi|custom)$ ]]; then
+			echo "ERROR: Invalid PROVIDER '$p_provider' (supported: r2, s3, gdrive, b2, wasabi, custom)."
+			exit "${E_INVALID:-2}"
+		fi
+
+		# Reject values that could break out of the sourced config or traverse paths
+		for conf_val in "$p_provider" "$p_endpoint" "$p_bucket" "$p_access" \
+			"$p_secret" "$p_enc_key" "$p_retention" "$ACCOUNT_ID" "$REGION"; do
+			if [[ "$conf_val" == *"'"* ]] || [[ "$conf_val" == *$'\n'* ]] || [[ "$conf_val" == *..* ]]; then
+				echo "ERROR: Configuration values must not contain single quotes, newlines, or '..'."
+				exit "${E_INVALID:-2}"
+			fi
+		done
+
+		# Per-field whitelist checks
+		# NOTE: character sets are enumerated explicitly (no a-z ranges)
+		# so they stay locale-independent (e.g. tr_TR.UTF-8 excludes i/I)
+		re_endpoint='^https?://[abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:/-]+$'
+		re_bucket='^[abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]+$'
+		re_secret='^[abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._~+/=-]+$'
+		re_ident='^[abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-]+$'
+		if [ -n "$p_endpoint" ] && ! [[ "$p_endpoint" =~ $re_endpoint ]]; then
+			echo "ERROR: Invalid ENDPOINT (expected http(s)://host[:port][/path])."
+			exit "${E_INVALID:-2}"
+		fi
+		if ! [[ "$p_bucket" =~ $re_bucket ]]; then
+			echo "ERROR: Invalid BUCKET (allowed characters: letters, digits, '.', '_', '-')."
+			exit "${E_INVALID:-2}"
+		fi
+		if ! [[ "$p_access" =~ $re_secret ]]; then
+			echo "ERROR: Invalid ACCESS_KEY (allowed characters: letters, digits, '.', '_', '~', '+', '/', '=', '-')."
+			exit "${E_INVALID:-2}"
+		fi
+		if ! [[ "$p_secret" =~ $re_secret ]]; then
+			echo "ERROR: Invalid SECRET_KEY (allowed characters: letters, digits, '.', '_', '~', '+', '/', '=', '-')."
+			exit "${E_INVALID:-2}"
+		fi
+		if [ -n "$p_enc_key" ] && ! [[ "$p_enc_key" =~ $re_secret ]]; then
+			echo "ERROR: Invalid ENCRYPTION_KEY (allowed characters: letters, digits, '.', '_', '~', '+', '/', '=', '-')."
+			exit "${E_INVALID:-2}"
+		fi
+		if ! [[ "$p_retention" =~ ^[0123456789]+$ ]]; then
+			echo "ERROR: Invalid RETENTION_COUNT (must be numeric)."
+			exit "${E_INVALID:-2}"
+		fi
+		if [ -n "$ACCOUNT_ID" ] && ! [[ "$ACCOUNT_ID" =~ $re_ident ]]; then
+			echo "ERROR: Invalid ACCOUNT_ID (allowed characters: letters, digits, '_', '-')."
+			exit "${E_INVALID:-2}"
+		fi
+		if [ -n "$REGION" ] && ! [[ "$REGION" =~ $re_ident ]]; then
+			echo "ERROR: Invalid REGION (allowed characters: letters, digits, '_', '-')."
+			exit "${E_INVALID:-2}"
+		fi
 
 		cat > "$CLOUD_CONF" << EOF
 PROVIDER='$p_provider'

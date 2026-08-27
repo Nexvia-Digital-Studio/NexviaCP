@@ -52,13 +52,14 @@ if [ "$healing_enabled" = "no" ] && [ "$action" != "force" ]; then
 	exit 0
 fi
 
-# Healing directories
+# Healing directories (events contain journalctl snippets and admin emails:
+# never fall back to a world-writable path such as /tmp)
 HEAL_DIR="/var/lib/hestia/healing"
-if ! mkdir -p "$HEAL_DIR" 2>/dev/null; then
-	HEAL_DIR="/tmp/hestia-healing"
-	mkdir -p "$HEAL_DIR" 2>/dev/null || true
+if ! mkdir -p "$HEAL_DIR" 2>/dev/null || [ ! -w "$HEAL_DIR" ]; then
+	echo "ERROR: v-monitor-sys-healing requires a writable directory $HEAL_DIR" >&2
+	exit 1
 fi
-chmod 755 "$HEAL_DIR" 2>/dev/null || true
+chmod 750 "$HEAL_DIR" 2>/dev/null || true
 
 events_file="$HEAL_DIR/events.json"
 summary_file="$HEAL_DIR/summary.json"
@@ -66,6 +67,7 @@ cooldown_file="$HEAL_DIR/cooldown.json"
 
 [ ! -f "$events_file" ] && echo "[]" > "$events_file" 2>/dev/null || true
 [ ! -f "$cooldown_file" ] && echo "{}" > "$cooldown_file" 2>/dev/null || true
+chmod 640 "$events_file" "$cooldown_file" 2>/dev/null || true
 
 # Anti-spam cooldown check (default: 15 minutes = 900 seconds)
 is_in_cooldown() {
@@ -143,7 +145,7 @@ log_healing_event() {
 		file_put_contents($eventsFile, json_encode($events, JSON_PRETTY_PRINT));
 	' "$events_file" "$ts_iso" "$service" "$domain" "$event_type" "$level" "$diagnosis" "$action_taken" "$status" "$log_snippet" 2>/dev/null || true
 
-	chmod 644 "$events_file" 2>/dev/null || true
+	chmod 640 "$events_file" 2>/dev/null || true
 
 	# Construct extra JSON for email
 	local extra_json
@@ -448,7 +450,7 @@ scan_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 	file_put_contents($summaryFile, json_encode($summary, JSON_PRETTY_PRINT));
 ' "$summary_file" "$events_file" "$scan_ts" "$checked_count" "$healed_count" 2>/dev/null || true
 
-chmod 644 "$summary_file" 2>/dev/null || true
+chmod 640 "$summary_file" 2>/dev/null || true
 
 echo "[+] AI Ops Self-Healing Scan completed at $scan_ts: $checked_count services inspected, $healed_count auto-healed."
 exit 0

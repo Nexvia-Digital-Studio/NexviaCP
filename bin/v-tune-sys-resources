@@ -8,6 +8,10 @@
 # Inspects traffic rates, memory pressure, and assigned priority (0-5)
 # to dynamically allocate or throttle CPU, RAM, and SSD I/O.
 
+# Argument definition
+user=$1
+domain=$2
+
 # Includes
 # shellcheck source=/etc/hestiacp/hestia.conf
 source /etc/hestiacp/hestia.conf
@@ -16,8 +20,17 @@ source $HESTIA/func/main.sh
 # load config file
 source_conf "$HESTIA/conf/hestia.conf"
 
-target_user="$1"
-target_domain="$2"
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+# Optional args: with no USER/DOMAIN the script tunes all domains.
+if [ -n "$user" ] || [ -n "$domain" ]; then
+	check_args '2' "$#" 'USER DOMAIN'
+	is_format_valid 'user' 'domain'
+	is_object_valid 'user' 'USER' "$user"
+	is_object_valid 'web' 'DOMAIN' "$domain"
+fi
 
 GOV_DIR="/var/lib/hestia/governance"
 mkdir -p "$GOV_DIR" 2>/dev/null || true
@@ -184,8 +197,8 @@ JSONEOF
 }
 
 # Main Execution Loop
-if [ -n "$target_user" ] && [ -n "$target_domain" ]; then
-	tune_domain "$target_user" "$target_domain"
+if [ -n "$user" ] && [ -n "$domain" ]; then
+	tune_domain "$user" "$domain"
 else
 	# Tune all domains
 	for u_dir in "$HOMEDIR"/*; do

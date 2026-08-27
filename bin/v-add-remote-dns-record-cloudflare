@@ -62,11 +62,12 @@ payload=$(jq -nc \
 	--arg content "$record" \
 	'{type:"TXT", name:$name, content:$content, ttl:120}')
 
-answer=$(curl --silent --show-error --max-time 30 \
-	--request POST "$api_url" \
-	--header "Authorization: Bearer $CF_API_TOKEN" \
-	--header "Content-Type: application/json" \
-	--data "$payload")
+# Send the Authorization header via curl stdin config so the API token
+# never appears on the process command line (readable via /proc)
+answer=$(printf 'header = "Authorization: Bearer %s"\nheader = "Content-Type: application/json"\n' "$CF_API_TOKEN" |
+	curl --silent --show-error --max-time 30 -K - \
+		--request POST "$api_url" \
+		--data "$payload")
 
 # Parse the response.
 success=$(echo "$answer" | jq -r '.success // false')

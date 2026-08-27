@@ -47,6 +47,16 @@ if type check_args >/dev/null 2>&1; then
 	check_args '2' "$#" 'SUBJECT MESSAGE [LEVEL] [RECIPIENT_EMAIL] [EVENT_TYPE] [EXTRA_JSON]'
 fi
 
+# Validate explicitly provided recipient address (reject invalid input)
+if [ -n "$recipient_email" ]; then
+	if type is_email_format_valid >/dev/null 2>&1; then
+		is_email_format_valid "$recipient_email" 'email'
+	elif ! [[ "$recipient_email" =~ ^[A-Za-z0-9._%+-]+@[[:alnum:].-]+\.[A-Za-z]{2,63}$ ]]; then
+		echo "ERROR: invalid recipient email format :: $recipient_email" >&2
+		exit 1
+	fi
+fi
+
 # Normalize Level
 case "$level" in
 	INFO|SUCCESS|WARNING|CRITICAL) ;;
@@ -108,13 +118,14 @@ if [ "$msg_weight" -lt "$threshold_weight" ] && [ "$event_type" != "test" ]; the
 	exit 0
 fi
 
-# Prepare Directory
+# Prepare Directory (notifications log contains admin emails: never fall
+# back to a world-writable path such as /tmp)
 HEAL_DIR="/var/lib/hestia/healing"
-if ! mkdir -p "$HEAL_DIR" 2>/dev/null; then
-	HEAL_DIR="/tmp/hestia-healing"
-	mkdir -p "$HEAL_DIR" 2>/dev/null || true
+if ! mkdir -p "$HEAL_DIR" 2>/dev/null || [ ! -w "$HEAL_DIR" ]; then
+	echo "ERROR: v-send-sys-notification requires a writable directory $HEAL_DIR" >&2
+	exit 1
 fi
-chmod 755 "$HEAL_DIR" 2>/dev/null || true
+chmod 750 "$HEAL_DIR" 2>/dev/null || true
 
 # Sender configuration
 sender_name="${SYS_NOTIFY_SENDER_NAME:-NexviaCP AI Ops & Self-Healing}"
@@ -437,7 +448,7 @@ $entries = array_slice($entries, 0, 100);
 file_put_contents($logFile, json_encode($entries, JSON_PRETTY_PRINT));
 ' "$notif_log_file" "$ts_iso" "$recipient_email" "$subject" "$level" "$event_type" 2>/dev/null || true
 
-chmod 644 "$notif_log_file" 2>/dev/null || true
+chmod 640 "$notif_log_file" 2>/dev/null || true
 
 if [ -x "$BIN/v-log-action" ]; then
 	$BIN/v-log-action "system" "Info" "System" "AI Ops notification sent (To: $recipient_email, Subject: $subject, Level: $level)."

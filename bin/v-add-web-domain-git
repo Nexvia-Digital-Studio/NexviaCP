@@ -44,6 +44,12 @@ is_object_valid 'user' 'USER' "$user"
 is_object_unsuspended 'user' 'USER' "$user"
 is_object_valid 'web' 'DOMAIN' "$domain"
 
+# Branch name is substituted into deploy.sh via sed, so it must not contain
+# sed metacharacters (&, |, \) or any other shell/sed active characters.
+if ! [[ "${branch:-main}" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+	check_result "$E_INVALID" "invalid branch format :: $branch"
+fi
+
 # Perform verification if read-only mode is enabled
 check_hestia_demo_mode
 
@@ -163,6 +169,10 @@ fi
 
 # Logging
 $BIN/v-log-action "system" "Info" "Web" "Git auto-deploy enabled for domain (Domain: $domain, User: $user, Branch: ${branch:-main})."
+# Strip any credentials embedded in the repo URL (scheme://token@) before
+# logging so PATs never reach system.log.
+logged_repo_url=$(printf '%s' "$repo_url" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://[^/@]+@##')
+ARGUMENTS=${ARGUMENTS//"$repo_url"/$logged_repo_url}
 log_event "$OK" "$ARGUMENTS"
 
 echo "[+] Git auto-deploy configured for $domain (branch: ${branch:-main})."

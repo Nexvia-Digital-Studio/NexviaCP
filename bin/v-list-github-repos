@@ -47,7 +47,7 @@ if [ -n "$gh_org" ]; then
 fi
 
 # Fetch from GitHub API with token
-response=$(curl -s -H "Authorization: Bearer $gh_token" -H "Accept: application/vnd.github+json" "$api_url")
+response=$(printf 'header = "Authorization: Bearer %s"\nheader = "Accept: application/vnd.github+json"\n' "$gh_token" | curl -s -K - "$api_url")
 
 # Check if response is an error or array
 if echo "$response" | grep -q '"message":'; then

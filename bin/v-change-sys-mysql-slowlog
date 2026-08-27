@@ -24,14 +24,28 @@ if [ "x$(id -u)" != 'x0' ]; then
 fi
 
 # Find MySQL client & credentials
+mysql_cnf=""
 MYSQL_CMD="mysql"
 if [ -f /root/.my.cnf ]; then
 	MYSQL_CMD="mysql --defaults-file=/root/.my.cnf"
 elif [ -f "$HESTIA/conf/mysql.conf" ]; then
 	# shellcheck source=/usr/local/hestia/conf/mysql.conf
 	source "$HESTIA/conf/mysql.conf"
-	[ -n "$HOST" ] && [ -n "$USER" ] && MYSQL_CMD="mysql -h $HOST -u $USER -p$PASSWORD"
+	if [ -n "$HOST" ] && [ -n "$USER" ]; then
+		# Keep credentials off the process command line (/proc safe):
+		# use a private defaults-extra-file like v-list-sys-db-status does
+		mysql_cnf=$(mktemp -t nxv_slowlog_XXXXXX)
+		{
+			echo "[client]"
+			echo "host='$HOST'"
+			echo "user='$USER'"
+			echo "password='$PASSWORD'"
+		} > "$mysql_cnf"
+		chmod 600 "$mysql_cnf"
+		MYSQL_CMD="mysql --defaults-extra-file=$mysql_cnf"
+	fi
 fi
+trap 'rm -f "$mysql_cnf"' EXIT
 
 # Prepare slow query log file
 SLOW_LOG_FILE="/var/log/mysql/mariadb-slow.log"
@@ -41,10 +55,22 @@ chown -R mysql:mysql /var/log/mysql 2>/dev/null || true
 chmod 640 "$SLOW_LOG_FILE" 2>/dev/null || true
 
 if [ "$status" = "on" ] || [ "$status" = "yes" ] || [ "$status" = "1" ]; then
-	$MYSQL_CMD -e "SET GLOBAL slow_query_log = 'ON'; SET GLOBAL slow_query_log_file = '$SLOW_LOG_FILE'; SET GLOBAL long_query_time = $long_time; SET GLOBAL log_queries_not_using_indexes = 'ON';" 2>/dev/null || true
+	# Validate long_query_time before it is used in the SET GLOBAL statement
+	# (digits enumerated explicitly to stay locale-independent)
+	if ! [[ "$long_time" =~ ^[0123456789]+([.][0123456789]+)?$ ]]; then
+		echo "ERROR: Invalid LONG_QUERY_TIME '$long_time' (expected a number such as 1 or 0.5)."
+		exit "${E_INVALID:-2}"
+	fi
+	if ! $MYSQL_CMD -e "SET GLOBAL slow_query_log = 'ON'; SET GLOBAL slow_query_log_file = '$SLOW_LOG_FILE'; SET GLOBAL long_query_time = $long_time; SET GLOBAL log_queries_not_using_indexes = 'ON';" 2>/dev/null; then
+		echo "[-] FAILED: MariaDB / MySQL rejected the slow query log settings (check connection and privileges)."
+		exit 1
+	fi
 	echo "[+] MariaDB / MySQL Slow Query Log ENABLED (Threshold: ${long_time}s, Target: $SLOW_LOG_FILE)."
 else
-	$MYSQL_CMD -e "SET GLOBAL slow_query_log = 'OFF';" 2>/dev/null || true
+	if ! $MYSQL_CMD -e "SET GLOBAL slow_query_log = 'OFF';" 2>/dev/null; then
+		echo "[-] FAILED: MariaDB / MySQL could not disable the slow query log (check connection and privileges)."
+		exit 1
+	fi
 	echo "[+] MariaDB / MySQL Slow Query Log DISABLED."
 fi
 

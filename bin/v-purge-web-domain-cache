@@ -55,24 +55,25 @@ parse_object_kv_list $(grep "DOMAIN='$domain'" $USER_DATA/web.conf 2>/dev/null)
 purged_items=()
 bytes_cleared=0
 
-# Helper to find Redis CLI and auth if needed
-get_redis_cmd() {
-	local redis_auth=""
-	for conf_file in /etc/redis/redis.conf /etc/redis/redis-server.conf; do
-		if [ -f "$conf_file" ]; then
-			local pass
-			pass=$(grep -E "^\s*requirepass\s+" "$conf_file" | awk '{print $2}' | tr -d '"' | tr -d "'" | head -n1)
-			if [ -n "$pass" ]; then
-				redis_auth="-a $pass --no-auth-warning"
-				break
-			fi
+# Redis password discovered from server config (used via REDISCLI_AUTH so
+# the password never appears on the process command line)
+REDIS_PASS=""
+for conf_file in /etc/redis/redis.conf /etc/redis/redis-server.conf; do
+	if [ -f "$conf_file" ]; then
+		pass=$(grep -E "^\s*requirepass\s+" "$conf_file" | awk '{print $2}' | tr -d '"' | tr -d "'" | head -n1)
+		if [ -n "$pass" ]; then
+			REDIS_PASS="$pass"
+			break
 		fi
-	done
+	fi
+done
 
-	if command -v redis-cli >/dev/null 2>&1; then
-		echo "redis-cli $redis_auth"
+# Helper wrapping redis-cli with authentication kept off argv
+redis_exec() {
+	if [ -n "$REDIS_PASS" ]; then
+		REDISCLI_AUTH="$REDIS_PASS" redis-cli --no-auth-warning "$@"
 	else
-		echo ""
+		redis-cli "$@"
 	fi
 }
 
@@ -85,16 +86,15 @@ if [[ "$cache_type" == "all" || "$cache_type" == "redis" ]]; then
 		redis_target_db=$(grep -E "^REDIS_DB=" "$HOMEDIR/$user/web/$domain/public_html/.env" 2>/dev/null | cut -d '=' -f2 | tr -d '"' | tr -d "'" | tr -d ' ')
 	fi
 
-	redis_cmd=$(get_redis_cmd)
-	if [ -n "$redis_cmd" ] && [ -n "$redis_target_db" ]; then
-		key_count=$($redis_cmd -n "$redis_target_db" DBSIZE 2>/dev/null | awk '{print $1}')
-		$redis_cmd -n "$redis_target_db" FLUSHDB async >/dev/null 2>&1 || $redis_cmd -n "$redis_target_db" FLUSHDB >/dev/null 2>&1
+	if command -v redis-cli >/dev/null 2>&1 && [ -n "$redis_target_db" ]; then
+		key_count=$(redis_exec -n "$redis_target_db" DBSIZE 2>/dev/null | awk '{print $1}')
+		redis_exec -n "$redis_target_db" FLUSHDB async >/dev/null 2>&1 || redis_exec -n "$redis_target_db" FLUSHDB >/dev/null 2>&1
 		purged_items+=("Redis DB $redis_target_db flushed (${key_count:-0} keys)")
-	elif [ -n "$redis_cmd" ] && [ -z "$redis_target_db" ]; then
+	elif command -v redis-cli >/dev/null 2>&1 && [ -z "$redis_target_db" ]; then
 		pattern="*${domain}*"
-		keys=$($redis_cmd --scan --pattern "$pattern" 2>/dev/null)
+		keys=$(redis_exec --scan --pattern "$pattern" 2>/dev/null)
 		if [ -n "$keys" ]; then
-			echo "$keys" | xargs -r $redis_cmd DEL >/dev/null 2>&1
+			echo "$keys" | xargs -r redis_exec DEL >/dev/null 2>&1
 			purged_items+=("Redis keys matching '$pattern' cleared")
 		else
 			purged_items+=("Redis (No DB allocated / no matching keys)")

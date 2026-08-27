@@ -35,12 +35,14 @@ fi
 
 format="${1:-json}"
 
-# Healing directories
+# Healing directories (events contain journalctl snippets and admin emails:
+# never fall back to a world-writable path such as /tmp)
 HEAL_DIR="/var/lib/hestia/healing"
-if ! mkdir -p "$HEAL_DIR" 2>/dev/null; then
-	HEAL_DIR="/tmp/hestia-healing"
-	mkdir -p "$HEAL_DIR" 2>/dev/null || true
+if ! mkdir -p "$HEAL_DIR" 2>/dev/null || [ ! -w "$HEAL_DIR" ]; then
+	echo "ERROR: v-list-sys-healing-events requires a writable directory $HEAL_DIR" >&2
+	exit 1
 fi
+chmod 750 "$HEAL_DIR" 2>/dev/null || true
 
 events_file="$HEAL_DIR/events.json"
 summary_file="$HEAL_DIR/summary.json"
@@ -48,6 +50,7 @@ notif_file="$HEAL_DIR/notifications.json"
 
 [ ! -f "$events_file" ] && echo "[]" > "$events_file" 2>/dev/null || true
 [ ! -f "$notif_file" ] && echo "[]" > "$notif_file" 2>/dev/null || true
+chmod 640 "$events_file" "$notif_file" 2>/dev/null || true
 
 # Generate live status for monitored services
 "$HESTIA_PHP" -r '

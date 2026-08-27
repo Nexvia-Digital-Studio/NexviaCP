@@ -11,6 +11,12 @@
 #                Variables & Functions                     #
 #----------------------------------------------------------#
 
+# Argument definition
+org_name="$1"
+token="$2"
+# Hide the token (argument 2) from log_event / system.log output
+HIDE=2
+
 # Includes
 # shellcheck source=/etc/hestiacp/hestia.conf
 source /etc/hestiacp/hestia.conf
@@ -24,9 +30,6 @@ source_conf "$HESTIA/conf/hestia.conf"
 #----------------------------------------------------------#
 
 check_args '2' "$#" 'ORG_NAME GITHUB_TOKEN'
-
-org_name="$1"
-token="$2"
 
 # Ensure root user
 if [ "x$(id -u)" != 'x0' ]; then
