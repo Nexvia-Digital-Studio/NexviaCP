@@ -1,8 +1,16 @@
 #!/bin/bash
-# info: configure private IP whitelisting and magic-link security for a PR preview domain
+# info: configure IP whitelisting and magic-link security for a PR preview domain
 # options: USER PR_DOMAIN [ACCESS_MODE] [EXTRA_IPS]
 #
 # example: v-set-web-domain-pr-access admin pr-12.example.com private "192.168.1.50"
+#
+# Protection model (server-level only — the vhost templates already define
+# `location /`, so this include must never add its own location block):
+#   satisfy any;
+#     allow <whitelisted IPs>; deny all;   -> IP whitelist
+#     auth_basic + htpasswd (preview:<token>) -> magic URL
+#   Magic URL: https://preview:<token>@<pr_domain>/
+# The token is generated once per preview domain and kept root-only.
 
 # Includes
 # shellcheck source=/etc/hestiacp/hestia.conf
@@ -35,28 +43,46 @@ mkdir -p "$conf_dir" 2>/dev/null || true
 nginx_inc_http="$conf_dir/nginx.conf_pr_access"
 nginx_inc_ssl="$conf_dir/nginx.ssl.conf_pr_access"
 token_file="$conf_dir/preview_token.secret"
-
-# Generate persistent secret token if not exists
-if [ ! -f "$token_file" ]; then
-	openssl rand -hex 16 > "$token_file"
-	chmod 600 "$token_file"
-	chown "$user:$user" "$token_file" 2>/dev/null || true
-fi
-preview_token=$(cat "$token_file" 2>/dev/null)
+htpasswd_file="$conf_dir/preview_htpasswd"
 
 if [ "$access_mode" = "public" ]; then
 	# Remove restriction
 	rm -f "$nginx_inc_http" "$nginx_inc_ssl"
-	systemctl reload nginx 2>/dev/null || true
+	if nginx -t >/dev/null 2>&1; then
+		systemctl reload nginx 2>/dev/null || true
+	fi
 	echo "[+] PR preview $pr_domain is now PUBLIC."
 	exit 0
 fi
 
+# Generate persistent secret token if not exists (root-only: the hosting
+# user must not be able to read the token from untrusted preview code)
+if [ ! -f "$token_file" ]; then
+	umask 077
+	openssl rand -hex 16 > "$token_file"
+fi
+chown root:root "$token_file" 2>/dev/null || true
+chmod 600 "$token_file" 2>/dev/null || true
+preview_token=$(cat "$token_file" 2>/dev/null)
+
+if [ -z "$preview_token" ]; then
+	echo "ERROR: Unable to generate preview token"
+	exit 1
+fi
+
+# Build the htpasswd (hash of a 128-bit random token — safe to be
+# world-readable for the nginx worker; the hash cannot be inverted)
+token_hash=$(openssl passwd -apr1 "$preview_token" 2>/dev/null)
+if [ -z "$token_hash" ]; then
+	echo "ERROR: Unable to hash preview token"
+	exit 1
+fi
+printf 'preview:%s\n' "$token_hash" > "$htpasswd_file"
+chown root:root "$htpasswd_file" 2>/dev/null || true
+chmod 644 "$htpasswd_file" 2>/dev/null || true
+
 # Collect whitelisted IPs
 GLOBAL_WHITELIST_FILE="$HESTIA/data/security/global_whitelist.conf"
-whitelist_ips=""
-
-# Add local loopback
 whitelist_ips="127.0.0.1 ::1"
 
 # Add Global Whitelist IPs
@@ -73,52 +99,48 @@ for e_ip in $extra_ips; do
 	[ -n "$clean_eip" ] && whitelist_ips="$whitelist_ips $clean_eip"
 done
 
-# Build Nginx IP allow block
-ip_rules=""
+# Build Nginx access rules (SERVER-LEVEL DIRECTIVES ONLY — no location
+# blocks: templates already define `location /` and duplicate locations
+# make `nginx -t` fail, which previously silently disabled all protection)
+ip_rules="allow 127.0.0.1;
+allow ::1;"
 for ip in $whitelist_ips; do
-	ip_rules="${ip_rules}    allow $ip;\n"
+	[ "$ip" = "127.0.0.1" ] || [ "$ip" = "::1" ] && continue
+	ip_rules="$ip_rules
+allow $ip;"
 done
 
-# Generate Nginx configuration rule
-cat << NGINXEOF > "$nginx_inc_http"
-# NexviaCP PR Preview Access Control Shield
-# Magic Token / Cookie Bypass & Whitelist Enforcement
+access_block="# NexviaCP PR Preview Access Shield
+# IP whitelist OR token (https://preview:TOKEN@domain/) — server-level only
+satisfy any;
+${ip_rules}
+deny all;
+auth_basic \"NexviaCP PR Preview\";
+auth_basic_user_file ${htpasswd_file};"
 
-set \$pr_auth_granted 0;
+# Backup current includes, write new ones, and only keep them if nginx
+# accepts the configuration (previously failures were swallowed with ||true)
+backup_ext=".bak.$$"
+cp -f "$nginx_inc_http" "${nginx_inc_http}${backup_ext}" 2>/dev/null || true
+cp -f "$nginx_inc_ssl" "${nginx_inc_ssl}${backup_ext}" 2>/dev/null || true
 
-# Check if magic token query parameter is provided
-if (\$arg_preview_token = "$preview_token") {
-    set \$pr_auth_granted 1;
-    add_header Set-Cookie "nexvia_pr_auth=$preview_token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000" always;
-}
-
-# Check if client has the valid preview cookie
-if (\$cookie_nexvia_pr_auth = "$preview_token") {
-    set \$pr_auth_granted 1;
-}
-
-# If token authorized, bypass IP restrictions; otherwise enforce IP whitelist
-location / {
-    # If client is cookie/token authorized, proxy or serve directly
-    if (\$pr_auth_granted = 1) {
-        break;
-    }
-
-$(echo -e "$ip_rules")
-    deny all;
-
-    # Fallback to try files
-    try_files \$uri \$uri/ /index.php?\$args /index.html;
-}
-NGINXEOF
-
+printf '%s\n' "$access_block" > "$nginx_inc_http"
 cp -f "$nginx_inc_http" "$nginx_inc_ssl" 2>/dev/null || true
 chmod 640 "$nginx_inc_http" "$nginx_inc_ssl" 2>/dev/null || true
 chown "root:$user" "$nginx_inc_http" "$nginx_inc_ssl" 2>/dev/null || true
 
-# Test & Reload Nginx
-nginx -t >/dev/null 2>&1 && systemctl reload nginx 2>/dev/null || true
+if ! nginx -t >/dev/null 2>&1; then
+	# Roll back so the next unrelated reload doesn't break nginx either
+	mv -f "${nginx_inc_http}${backup_ext}" "$nginx_inc_http" 2>/dev/null || rm -f "$nginx_inc_http"
+	mv -f "${nginx_inc_ssl}${backup_ext}" "$nginx_inc_ssl" 2>/dev/null || rm -f "$nginx_inc_ssl"
+	echo "ERROR: nginx rejected the access shield configuration for $pr_domain; previous state restored."
+	log_event "$E_INVALID" "PR access shield rejected by nginx for $pr_domain"
+	exit 1
+fi
+rm -f "${nginx_inc_http}${backup_ext}" "${nginx_inc_ssl}${backup_ext}" 2>/dev/null || true
 
-echo "[+] PR Preview $pr_domain protected with IP Whitelist & Magic Token."
-echo "    Magic Bypass URL: http://${pr_domain}/?preview_token=${preview_token}"
+systemctl reload nginx 2>/dev/null || true
+
+echo "[+] PR Preview $pr_domain protected (IP whitelist OR token)."
+echo "    Magic URL: https://preview:${preview_token}@${pr_domain}/"
 exit 0

@@ -71,21 +71,14 @@ if [ -z "$repo_url" ]; then
 	check_result "$E_INVALID" "GitHub repository not specified and could not be inferred from $base_domain"
 fi
 
-# Build authenticated git URL if GITHUB_TOKEN is available
-auth_repo_url="$repo_url"
+# Build repository URL (token stays OFF the URL/argv — auth goes through
+# GIT_ASKPASS at clone time)
 if [[ ! "$repo_url" =~ ^https?:// ]] && [[ ! "$repo_url" =~ ^git@ ]]; then
 	if [ -n "$GITHUB_ORG" ]; then
 		repo_url="https://github.com/${GITHUB_ORG}/${repo_input}.git"
 	else
 		repo_url="https://github.com/${repo_input}.git"
 	fi
-fi
-
-if [ -n "$GITHUB_TOKEN" ] && [[ "$repo_url" =~ ^https://github.com/ ]]; then
-	clean_repo=$(echo "$repo_url" | sed -e 's|https://github.com/||' -e 's|\.git$||')
-	auth_repo_url="https://${GITHUB_TOKEN}@github.com/${clean_repo}.git"
-else
-	auth_repo_url="$repo_url"
 fi
 
 #----------------------------------------------------------#
@@ -111,13 +104,27 @@ trap 'rm -rf "$tmp_dir"' EXIT
 tmp_clone="$tmp_dir/clone"
 mkdir -p "$tmp_clone"
 
-# Clone repository
+# Clone repository (credentials via GIT_ASKPASS helper — never on argv)
 clone_success=0
+askpass=""
+if [ -n "$GITHUB_TOKEN" ] && [[ "$repo_url" =~ ^https://github.com/ ]]; then
+	askpass="$tmp_dir/askpass.sh"
+	printf '#!/bin/sh\nprintf "%%s\\n" "$NEXVIA_GIT_TOKEN"\n' > "$askpass"
+	chmod 700 "$askpass"
+fi
+
+git_do() {
+	if [ -n "$askpass" ]; then
+		NEXVIA_GIT_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 git -c credential.helper= "$@"
+	else
+		git "$@"
+	fi
+}
 
 # Attempt 1: Fetch pull request ref (pull/PR_NUMBER/head)
-if git clone --depth 50 "$auth_repo_url" "$tmp_clone" 2>/dev/null; then
+if git_do clone --depth 50 "$repo_url" "$tmp_clone" 2>/dev/null; then
 	cd "$tmp_clone" || exit 1
-	if git fetch origin "pull/${pr_number}/head:pr-${pr_number}" 2>/dev/null; then
+	if git_do fetch origin "pull/${pr_number}/head:pr-${pr_number}" 2>/dev/null; then
 		git checkout "pr-${pr_number}" >/dev/null 2>&1
 		clone_success=1
 	elif [ -n "$branch_input" ] && git checkout "$branch_input" 2>/dev/null; then
@@ -159,17 +166,9 @@ else
 	touch "$docroot/.env"
 fi
 
-# Inject Global Key Vault secrets if available
-if [ -f "$HESTIA/conf/vault.conf" ]; then
-	while IFS= read -r vline || [ -n "$vline" ]; do
-		[[ "$vline" =~ ^[[:space:]]*# ]] && continue
-		[[ -z "$vline" ]] && continue
-		vkey=$(echo "$vline" | cut -d '=' -f 1 | tr -d ' \t\r\n')
-		if [ -n "$vkey" ] && ! grep -q "^${vkey}=" "$docroot/.env" 2>/dev/null; then
-			echo "$vline" >> "$docroot/.env"
-		fi
-	done < "$HESTIA/conf/vault.conf"
-fi
+# NOTE: global vault secrets are deliberately NOT injected into PR preview
+# environments — the deployed branch is untrusted code. Per-domain secrets
+# can be managed explicitly via v-set-web-domain-env after review.
 
 # Inject PR preview environment metadata flags
 for env_entry in \
@@ -210,11 +209,21 @@ if ! $BIN/v-list-database "$user" "$full_db_name" >/dev/null 2>&1; then
 	$BIN/v-add-database "$user" "$db_short" "$db_short" "$db_pass" >/dev/null 2>&1 || true
 fi
 
-# Import SQL schema if present
-if [ -n "$sql_file" ] && [ -f "$HESTIA/conf/mysql.conf" ]; then
+# Import SQL schema if present — as the dedicated PR database user, never
+# as root: the schema file comes from an untrusted pull request
+if [ -n "$sql_file" ]; then
 	echo "[*] Importing SQL schema into $full_db_name..."
-	mysql_pass=$(grep "^PASSWORD=" "$HESTIA/conf/mysql.conf" | cut -d "'" -f 2)
-	mariadb -u root -p"$mysql_pass" "$full_db_name" < "$sql_file" 2>/dev/null || true
+	# Keep the dedicated DB user's password in sync with this deployment
+	$BIN/v-change-database-password "$user" "$full_db_name" "$db_pass" >/dev/null 2>&1 || true
+	mysql_cnf=$(mktemp /tmp/nexvia_pr_sql.XXXXXX)
+	chmod 600 "$mysql_cnf"
+	printf '[client]\nuser=%s\npassword=%s\n' "$full_db_name" "$db_pass" > "$mysql_cnf"
+	if mariadb --defaults-extra-file="$mysql_cnf" "$full_db_name" < "$sql_file" 2>/dev/null; then
+		echo "[+] Schema imported as dedicated PR database user."
+	else
+		echo "[!] Schema import failed (continuing)"
+	fi
+	shred -u "$mysql_cnf" 2>/dev/null || rm -f "$mysql_cnf"
 fi
 
 # Inject DB credentials into isolated .env
@@ -276,7 +285,8 @@ case "$detected_type" in
 		$BIN/v-change-web-domain-tpl "$user" "$pr_domain" "node-js" >/dev/null 2>&1 || true
 		if [ -f "$docroot/package.json" ] && command -v npm &>/dev/null; then
 			echo "[*] Installing Node dependencies..."
-			su - "$user" -s /bin/bash -c "cd '$docroot' && npm install --production" 2>/dev/null || true
+			# PR code is untrusted: dependency lifecycle scripts are disabled
+			su - "$user" -s /bin/bash -c "cd '$docroot' && npm install --production --ignore-scripts" 2>/dev/null || true
 		fi
 		entry_file="app.js"
 		[ -f "$docroot/server.js" ] && entry_file="server.js"
@@ -287,6 +297,7 @@ case "$detected_type" in
 		$BIN/v-change-web-domain-tpl "$user" "$pr_domain" "default" >/dev/null 2>&1 || true
 		if [ -f "$docroot/package.json" ] && command -v npm &>/dev/null; then
 			echo "[*] Building React / SPA static bundle..."
+			su - "$user" -s /bin/bash -c "cd '$docroot' && npm install --ignore-scripts" 2>/dev/null || true
 			su - "$user" -s /bin/bash -c "cd '$docroot' && npm run build" 2>/dev/null || true
 			[ -d "$docroot/dist" ] && cp -rf "$docroot/dist"/* "$docroot"/ 2>/dev/null || true
 		fi
@@ -295,7 +306,7 @@ case "$detected_type" in
 		$BIN/v-change-web-domain-tpl "$user" "$pr_domain" "default" >/dev/null 2>&1 || true
 		if command -v composer &>/dev/null; then
 			echo "[*] Running composer install..."
-			su - "$user" -s /bin/bash -c "cd '$docroot' && composer install --no-dev -o" 2>/dev/null || true
+			su - "$user" -s /bin/bash -c "cd '$docroot' && composer install --no-dev -o --no-scripts --no-plugins" 2>/dev/null || true
 		fi
 		su - "$user" -s /bin/bash -c "cd '$docroot' && php artisan key:generate --force 2>/dev/null" || true
 		su - "$user" -s /bin/bash -c "cd '$docroot' && php artisan migrate --force 2>/dev/null" || true
@@ -303,7 +314,7 @@ case "$detected_type" in
 	php)
 		$BIN/v-change-web-domain-tpl "$user" "$pr_domain" "default" >/dev/null 2>&1 || true
 		if [ -f "$docroot/composer.json" ] && command -v composer &>/dev/null; then
-			su - "$user" -s /bin/bash -c "cd '$docroot' && composer install --no-dev -o" 2>/dev/null || true
+			su - "$user" -s /bin/bash -c "cd '$docroot' && composer install --no-dev -o --no-scripts --no-plugins" 2>/dev/null || true
 		fi
 		;;
 esac

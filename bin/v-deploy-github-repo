@@ -63,12 +63,9 @@ docroot="$HOMEDIR/$user/web/$domain/public_html"
 mkdir -p "$docroot"
 
 echo "[*] Step 2: Cloning repository into $docroot..."
-# Prepare authenticated git clone URL
-auth_repo_url="$repo_url"
-if [ -n "$GITHUB_TOKEN" ] && [[ "$repo_url" =~ ^https://github.com/ ]]; then
-	clean_repo=$(echo "$repo_url" | sed -e 's|https://github.com/||' -e 's|\.git$||')
-	auth_repo_url="https://${GITHUB_TOKEN}@github.com/${clean_repo}.git"
-fi
+# Authenticated clone without embedding the PAT in the URL (it would be
+# visible on the process command line via /proc): credentials are supplied
+# through a GIT_ASKPASS helper instead.
 
 # Secure temporary directory with auto-cleanup
 tmp_dir=$(mktemp -d -t nexvia_deploy_XXXXXX)
@@ -76,11 +73,23 @@ trap 'rm -rf "$tmp_dir"' EXIT
 tmp_clone="$tmp_dir/clone"
 mkdir -p "$tmp_clone"
 
-echo "[*] Fetching branch '$branch' from $repo_input..."
-if ! git clone --depth 1 -b "$branch" "$auth_repo_url" "$tmp_clone" 2>/dev/null; then
-	# Fallback to default branch
-	if ! git clone --depth 1 "$auth_repo_url" "$tmp_clone" 2>/dev/null; then
-		check_result "$E_CONNECT" "Git clone failed. Please check repository name and GitHub Token permissions."
+if [ -n "$GITHUB_TOKEN" ] && [[ "$repo_url" =~ ^https://github.com/ ]]; then
+	askpass="$tmp_dir/askpass.sh"
+	printf '#!/bin/sh\nprintf "%%s\\n" "$NEXVIA_GIT_TOKEN"\n' > "$askpass"
+	chmod 700 "$askpass"
+	echo "[*] Fetching branch '$branch' from $repo_input (authenticated)..."
+	if ! NEXVIA_GIT_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 git -c credential.helper= clone --depth 1 -b "$branch" "$repo_url" "$tmp_clone" 2>/dev/null; then
+		if ! NEXVIA_GIT_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 git -c credential.helper= clone --depth 1 "$repo_url" "$tmp_clone" 2>/dev/null; then
+			check_result "$E_CONNECT" "Git clone failed. Please check repository name and GitHub Token permissions."
+		fi
+	fi
+else
+	echo "[*] Fetching branch '$branch' from $repo_input..."
+	if ! git clone --depth 1 -b "$branch" "$repo_url" "$tmp_clone" 2>/dev/null; then
+		# Fallback to default branch
+		if ! git clone --depth 1 "$repo_url" "$tmp_clone" 2>/dev/null; then
+			check_result "$E_CONNECT" "Git clone failed. Please check repository name and access."
+		fi
 	fi
 fi
 
@@ -105,17 +114,10 @@ else
 	touch "$docroot/.env"
 fi
 
-# Inject Global Vault secrets if not already present
-if [ -f "$HESTIA/conf/vault.conf" ]; then
-	while IFS= read -r vline || [ -n "$vline" ]; do
-		[[ "$vline" =~ ^[[:space:]]*# ]] && continue
-		[[ -z "$vline" ]] && continue
-		vkey=$(echo "$vline" | cut -d '=' -f 1 | tr -d ' \t\r\n')
-		if [ -n "$vkey" ] && ! grep -q "^${vkey}=" "$docroot/.env" 2>/dev/null; then
-			echo "$vline" >> "$docroot/.env"
-		fi
-	done < "$HESTIA/conf/vault.conf"
-fi
+# NOTE: global vault secrets are deliberately NOT injected into deployed
+# application environments — deployed code runs as the hosting user and
+# must never see the admin's global API keys. Use v-set-web-domain-env to
+# manage per-domain secrets explicitly.
 
 # Step 2.5: Auto-provision MySQL Database if schema.sql exists
 sql_file=""
@@ -138,15 +140,27 @@ if [ -n "$sql_file" ]; then
 		$BIN/v-add-database "$user" "$db_name" "$db_name" "$db_pass" >/dev/null 2>&1 || true
 	fi
 
-	# Import SQL schema
+	# Import SQL schema — as the deployment's dedicated database user,
+	# never as root: the schema file comes from the deployed repository
 	echo "[*] Importing SQL schema into $full_db_name..."
-	mysql_pass=$(grep "^PASSWORD=" "$HESTIA/conf/mysql.conf" | cut -d "'" -f 2)
-	mariadb -u root -p"$mysql_pass" "$full_db_name" < "$sql_file" 2>/dev/null || true
+	$BIN/v-change-database-password "$user" "$full_db_name" "$db_pass" >/dev/null 2>&1 || true
+	mysql_cnf=$(mktemp /tmp/nexvia_repo_sql.XXXXXX)
+	chmod 600 "$mysql_cnf"
+	printf '[client]\nuser=%s\npassword=%s\n' "$full_db_name" "$db_pass" > "$mysql_cnf"
+	if mariadb --defaults-extra-file="$mysql_cnf" "$full_db_name" < "$sql_file" 2>/dev/null; then
+		echo "[+] Schema imported as dedicated database user."
+	else
+		echo "[!] Schema import failed (continuing)"
+	fi
+	shred -u "$mysql_cnf" 2>/dev/null || rm -f "$mysql_cnf"
 
-	# Inject DB credentials into .env
+	# Inject DB credentials into .env (force-update: the password may have
+	# been rotated above, stale values from older deployments must go)
 	for db_var in "DB_HOST=127.0.0.1" "DB_PORT=3306" "DB_NAME=$full_db_name" "DB_DATABASE=$full_db_name" "DB_USER=$full_db_name" "DB_USERNAME=$full_db_name" "DB_PASS=$db_pass" "DB_PASSWORD=$db_pass"; do
 		k=$(echo "$db_var" | cut -d '=' -f 1)
-		if ! grep -q "^${k}=" "$docroot/.env" 2>/dev/null; then
+		if grep -q "^${k}=" "$docroot/.env" 2>/dev/null; then
+			sed -i "s|^${k}=.*|${db_var}|g" "$docroot/.env"
+		else
 			echo "$db_var" >> "$docroot/.env"
 		fi
 	done
