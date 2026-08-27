@@ -131,6 +131,17 @@ check_wget_curl() {
 	fi
 }
 
+# Prefer the OS-specific installer that ships next to this wrapper: when the
+# installer is run from a repository checkout (the documented install flow),
+# the code that gets installed must be the checked-out code, not whatever is
+# on GitHub main at install time. Downloading is only a fallback for running
+# the wrapper standalone without a checkout.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/hst-install-$type.sh" ]; then
+	bash "$SCRIPT_DIR/hst-install-$type.sh" "$@"
+	exit $?
+fi
+
 # Check for supported operating system before proceeding with download
 # of OS-specific installer, and throw error message if unsupported OS detected.
 if [[ "$release" =~ ^(11|12|13|22.04|24.04|26.04)$ ]]; then
