@@ -216,6 +216,16 @@
 									<span class="top-bar-menu-link-label u-hide-desktop"><?= _("AI Self-Healing") ?></span>
 								</a>
 							</li>
+
+							<!-- Domain Anomaly Monitor — admin only -->
+							<li class="top-bar-menu-item">
+								<a title="<?= function_exists('__tr') ? __tr("Domain Anomaly Monitor", "Domain Anomali İzleme") : _("Domain Anomaly Monitor") ?>" class="top-bar-menu-link <?php if ($TAB == "ANOMALIES") {
+									echo "active";
+								} ?>" href="/list/anomalies/">
+									<i class="fas fa-satellite-dish icon-purple"></i>
+									<span class="top-bar-menu-link-label u-hide-desktop"><?= function_exists('__tr') ? __tr("Domain Anomaly Monitor", "Domain Anomali İzleme") : _("Domain Anomaly Monitor") ?></span>
+								</a>
+							</li>
 							<?php } ?>
 
 							<!-- Server Settings -->

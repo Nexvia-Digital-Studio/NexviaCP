@@ -1,0 +1,177 @@
+#!/bin/bash
+# info: list detected domain anomalies as JSON
+# options: [DOMAIN] [PERIOD] [FORMAT]
+#
+# example: v-list-domain-anomalies json
+# example: v-list-domain-anomalies neredeyasanir.localhost 7d json
+# example: v-list-domain-anomalies all 24h json
+#
+# Periods: 24h, 7d, 30d, 90d, all
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+arg2=$2
+arg3=$3
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+ANOMALY_DIR="$HESTIA/data/anomalies"
+
+# Parse arguments
+if [[ "$arg1" =~ ^(json|shell|plain)$ ]]; then
+	target_domain="all"
+	period="7d"
+	format="$arg1"
+elif [[ "$arg2" =~ ^(json|shell|plain)$ ]]; then
+	target_domain="${arg1:-all}"
+	period="7d"
+	format="$arg2"
+else
+	target_domain="${arg1:-all}"
+	period="${arg2:-7d}"
+	format="${arg3:-json}"
+fi
+
+# Validate domain argument (prevents path traversal via crafted names)
+if [ "$target_domain" != "all" ]; then
+	if ! [[ "$target_domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$ ]] || [[ "$target_domain" == *..* ]]; then
+		echo "ERROR: Invalid domain name."
+		exit 1
+	fi
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+NOW=$(date +%s)
+
+# Calculate cutoff based on period
+case "$period" in
+	24h) cutoff=$((NOW - 86400)) ;;
+	7d)  cutoff=$((NOW - 604800)) ;;
+	30d) cutoff=$((NOW - 2592000)) ;;
+	90d) cutoff=$((NOW - 7776000)) ;;
+	*)   cutoff=0 ;;
+esac
+
+# Collect all anomalies
+python3 - "$ANOMALY_DIR" "$target_domain" "$cutoff" <<'PYEOF'
+import json, sys, os, glob
+
+anomaly_dir = sys.argv[1]
+target_domain = sys.argv[2]
+cutoff = int(sys.argv[3])
+
+all_anomalies = []
+all_metrics = {}
+domains_list = []
+
+# Scan domain directories
+if not os.path.isdir(anomaly_dir):
+    print(json.dumps({"anomalies": [], "metrics": {}, "domains": [], "summary": {}}))
+    sys.exit(0)
+
+for domain_dir in sorted(glob.glob(os.path.join(anomaly_dir, "*"))):
+    if not os.path.isdir(domain_dir):
+        continue
+    domain = os.path.basename(domain_dir)
+
+    if target_domain != "all" and domain != target_domain:
+        continue
+
+    domains_list.append(domain)
+
+    # Load alerts
+    alerts = []
+    alerts_file = os.path.join(domain_dir, "alerts.json")
+    if os.path.isfile(alerts_file):
+        try:
+            with open(alerts_file, 'r') as f:
+                alerts = json.load(f)
+            for a in alerts:
+                if a.get('epoch', 0) >= cutoff:
+                    all_anomalies.append(a)
+        except:
+            pass
+
+    # Load recent metrics for context
+    metrics_file = os.path.join(domain_dir, "metrics.json")
+    metrics = []
+    if os.path.isfile(metrics_file):
+        try:
+            with open(metrics_file, 'r') as f:
+                metrics = json.load(f)
+        except:
+            metrics = []
+
+    # Attach before/after metric context to each alert so the UI can show
+    # what happened around the anomaly (metric value timeline slice)
+    for a in alerts:
+        metric = a.get('metric')
+        ep = a.get('epoch', 0)
+        if not metric or not metrics:
+            continue
+        idx = None
+        for i, m in enumerate(metrics):
+            if m.get('epoch', 0) >= ep:
+                idx = i
+                break
+        if idx is None:
+            idx = len(metrics)
+        def point(m):
+            return {"t": m.get("timestamp", ""), "v": m.get(metric, 0)}
+        a['timeline'] = {
+            "before": [point(m) for m in metrics[max(0, idx - 3):idx]],
+            "after": [point(m) for m in metrics[idx + 1:idx + 4]],
+        }
+
+    # Keep last 48 entries for the live timeline cards
+    if metrics:
+        all_metrics[domain] = metrics[-48:]
+
+# Sort anomalies by epoch descending (newest first)
+all_anomalies.sort(key=lambda x: x.get('epoch', 0), reverse=True)
+
+# Summary stats
+total = len(all_anomalies)
+critical = sum(1 for a in all_anomalies if a.get('severity') == 'critical')
+warning = sum(1 for a in all_anomalies if a.get('severity') == 'warning')
+unresolved = sum(1 for a in all_anomalies if not a.get('resolved'))
+
+# Most affected domain
+domain_counts = {}
+for a in all_anomalies:
+    d = a.get('domain', 'unknown')
+    domain_counts[d] = domain_counts.get(d, 0) + 1
+most_affected = max(domain_counts, key=domain_counts.get) if domain_counts else None
+
+result = {
+    "anomalies": all_anomalies,
+    "metrics": all_metrics,
+    "domains": domains_list,
+    "summary": {
+        "total": total,
+        "critical": critical,
+        "warning": warning,
+        "unresolved": unresolved,
+        "most_affected": most_affected
+    }
+}
+
+print(json.dumps(result, ensure_ascii=False, indent=2))
+PYEOF
+
+exit 0

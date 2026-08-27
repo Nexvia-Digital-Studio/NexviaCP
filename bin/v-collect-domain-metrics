@@ -1,0 +1,211 @@
+#!/bin/bash
+# info: collect domain-level traffic and performance metrics from Nginx logs
+# options: [DOMAIN] [PERIOD]
+#
+# example: v-collect-domain-metrics
+# example: v-collect-domain-metrics neredeyasanir.localhost
+#
+# This script parses Nginx access logs per domain and stores hourly metrics
+# including request count, error rates, bandwidth, unique IPs, and response codes.
+# Data is stored as a rolling 30-day window in JSON format.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+target_domain=${1:-all}
+
+# Validate domain argument (prevents path traversal via crafted names)
+if [ "$target_domain" != "all" ]; then
+	if ! [[ "$target_domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$ ]] || [[ "$target_domain" == *..* ]]; then
+		echo "ERROR: Invalid domain name."
+		exit 1
+	fi
+fi
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+ANOMALY_DIR="$HESTIA/data/anomalies"
+NGINX_LOG_DIR="/var/log/nginx/domains"
+NOW=$(date +%s)
+HOUR_KEY=$(date +"%Y-%m-%dT%H:00:00")
+RETENTION_DAYS=30
+
+mkdir -p "$ANOMALY_DIR"
+
+#----------------------------------------------------------#
+#                    Helper Functions                      #
+#----------------------------------------------------------#
+
+collect_domain_metrics() {
+	local domain="$1"
+	local log_file="$NGINX_LOG_DIR/${domain}.log"
+	local domain_dir="$ANOMALY_DIR/$domain"
+	local metrics_file="$domain_dir/metrics.json"
+
+	mkdir -p "$domain_dir"
+
+	# If no log file, create empty entry
+	if [ ! -f "$log_file" ]; then
+		return 0
+	fi
+
+	# Nginx writes local-time timestamps by default; LC_ALL=C keeps
+	# month abbreviations in English regardless of server locale
+	local current_hour
+	current_hour=$(LC_ALL=C date +"%d/%b/%Y:%H")
+
+	# Initialize counters so unmatched hours don't break comparisons
+	local total_requests=0
+	local error_4xx=0
+	local error_5xx=0
+	local total_bytes=0
+	local unique_ip_count=0
+	local status_200=0
+	local status_301=0
+	local status_302=0
+	local status_403=0
+	local status_404=0
+	local status_500=0
+	local status_502=0
+	local status_503=0
+
+	# Use awk for efficient single-pass parsing
+	eval $(awk -v cur_hour="$current_hour" '
+	BEGIN {
+		total=0; e4xx=0; e5xx=0; bytes=0;
+		s200=0; s301=0; s302=0; s403=0; s404=0; s500=0; s502=0; s503=0;
+	}
+	{
+		# Check if line is from current hour
+		if (index($4, cur_hour) > 0) {
+			total++
+			status = $9 + 0
+			byt = $10 + 0
+			bytes += byt
+			ip = $1
+
+			# Track unique IPs
+			ips[ip] = 1
+
+			# Status code tracking
+			if (status == 200) s200++
+			else if (status == 301) s301++
+			else if (status == 302) s302++
+			else if (status == 403) s403++
+			else if (status == 404) s404++
+			else if (status == 500) s500++
+			else if (status == 502) s502++
+			else if (status == 503) s503++
+
+			if (status >= 400 && status < 500) e4xx++
+			if (status >= 500) e5xx++
+		}
+	}
+	END {
+		uip = 0
+		for (i in ips) uip++
+		printf "total_requests=%d error_4xx=%d error_5xx=%d total_bytes=%d unique_ip_count=%d ", total, e4xx, e5xx, bytes, uip
+		printf "status_200=%d status_301=%d status_302=%d status_403=%d status_404=%d status_500=%d status_502=%d status_503=%d", s200, s301, s302, s403, s404, s500, s502, s503
+	}
+	' "$log_file" 2>/dev/null)
+
+	# Calculate error rate
+	local error_rate=0
+	if [ "$total_requests" -gt 0 ]; then
+		error_rate=$(awk "BEGIN { printf \"%.2f\", (($error_4xx + $error_5xx) / $total_requests) * 100 }")
+	fi
+
+	# Calculate bandwidth in KB
+	local bandwidth_kb=0
+	if [ "$total_bytes" -gt 0 ]; then
+		bandwidth_kb=$(awk "BEGIN { printf \"%.1f\", $total_bytes / 1024 }")
+	fi
+
+	# Build new metric entry
+	local new_entry
+	new_entry=$(cat <<-ENTRY
+{
+  "timestamp": "$HOUR_KEY",
+  "epoch": $NOW,
+  "requests": $total_requests,
+  "error_4xx": $error_4xx,
+  "error_5xx": $error_5xx,
+  "error_rate": $error_rate,
+  "bandwidth_kb": $bandwidth_kb,
+  "unique_ips": ${unique_ip_count:-0},
+  "status": {
+    "200": $status_200,
+    "301": $status_301,
+    "302": $status_302,
+    "403": $status_403,
+    "404": $status_404,
+    "500": $status_500,
+    "502": $status_502,
+    "503": $status_503
+  }
+}
+ENTRY
+)
+
+	# Append to metrics file (or create new)
+	if [ -f "$metrics_file" ]; then
+		# Read existing, replace same-hour entry or append, trim to retention window
+		local cutoff
+		cutoff=$(( NOW - RETENTION_DAYS * 86400 ))
+		# Paths/entry passed via argv — never interpolated into Python source
+		python3 - "$metrics_file" "$cutoff" "$new_entry" <<'PYEOF' 2>/dev/null
+import json, sys
+
+metrics_file, cutoff, entry_raw = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+try:
+    with open(metrics_file, 'r') as f:
+        data = json.load(f)
+except Exception:
+    data = []
+new_entry = json.loads(entry_raw)
+# Replace same-hour entry so manual scans don't duplicate cron data
+data = [d for d in data if d.get('timestamp') != new_entry['timestamp']]
+data.append(new_entry)
+data.sort(key=lambda d: d.get('epoch', 0))
+# Trim old entries beyond retention
+data = [d for d in data if d.get('epoch', 0) > cutoff]
+with open(metrics_file, 'w') as f:
+    json.dump(data, f, indent=2)
+PYEOF
+	else
+		echo "[$new_entry]" > "$metrics_file"
+	fi
+
+	chmod 640 "$metrics_file"
+}
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+if [ "$target_domain" = "all" ]; then
+	# Collect metrics for all domains that have Nginx logs
+	for log_file in "$NGINX_LOG_DIR"/*.log; do
+		[ ! -f "$log_file" ] && continue
+		fname=$(basename "$log_file")
+		# Skip error logs
+		echo "$fname" | grep -q "error" && continue
+		domain="${fname%.log}"
+		collect_domain_metrics "$domain"
+	done
+else
+	collect_domain_metrics "$target_domain"
+fi
+
+echo "OK: Domain metrics collected at $HOUR_KEY"
+exit 0

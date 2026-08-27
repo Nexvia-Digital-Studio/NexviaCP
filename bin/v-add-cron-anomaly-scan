@@ -1,0 +1,70 @@
+#!/bin/bash
+# info: add cron jobs for domain anomaly metrics collection and detection
+# options: NONE
+#
+# This function registers two hourly cron jobs:
+#   - v-collect-domain-metrics   (parses nginx logs, builds baseline)
+#   - v-detect-domain-anomalies  (Z-score detection + email alerts)
+# Jobs run at minute offsets (17/19) to avoid clashing with other hourly
+# tasks scheduled at :00. Safe to run multiple times (idempotent).
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+CRON_TAB="/var/spool/cron/crontabs/hestiaweb"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+if [ ! -f "$CRON_TAB" ]; then
+	echo "ERROR: Cron tab file $CRON_TAB not found."
+	exit 1
+fi
+
+check_collect=$(grep 'v-collect-domain-metrics' "$CRON_TAB")
+check_detect=$(grep 'v-detect-domain-anomalies' "$CRON_TAB")
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+changed=0
+
+if [ -z "$check_collect" ]; then
+	echo "17 * * * * sudo $HESTIA/bin/v-collect-domain-metrics" >> "$CRON_TAB"
+	changed=1
+fi
+
+if [ -z "$check_detect" ]; then
+	echo "19 * * * * sudo $HESTIA/bin/v-detect-domain-anomalies" >> "$CRON_TAB"
+	changed=1
+fi
+
+if [ "$changed" -eq 1 ]; then
+	#----------------------------------------------------------#
+	#                       Hestia                             #
+	#----------------------------------------------------------#
+	# Restarting cron
+	$BIN/v-restart-cron
+	check_result $? "Cron restart failed" > /dev/null
+
+	# Logging
+	$BIN/v-log-action "system" "Info" "Monitoring" "Domain anomaly scan cron jobs enabled."
+fi
+
+log_event "$OK" "$ARGUMENTS"
+
+exit

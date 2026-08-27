@@ -1,0 +1,329 @@
+#!/bin/bash
+# info: detect anomalies in domain metrics using Z-score statistical analysis
+# options: [DOMAIN] [SENSITIVITY]
+#
+# example: v-detect-domain-anomalies
+# example: v-detect-domain-anomalies neredeyasanir.localhost 2.5
+#
+# This script analyzes collected domain metrics against a rolling 7-day baseline.
+# Uses Z-score (standard deviations from mean) to flag anomalies.
+# Z > 3.0 = CRITICAL, Z > 2.0 = WARNING
+# Sends email alerts and stores anomaly events with before/after context.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+target_domain=${1:-all}
+sensitivity=${2:-2.5}
+
+# Validate domain argument (prevents path traversal via crafted names)
+if [ "$target_domain" != "all" ]; then
+	if ! [[ "$target_domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$ ]] || [[ "$target_domain" == *..* ]]; then
+		echo "ERROR: Invalid domain name."
+		exit 1
+	fi
+fi
+
+# Validate sensitivity is numeric
+if ! [[ "$sensitivity" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+	sensitivity=2.5
+fi
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+ANOMALY_DIR="$HESTIA/data/anomalies"
+NOW=$(date +%s)
+NOW_ISO=$(date +"%Y-%m-%dT%H:%M:%S")
+
+#----------------------------------------------------------#
+#                    Anomaly Detection                     #
+#----------------------------------------------------------#
+
+detect_anomalies_for_domain() {
+	local domain="$1"
+	local domain_dir="$ANOMALY_DIR/$domain"
+	local metrics_file="$domain_dir/metrics.json"
+	local alerts_file="$domain_dir/alerts.json"
+
+	if [ ! -f "$metrics_file" ]; then
+		return 0
+	fi
+
+	# Run Z-score anomaly detection with Python
+	python3 - "$metrics_file" "$alerts_file" "$domain" "$sensitivity" "$NOW" "$NOW_ISO" <<'PYEOF'
+import json, sys, math, os
+
+metrics_file = sys.argv[1]
+alerts_file = sys.argv[2]
+domain = sys.argv[3]
+sensitivity = float(sys.argv[4])
+now_epoch = int(sys.argv[5])
+now_iso = sys.argv[6]
+
+# Load metrics
+try:
+    with open(metrics_file, 'r') as f:
+        metrics = json.load(f)
+except:
+    sys.exit(0)
+
+if len(metrics) < 6:
+    # Need at least 6 data points for meaningful baseline
+    sys.exit(0)
+
+# Load existing alerts
+try:
+    with open(alerts_file, 'r') as f:
+        alerts = json.load(f)
+except:
+    alerts = []
+
+# Separate baseline (all except last entry) and current
+current = metrics[-1]
+baseline = metrics[:-1]
+
+# Only use last 7 days of baseline (168 hourly entries max)
+week_cutoff = now_epoch - (7 * 86400)
+baseline = [m for m in baseline if m.get('epoch', 0) > week_cutoff]
+
+if len(baseline) < 4:
+    sys.exit(0)
+
+# Metrics to check for anomalies
+check_fields = [
+    ('requests', 'İstek Sayısı', 'Request Count'),
+    ('error_rate', 'Hata Oranı (%)', 'Error Rate (%)'),
+    ('error_5xx', 'Sunucu Hataları (5xx)', 'Server Errors (5xx)'),
+    ('bandwidth_kb', 'Bant Genişliği (KB)', 'Bandwidth (KB)'),
+    ('unique_ips', 'Benzersiz Ziyaretçi', 'Unique Visitors'),
+]
+
+new_anomalies = []
+# Metrics anomalous in THIS run, whether new or merged into an existing
+# alert — used so ongoing incidents are not prematurely marked resolved
+current_anomalous_metrics = set()
+
+# Re-alert cooldown: an ongoing anomaly is merged into the existing alert
+# instead of spawning a duplicate entry + email on every run
+COOLDOWN_SECONDS = 6 * 3600
+
+for field, label_tr, label_en in check_fields:
+    values = [m.get(field, 0) for m in baseline if m.get(field) is not None]
+    current_val = current.get(field, 0)
+
+    if not values or len(values) < 3:
+        continue
+
+    # Calculate mean and standard deviation
+    mean = sum(values) / len(values)
+    variance = sum((x - mean) ** 2 for x in values) / len(values)
+    std_dev = math.sqrt(variance) if variance > 0 else 0.001
+
+    # Z-score
+    z_score = abs(current_val - mean) / std_dev if std_dev > 0 else 0
+
+    if z_score < sensitivity:
+        continue
+
+    # Flat-baseline guard: when variance is near zero, any tiny deviation
+    # produces a huge Z-score (e.g. 20 -> 21 unique visitors on a quiet
+    # site). Require at least a 20% deviation to report it.
+    if std_dev < abs(mean) * 0.05 and abs(current_val - mean) < abs(mean) * 0.2:
+        continue
+
+    # Zero-baseline guard: a single stray error on a historically clean
+    # metric (0 -> 1) is noise; require a small burst to report it
+    if mean == 0 and current_val < 3:
+        continue
+
+    # Determine severity
+    if z_score >= 3.0:
+        severity = "critical"
+        severity_tr = "KRİTİK"
+        severity_icon = "🔴"
+    else:
+        severity = "warning"
+        severity_tr = "UYARI"
+        severity_icon = "🟡"
+
+    # Determine direction
+    if current_val > mean:
+        direction = "spike"
+        direction_tr = "Ani Yükselme"
+    else:
+        direction = "drop"
+        direction_tr = "Ani Düşüş"
+
+    current_anomalous_metrics.add(field)
+
+    # Merge into an existing unresolved alert for the same metric within
+    # the cooldown window instead of creating duplicates
+    existing_alert = None
+    for alert in alerts:
+        if (not alert.get('resolved') and alert.get('domain') == domain
+                and alert.get('metric') == field
+                and now_epoch - alert.get('epoch', 0) < COOLDOWN_SECONDS):
+            existing_alert = alert
+            break
+
+    if existing_alert is not None:
+        existing_alert['last_seen'] = now_iso
+        existing_alert['occurrences'] = existing_alert.get('occurrences', 1) + 1
+        existing_alert['current_value'] = round(current_val, 2)
+        existing_alert['z_score'] = round(z_score, 2)
+        if severity == 'critical':
+            existing_alert['severity'] = severity
+            existing_alert['severity_tr'] = severity_tr
+        if direction == 'spike':
+            existing_alert['peak_value'] = round(max(existing_alert.get('peak_value', 0), current_val), 2)
+        else:
+            existing_alert['dip_value'] = round(min(existing_alert.get('dip_value', current_val), current_val), 2)
+        continue
+
+    # Context: 3 entries before anomaly
+    context_before = metrics[-4:-1] if len(metrics) >= 4 else metrics[:-1]
+    context_before_values = [m.get(field, 0) for m in context_before]
+
+    anomaly = {
+        "id": f"{domain}_{field}_{now_epoch}",
+        "domain": domain,
+        "timestamp": now_iso,
+        "epoch": now_epoch,
+        "last_seen": now_iso,
+        "occurrences": 1,
+        "metric": field,
+        "label_tr": label_tr,
+        "label_en": label_en,
+        "current_value": round(current_val, 2),
+        "baseline_mean": round(mean, 2),
+        "baseline_std": round(std_dev, 2),
+        "z_score": round(z_score, 2),
+        "severity": severity,
+        "severity_tr": severity_tr,
+        "direction": direction,
+        "direction_tr": direction_tr,
+        "context_before": context_before_values,
+        "status_snapshot": current.get("status", {}),
+        "resolved": False,
+        "resolved_at": None,
+        "duration_minutes": None
+    }
+    if direction == "spike":
+        anomaly["peak_value"] = round(current_val, 2)
+    else:
+        anomaly["dip_value"] = round(current_val, 2)
+
+    new_anomalies.append(anomaly)
+
+    # Print for bash to capture (only NEW anomalies trigger email)
+    print(f"ANOMALY|{severity_icon}|{domain}|{label_tr}|{direction_tr}|{severity_tr}|Beklenen: {mean:.1f} → Gerçek: {current_val:.1f} (Z={z_score:.1f})")
+
+# Mark previously unresolved anomalies as resolved if no longer anomalous.
+# Considers every metric still anomalous this run — including ones merged
+# into existing alerts — or ongoing incidents would resolve prematurely.
+for alert in alerts:
+    if alert.get('resolved'):
+        continue
+    if alert['domain'] != domain:
+        continue
+    if alert['metric'] not in current_anomalous_metrics:
+        alert['resolved'] = True
+        alert['resolved_at'] = now_iso
+        if alert.get('epoch'):
+            alert['duration_minutes'] = round((now_epoch - alert['epoch']) / 60)
+
+# Append new anomalies
+alerts.extend(new_anomalies)
+
+# Trim to last 90 days
+cutoff_90d = now_epoch - (90 * 86400)
+alerts = [a for a in alerts if a.get('epoch', 0) > cutoff_90d]
+
+# Save alerts
+with open(alerts_file, 'w') as f:
+    json.dump(alerts, f, indent=2, ensure_ascii=False)
+
+os.chmod(alerts_file, 0o640)
+PYEOF
+}
+
+#----------------------------------------------------------#
+#                    Email Alert                           #
+#----------------------------------------------------------#
+
+send_anomaly_email() {
+	local domain="$1"
+	local anomaly_output="$2"
+
+	# Strip CR/LF so a hostile domain string can't inject mail headers
+	domain=$(printf '%s' "$domain" | tr -d '\r\n')
+
+	# Get admin email
+	local admin_email
+	admin_email=$(grep "^CONTACT" "$HESTIA/data/users/admin/user.conf" 2>/dev/null | cut -d"'" -f2)
+	[ -z "$admin_email" ] && return 0
+
+	local hostname
+	hostname=$(hostname -f 2>/dev/null || hostname)
+
+	local subject="⚠️ NexviaCP Anomali Tespiti - $domain [$hostname]"
+
+	local body="NexviaCP Anomali Tespit Sistemi
+========================================
+
+Sunucu: $hostname
+Tarih: $(date '+%d/%m/%Y %H:%M:%S')
+Domain: $domain
+
+Tespit Edilen Anomaliler:
+$(echo "$anomaly_output" | sed 's/ANOMALY|//g' | sed 's/|/ | /g')
+
+Detaylar: https://$hostname:8083/list/anomalies/?domain=$domain
+
+Bu e-posta otomatik olarak NexviaCP Anomali Tespit Motoru tarafından gönderilmiştir.
+"
+
+	# Send via hestia notification or mail command
+	if command -v mail >/dev/null 2>&1; then
+		echo "$body" | mail -s "$subject" "$admin_email" 2>/dev/null
+	elif [ -x "$HESTIA/bin/v-add-user-notification" ]; then
+		$HESTIA/bin/v-add-user-notification admin "Anomali: $domain" "$(echo "$anomaly_output" | head -5 | sed 's/ANOMALY|//g' | sed 's/|/ /g')" 2>/dev/null
+	fi
+}
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+process_domain() {
+	local domain="$1"
+	local anomaly_output
+	anomaly_output=$(detect_anomalies_for_domain "$domain" 2>/dev/null)
+
+	if [ -n "$anomaly_output" ]; then
+		echo "$anomaly_output"
+		send_anomaly_email "$domain" "$anomaly_output"
+	fi
+}
+
+if [ "$target_domain" = "all" ]; then
+	for domain_dir in "$ANOMALY_DIR"/*/; do
+		[ ! -d "$domain_dir" ] && continue
+		domain=$(basename "$domain_dir")
+		process_domain "$domain"
+	done
+else
+	process_domain "$target_domain"
+fi
+
+exit 0
