@@ -13,6 +13,7 @@ if ($_SESSION["userContext"] != "admin") {
 
 // Check POST request
 if (!empty($_POST["save"])) {
+	verify_csrf($_POST);
 	// Set success message
 	$_SESSION["ok_msg"] = _("Info (read-only mode): Crontab can only be edited via SSH.");
 }
