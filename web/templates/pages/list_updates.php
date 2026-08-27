@@ -28,6 +28,24 @@ $up_data = $nexvia_info["upstream_hestia"] ?? [];
 	<h1 class="u-text-center u-hide-desktop u-mt20 u-pr30 u-mb20 u-pl30"><?= tohtml(__u_tr("Updates & Core Management", "Güncellemeler & Çekirdek Yönetimi")) ?></h1>
 	<?php show_alert_message($_SESSION); ?>
 
+	<!-- NexviaCP Release Status Alert Banner (TEST BADGE: GITHUB-PULL-VERIFICATION) -->
+	<div class="u-mb20" style="background: linear-gradient(135deg, rgba(56, 189, 248, 0.12), rgba(168, 85, 247, 0.12)); border: 1px solid var(--icon-color-blue, #38bdf8); border-radius: 8px; padding: 15px 20px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+		<div style="display:flex; align-items:center; gap:12px;">
+			<div style="width:40px; height:40px; border-radius:50%; background: var(--icon-color-blue, #38bdf8); display:flex; align-items:center; justify-content:center; color:#fff; font-size:1.2rem;">
+				<i class="fas fa-rocket"></i>
+			</div>
+			<div>
+				<h4 style="margin:0; font-size:1rem; font-weight:700; color:var(--color-text);">NexviaCP v2.1.0 Enterprise Core</h4>
+				<span style="font-size:12px; color:var(--color-text-muted);">🌟 GitHub Doğrudan Canlı Çekirdek Güncelleme Doğrulandı</span>
+			</div>
+		</div>
+		<div>
+			<span class="badge badge-success" style="padding: 6px 12px; font-size:12px; font-weight:600;">
+				<i class="fas fa-check-double"></i> GitHub Canlı Senkronizasyon Aktif
+			</span>
+		</div>
+	</div>
+
 	<!-- Top Grid: NexviaCP Core & Upstream Security Tracking -->
 	<div class="u-mb20" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 15px;">
 		
