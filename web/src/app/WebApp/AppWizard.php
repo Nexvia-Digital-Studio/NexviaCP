@@ -35,9 +35,11 @@ class AppWizard
         $installationTarget = $this->getInstallationTarget($this->domain);
         $files = $this->appcontext->listFiles($installationTarget->getDocRoot());
 
+        // deploy.php is an additional NexviaCP skeleton placeholder (Git
+        // webhook receiver stub) and must count as "clean" as well.
         $filteredFiles = array_filter(
             $files,
-            fn(string $file) => !in_array($file, ['index.html', 'robots.txt']),
+            fn(string $file) => !in_array($file, ['index.html', 'robots.txt', 'deploy.php']),
         );
 
         return count($filteredFiles) <= 0;

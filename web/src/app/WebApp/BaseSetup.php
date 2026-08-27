@@ -44,8 +44,12 @@ abstract class BaseSetup implements InstallerInterface
 
     public function install(InstallationTarget $target, array $options): void
     {
+        // NexviaCP ships an extra skeleton placeholder (deploy.php, the Git
+        // webhook receiver stub) that must be cleared as well, otherwise
+        // composer create-project aborts with "Project directory is not empty".
         $this->appcontext->deleteFile($target->getDocRoot('robots.txt'));
         $this->appcontext->deleteFile($target->getDocRoot('index.html'));
+        $this->appcontext->deleteFile($target->getDocRoot('deploy.php'));
 
         $this->retrieveResources($target, $options);
         $this->setupDatabase($target->database);
