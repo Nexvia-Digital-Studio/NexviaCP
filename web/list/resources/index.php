@@ -50,7 +50,7 @@ if (!empty($_POST["tune_all"])) {
 	if ($return_var == 0) {
 		$_SESSION["ok_msg"] = $is_tr ? "Tüm sitelerin trafik ve kaynak profilleri analiz edildi; boşta olanlar kısıldı, aktif siteler ölçeklendirildi." : _("All sites analyzed; idle sites throttled and active sites scaled successfully.");
 	} else {
-		$_SESSION["error_msg"] = $is_tr ? "Kaynak optimizasyonu sırasında hata oluştu." : _("Error during resource auto-tuning.");
+		$_SESSION["error_msg"] = ($is_tr ? "Kaynak optimizasyonu sırasında hata oluştu: " : _("Error during resource auto-tuning: ")) . implode(" ", $output);
 	}
 	header("Location: /list/resources/");
 	exit();
