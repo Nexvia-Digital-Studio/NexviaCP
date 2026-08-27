@@ -1,13 +1,25 @@
 <?php
 [$http_host, $port] = explode(":", $_SERVER["HTTP_HOST"] . ":");
-$db_myadmin_link = "//" . $http_host . "/phpmyadmin/";
-$db_pgadmin_link = "//" . $http_host . "/phppgadmin/";
+
+$pma_host = $http_host;
+// In local dev/Docker or IP access, pick the first configured domain or map web port 9080
+if (filter_var($http_host, FILTER_VALIDATE_IP) || $http_host === "localhost" || $http_host === "127.0.0.1") {
+	$found_domains = glob("/home/" . ($user ?? "admin") . "/web/*");
+	if (!empty($found_domains) && is_dir($found_domains[0])) {
+		$pma_host = basename($found_domains[0]) . ":9080";
+	} elseif ($port == "8083") {
+		$pma_host = $http_host . ":9080";
+	}
+}
+
+$db_myadmin_link = "//" . $pma_host . "/phpmyadmin/";
+$db_pgadmin_link = "//" . $pma_host . "/phppgadmin/";
 
 if (!empty($_SESSION["DB_PMA_ALIAS"])) {
-	$db_myadmin_link = "//" . $http_host . "/" . $_SESSION["DB_PMA_ALIAS"] . "/";
+	$db_myadmin_link = "//" . $pma_host . "/" . $_SESSION["DB_PMA_ALIAS"] . "/";
 }
 if (!empty($_SESSION["DB_PGA_ALIAS"])) {
-	$db_pgadmin_link = "//" . $http_host . "/" . $_SESSION["DB_PGA_ALIAS"] . "/";
+	$db_pgadmin_link = "//" . $pma_host . "/" . $_SESSION["DB_PGA_ALIAS"] . "/";
 }
 ?>
 
