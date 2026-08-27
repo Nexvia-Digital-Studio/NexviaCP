@@ -2303,6 +2303,14 @@ fi
 
 if [ "$fail2ban" = 'yes' ]; then
 	echo "[ * ] Configuring fail2ban access monitor..."
+	# fail2ban refuses to start when a monitored log file is missing;
+	# rsyslog only creates auth.log after the first authpriv message,
+	# so pre-create it to survive first-boot start ordering
+	if [ ! -f "/var/log/auth.log" ]; then
+		touch /var/log/auth.log
+		chown syslog:adm /var/log/auth.log
+		chmod 640 /var/log/auth.log
+	fi
 	cp -rf $HESTIA_INSTALL_DIR/fail2ban /etc/
 	if [ "$dovecot" = 'no' ]; then
 		fline=$(cat /etc/fail2ban/jail.local | grep -n dovecot-iptables -A 2)
