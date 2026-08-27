@@ -13,8 +13,24 @@ source_conf "$HESTIA/conf/hestia.conf"
 format=${1:-json}
 GOV_DIR="/var/lib/hestia/governance"
 
-# Auto-run tune if governance state is empty or stale (>5 min)
+# Auto-run tune if governance state is empty or stale (>60s)
+stale=0
 if [ ! -d "$GOV_DIR" ] || [ -z "$(ls -A "$GOV_DIR" 2>/dev/null)" ]; then
+	stale=1
+else
+	newest_file=$(ls -t "$GOV_DIR"/*.json 2>/dev/null | head -n 1)
+	if [ -z "$newest_file" ]; then
+		stale=1
+	else
+		now_ts=$(date +%s)
+		file_ts=$(stat -c %Y "$newest_file" 2>/dev/null || echo 0)
+		if [ $((now_ts - file_ts)) -gt 60 ]; then
+			stale=1
+		fi
+	fi
+fi
+
+if [ "$stale" -eq 1 ]; then
 	$BIN/v-tune-sys-resources >/dev/null 2>&1 || true
 fi
 

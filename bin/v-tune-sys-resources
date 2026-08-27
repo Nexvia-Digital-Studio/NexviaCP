@@ -47,8 +47,8 @@ tune_domain() {
 
 	# Get log file to measure request activity
 	local log_file=""
-	for lpath in "/var/log/nginx/domains/$d.log" "$HOMEDIR/$u/web/$d/logs/$d.log" "/var/log/apache2/domains/$d.log"; do
-		if [ -f "$lpath" ]; then
+	for lpath in "/var/log/nginx/domains/$d.log" "$HOMEDIR/$u/web/$d/logs/$d.log" "/var/log/apache2/domains/$d.log" "$HOMEDIR/$u/web/$d/logs/$d.bytes.log"; do
+		if [ -f "$lpath" ] && [ -s "$lpath" ]; then
 			log_file="$lpath"
 			break
 		fi
@@ -57,10 +57,57 @@ tune_domain() {
 	local req_count=0
 	local last_hit_time=0
 	if [ -n "$log_file" ] && [ -f "$log_file" ]; then
-		# Approximate recent requests in last 10 minutes
-		req_count=$(tail -n 200 "$log_file" 2>/dev/null | wc -l)
-		last_hit_time=$(stat -c %Y "$log_file" 2>/dev/null || echo 0)
+		read -r req_count last_hit_time < <(python3 - "$log_file" << 'PYEOF'
+import sys, re, time, os
+from datetime import datetime, timezone, timedelta
+
+log_file = sys.argv[1] if len(sys.argv) > 1 else ""
+now_ts = int(time.time())
+req_count_10m = 0
+last_hit_time = 0
+
+MONTHS = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,"Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
+
+if log_file and os.path.isfile(log_file):
+    try:
+        with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - 200000), os.SEEK_SET)
+            lines = f.readlines()
+            if size > 200000 and lines:
+                lines = lines[1:]
+            
+            for line in lines[-1000:]:
+                m = re.search(r"(\d{2})/([A-Za-z]{3})/(\d{4}):(\d{2}):(\d{2}):(\d{2})(?:\s+([+-]\d{4}))?", line)
+                if m:
+                    day, mon_str, year, hr, minu, sec, tz_str = m.groups()
+                    mon = MONTHS.get(mon_str, 1)
+                    if tz_str:
+                        tz_sign = 1 if tz_str[0] == "+" else -1
+                        tz_hrs = int(tz_str[1:3])
+                        tz_mins = int(tz_str[3:5])
+                        tz = timezone(tz_sign * timedelta(hours=tz_hrs, minutes=tz_mins))
+                        dt = datetime(int(year), mon, int(day), int(hr), int(minu), int(sec), tzinfo=tz)
+                        line_ts = int(dt.timestamp())
+                    else:
+                        dt = datetime(int(year), mon, int(day), int(hr), int(minu), int(sec))
+                        line_ts = int(dt.timestamp())
+                    
+                    if line_ts > last_hit_time:
+                        last_hit_time = line_ts
+                    
+                    if line_ts >= (now_ts - 600):
+                        req_count_10m += 1
+    except Exception:
+        pass
+
+print(f"{req_count_10m} {last_hit_time}")
+PYEOF
+		)
 	fi
+	[ -z "$req_count" ] && req_count=0
+	[ -z "$last_hit_time" ] && last_hit_time=0
 
 	# Determine memory usage
 	local cur_ram_bytes=0
@@ -98,9 +145,14 @@ tune_domain() {
 		0)
 			# AUTO-ADAPTIVE (Akıllı Otomatik)
 			local now_ts=$(date +%s)
-			local idle_sec=$((now_ts - last_hit_time))
+			local idle_sec=0
+			if [ "$last_hit_time" -gt 0 ]; then
+				idle_sec=$((now_ts - last_hit_time))
+			else
+				idle_sec=999999
+			fi
 
-			if [ "$req_count" -eq 0 ] || ([ "$last_hit_time" -gt 0 ] && [ "$idle_sec" -gt 600 ]); then
+			if [ "$req_count" -eq 0 ] || [ "$idle_sec" -gt 600 ]; then
 				# Deep Eco-Idle: Site has been idle for >10 mins -> throttle aggressively!
 				status="idle"
 				mem_high="64M"
