@@ -1,6 +1,11 @@
 <?php
 // GitHub Webhook Auto-Deploy Listener
 // Responds to GitHub push / release events to automatically update connected domains.
+//
+// Security: HMAC-SHA256 verification is MANDATORY (fail-closed). The secret
+// is fetched through the sudo-whitelisted v-list-webhook-secret helper
+// because this endpoint runs as the unprivileged panel user. Replayed
+// deliveries are rejected via the X-GitHub-Delivery id cache.
 
 header("Content-Type: application/json");
 
@@ -15,35 +20,38 @@ if (empty($payload_raw)) {
 	exit();
 }
 
-// 1. Signature Verification (HMAC-SHA256) if GITHUB_WEBHOOK_SECRET is set
+// 1. Signature Verification (HMAC-SHA256) — always enforced
 $headers = function_exists('getallheaders') ? getallheaders() : [];
 $signature = $headers['X-Hub-Signature-256'] ?? $headers['x-hub-signature-256'] ?? ($_SERVER['HTTP_X_HUB_SIGNATURE_256'] ?? '');
 
 $webhook_secret = "";
-if (file_exists("/usr/local/hestia/conf/vault.conf")) {
-	$vault_lines = file("/usr/local/hestia/conf/vault.conf", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-	foreach ($vault_lines as $vline) {
-		if (strpos($vline, 'GITHUB_WEBHOOK_SECRET=') === 0) {
-			list(, $webhook_secret) = explode('=', $vline, 2);
-			$webhook_secret = trim($webhook_secret, " \t\n\r\0\x0B\"'");
-			break;
-		}
-	}
+exec("/usr/bin/sudo /usr/local/hestia/bin/v-list-webhook-secret 2>/dev/null", $secret_out, $secret_rc);
+if ($secret_rc === 0 && !empty($secret_out[0])) {
+	$webhook_secret = trim($secret_out[0]);
 }
 
-if (!empty($webhook_secret)) {
-	if (empty($signature) || strpos($signature, 'sha256=') !== 0) {
-		http_response_code(401);
-		echo json_encode(["status" => "error", "message" => "Missing or invalid signature header"]);
-		exit();
-	}
-	$expected_signature = 'sha256=' . hash_hmac('sha256', $payload_raw, $webhook_secret);
-	if (!hash_equals($expected_signature, $signature)) {
-		http_response_code(403);
-		echo json_encode(["status" => "error", "message" => "Signature verification failed"]);
-		exit();
-	}
+if (empty($webhook_secret)) {
+	// Fail closed: without a configured secret no request is trusted.
+	http_response_code(403);
+	echo json_encode([
+		"status" => "error",
+		"message" => "Webhook secret is not configured. Run: v-set-sys-global-vault GITHUB_WEBHOOK_SECRET <secret> (or set it via v-change-sys-config-value), then retry.",
+	]);
+	exit();
 }
+
+if (empty($signature) || strpos($signature, 'sha256=') !== 0) {
+	http_response_code(401);
+	echo json_encode(["status" => "error", "message" => "Missing or invalid signature header"]);
+	exit();
+}
+$expected_signature = 'sha256=' . hash_hmac('sha256', $payload_raw, $webhook_secret);
+if (!hash_equals($expected_signature, $signature)) {
+	http_response_code(403);
+	echo json_encode(["status" => "error", "message" => "Signature verification failed"]);
+	exit();
+}
+unset($webhook_secret, $secret_out);
 
 // 2. Payload Parsing & Sanitization
 $payload = json_decode($payload_raw, true);
@@ -55,8 +63,31 @@ if (empty($repo_name) || !preg_match('/^[a-zA-Z0-9_\-\.]+$/', $repo_name)) {
 	exit();
 }
 
-// 3. Rate Limit / Cooldown per repository (prevents flood DoS attacks)
-$lock_dir = "/tmp/nexvia_webhook_locks";
+// 3. Replay protection: reject already-seen delivery ids (24h window)
+$delivery_id = $_SERVER["HTTP_X_GITHUB_DELIVERY"] ?? "";
+if (!empty($delivery_id) && preg_match('/^[a-zA-Z0-9\-]{8,64}$/', $delivery_id)) {
+	$cache_dir = sys_get_temp_dir() . "/nexvia_webhook_deliveries";
+	if (!is_dir($cache_dir)) {
+		@mkdir($cache_dir, 0700, true);
+	}
+	$marker = $cache_dir . "/" . md5($delivery_id);
+	if (file_exists($marker)) {
+		http_response_code(429);
+		echo json_encode(["status" => "error", "message" => "Duplicate delivery rejected"]);
+		exit();
+	}
+	@touch($marker);
+	// Opportunistic prune of markers older than 24h
+	$now = time();
+	foreach (glob($cache_dir . "/*") ?: [] as $old) {
+		if (is_file($old) && ($now - filemtime($old)) > 86400) {
+			@unlink($old);
+		}
+	}
+}
+
+// 4. Rate Limit / Cooldown per repository (prevents flood DoS attacks)
+$lock_dir = sys_get_temp_dir() . "/nexvia_webhook_locks";
 if (!is_dir($lock_dir)) {
 	@mkdir($lock_dir, 0700, true);
 }
@@ -69,11 +100,11 @@ if (file_exists($lock_file) && (time() - filemtime($lock_file) < 15)) {
 }
 @touch($lock_file);
 
-// 4. Log and Execute Background Sync
+// 5. Log and Execute Background Sync (sudo: bin scripts require root)
 $log_msg = date("[Y-m-d H:i:s]") . " GitHub Webhook triggered for repository: " . $repo_name . "\n";
 @file_put_contents("/var/log/hestia/github-webhook.log", $log_msg, FILE_APPEND);
 
-$cmd = "/usr/local/hestia/bin/v-sync-github-repos " . escapeshellarg($repo_name) . " >> /var/log/hestia/github-webhook.log 2>&1 &";
+$cmd = "/usr/bin/sudo /usr/local/hestia/bin/v-sync-github-repos " . escapeshellarg($repo_name) . " >> /var/log/hestia/github-webhook.log 2>&1 &";
 exec($cmd);
 
 echo json_encode([
