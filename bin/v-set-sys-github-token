@@ -1,0 +1,46 @@
+#!/bin/bash
+# info: configure GitHub Organization and Personal Access Token for NexviaCP
+# options: ORG_NAME GITHUB_TOKEN
+#
+# example: v-set-sys-github-token Nexvia-Digital-Studio github_pat_11A...
+#
+# This script stores the GitHub Organization and PAT credentials in Hestia configuration
+# so NexviaCP can list private repositories and perform 1-click deployments.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'ORG_NAME GITHUB_TOKEN'
+
+org_name="$1"
+token="$2"
+
+# Ensure root user
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: v-set-sys-github-token can be executed only by root user"
+	exit 10
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+$BIN/v-change-sys-config-value "GITHUB_ORG" "$org_name"
+$BIN/v-change-sys-config-value "GITHUB_TOKEN" "$token"
+
+log_event "$OK" "$ARGUMENTS"
+echo "[+] GitHub credentials successfully saved for organization: $org_name"
+exit 0

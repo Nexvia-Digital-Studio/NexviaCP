@@ -1,0 +1,63 @@
+#!/bin/bash
+# info: list masked environment variables (.env) for a web domain
+# options: USER DOMAIN [FORMAT]
+#
+# example: v-list-web-domain-env admin neredeyasanir.localhost json
+#
+# Security: Returns ONLY masked values to guarantee zero-knowledge secrecy.
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+check_args '2' "$#" 'USER DOMAIN [FORMAT]'
+is_format_valid 'user' 'domain'
+
+user=$1
+domain=$2
+format=${3:-json}
+
+docroot="$HOMEDIR/$user/web/$domain/public_html"
+env_file="$docroot/.env"
+
+if [ ! -f "$env_file" ]; then
+	echo "{}"
+	exit 0
+fi
+
+if [ "$format" = "json" ]; then
+	echo "{"
+	first=1
+	while IFS= read -r line || [ -n "$line" ]; do
+		# Ignore comments and empty lines
+		[[ "$line" =~ ^[[:space:]]*# ]] && continue
+		[[ -z "$line" ]] && continue
+		
+		key=$(echo "$line" | cut -d '=' -f 1 | tr -d ' \t\r\n')
+		val_len=$(echo "$line" | cut -d '=' -f 2- | wc -c)
+		
+		[ -z "$key" ] && continue
+		
+		if [ $first -eq 0 ]; then
+			echo ","
+		fi
+		first=0
+		
+		printf '    "%s": {\n        "KEY": "%s",\n        "MASKED": "••••••••••••••••",\n        "EXISTS": "yes"\n    }' "$key" "$key"
+	done < "$env_file"
+	echo ""
+	echo "}"
+else
+	while IFS= read -r line || [ -n "$line" ]; do
+		[[ "$line" =~ ^[[:space:]]*# ]] && continue
+		[[ -z "$line" ]] && continue
+		key=$(echo "$line" | cut -d '=' -f 1 | tr -d ' \t\r\n')
+		[ -n "$key" ] && echo "$key: ••••••••••••••••"
+	done < "$env_file"
+fi
+
+exit 0

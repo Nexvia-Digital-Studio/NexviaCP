@@ -1,0 +1,55 @@
+#!/bin/bash
+# info: update NexviaCP core from Nexvia-Digital-Studio/NexviaCP repository
+# options: [BRANCH]
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+branch=${1:-main}
+gh_token="$GITHUB_TOKEN"
+
+echo "[*] Starting NexviaCP Core update from branch '$branch'..."
+
+repo_url="https://github.com/Nexvia-Digital-Studio/NexviaCP.git"
+if [ -n "$gh_token" ]; then
+	repo_url="https://${gh_token}@github.com/Nexvia-Digital-Studio/NexviaCP.git"
+fi
+
+tmp_dir="/tmp/nexviacp_update_$$"
+rm -rf "$tmp_dir"
+mkdir -p "$tmp_dir"
+
+echo "[*] Cloning latest NexviaCP code..."
+if ! git clone --depth 1 -b "$branch" "$repo_url" "$tmp_dir" 2>/dev/null; then
+	rm -rf "$tmp_dir"
+	echo "[-] Error: Failed to fetch updates from GitHub."
+	exit 1
+fi
+
+echo "[*] Applying core updates to $HESTIA..."
+# Copy bin
+cp -rf "$tmp_dir/bin"/* "$HESTIA/bin/" 2>/dev/null || true
+chmod +x "$HESTIA/bin"/*
+chown -R root:root "$HESTIA/bin"
+
+# Copy web
+cp -rf "$tmp_dir/web"/* "$HESTIA/web/" 2>/dev/null || true
+
+# Copy func / install
+[ -d "$tmp_dir/func" ] && cp -rf "$tmp_dir/func"/* "$HESTIA/func/" 2>/dev/null || true
+[ -d "$tmp_dir/install" ] && cp -rf "$tmp_dir/install"/* "$HESTIA/install/" 2>/dev/null || true
+
+rm -rf "$tmp_dir"
+
+# Restart services
+echo "[*] Reloading panel services..."
+systemctl restart hestia 2>/dev/null || systemctl restart hestia-php hestia-nginx 2>/dev/null || true
+
+echo "[+] SUCCESS: NexviaCP updated to the latest version successfully."
+log_event "$OK" "NexviaCP core updated to latest $branch"
+exit 0

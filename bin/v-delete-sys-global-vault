@@ -1,0 +1,25 @@
+#!/bin/bash
+# info: delete a global secret from NexviaCP Vault
+# options: KEY
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+check_args '1' "$#" 'KEY'
+key=$(echo "$1" | tr -d ' \t\r\n' | tr '[:lower:]' '[:upper:]')
+vault_file="$HESTIA/conf/vault.conf"
+
+[ ! -f "$vault_file" ] && exit 0
+
+tmp_v="/tmp/vault_del_$$"
+grep -v "^${key}=" "$vault_file" > "$tmp_v"
+cat "$tmp_v" > "$vault_file"
+rm -f "$tmp_v"
+
+chmod 600 "$vault_file"
+exit 0

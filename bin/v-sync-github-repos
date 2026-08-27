@@ -1,0 +1,44 @@
+#!/bin/bash
+# info: sync and pull updates for all domains connected to GitHub repos
+# options: [REPO_NAME]
+#
+# example: v-sync-github-repos Nexvia-Nerede-Yasanir
+#
+# This script scans all user domains and updates any site cloned from GitHub.
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+target_repo="$1"
+
+echo "[*] Scanning domains for GitHub sync..."
+
+for u_dir in "$HOMEDIR"/*; do
+	[ ! -d "$u_dir/web" ] && continue
+	user=$(basename "$u_dir")
+
+	for d_dir in "$u_dir/web"/*; do
+		[ ! -d "$d_dir/public_html/.git" ] && continue
+		domain=$(basename "$d_dir")
+
+		# Check remote URL
+		remote_url=$(git -C "$d_dir/public_html" config --get remote.origin.url 2>/dev/null)
+
+		if [ -n "$target_repo" ]; then
+			if [[ "$remote_url" != *"$target_repo"* ]]; then
+				continue
+			fi
+		fi
+
+		echo "[*] Updating domain $domain (User: $user, Remote: $remote_url)..."
+		$BIN/v-update-web-domain-git "$user" "$domain"
+	done
+done
+
+echo "[+] Sync completed."
+exit 0

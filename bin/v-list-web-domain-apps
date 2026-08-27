@@ -1,0 +1,137 @@
+#!/bin/bash
+# info: list all running backend API/app services and isolated ports
+# options: [USER] [FORMAT]
+#
+# example: v-list-web-domain-apps json
+# example: v-list-web-domain-apps admin json
+#
+# This script inspects all domains across the system for backend apps (.NET, Node.js,
+# pure APIs), returns their listening ports, systemd states, and cgroup resource usage.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+user_filter="$1"
+format="${2:-json}"
+
+if [ "$user_filter" = "json" ] || [ "$user_filter" = "shell" ] || [ "$user_filter" = "plain" ]; then
+	format="$user_filter"
+	user_filter=""
+fi
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+users=()
+if [ -n "$user_filter" ]; then
+	users+=("$user_filter")
+else
+	for u in $(ls "$HESTIA/data/users" 2>/dev/null); do
+		users+=("$u")
+	done
+fi
+
+declare -A app_list
+count=0
+
+for u in "${users[@]}"; do
+	web_conf="$HESTIA/data/users/$u/web.conf"
+	if [ ! -f "$web_conf" ]; then
+		continue
+	fi
+
+	while IFS= read -r line || [ -n "$line" ]; do
+		domain=$(echo "$line" | grep -o "DOMAIN='[^']*'" | cut -d"'" -f2)
+		if [ -z "$domain" ]; then
+			continue
+		fi
+
+		app_port=$(echo "$line" | grep -o "APP_BACKEND_PORT='[^']*'" | cut -d"'" -f2)
+		app_type=$(echo "$line" | grep -o "APP_TYPE='[^']*'" | cut -d"'" -f2)
+		tpl=$(echo "$line" | grep -o "TPL='[^']*'" | cut -d"'" -f2)
+
+		# Check if it is a standalone API or backend app
+		if [ -n "$app_port" ] && [ "$app_port" != "%app_port%" ] || [ "$tpl" = "dotnet" ] || [ "$tpl" = "node-js" ]; then
+			unit_name="hestia-app-${u}-${domain}"
+			service_status="inactive"
+			cpu_usage="0%"
+			mem_usage="0 MB"
+			uptime="-"
+
+			if systemctl is-active --quiet "$unit_name" 2>/dev/null; then
+				service_status="running"
+				
+				# Gather systemd / cgroup metrics
+				raw_mem=$(systemctl show "$unit_name" --property=MemoryCurrent 2>/dev/null | cut -d= -f2)
+				if [ -n "$raw_mem" ] && [ "$raw_mem" != "[not set]" ] && [ "$raw_mem" -gt 0 ] 2>/dev/null; then
+					mem_mb=$((raw_mem / 1024 / 1024))
+					mem_usage="${mem_mb} MB"
+				fi
+
+				raw_uptime=$(systemctl show "$unit_name" --property=ActiveEnterTimestamp 2>/dev/null | cut -d= -f2)
+				if [ -n "$raw_uptime" ]; then
+					uptime="$raw_uptime"
+				fi
+			elif systemctl is-failed --quiet "$unit_name" 2>/dev/null; then
+				service_status="failed"
+			fi
+
+			if [ -z "$app_type" ]; then
+				app_type="$tpl"
+			fi
+
+			key="${u}:${domain}"
+			app_list["$key"]="$u|$domain|${app_type:-custom}|${app_port:-N/A}|$service_status|$mem_usage|$uptime"
+			((count++))
+		fi
+	done < "$web_conf"
+done
+
+if [ "$format" = "json" ]; then
+	echo "{"
+	i=0
+	for key in "${!app_list[@]}"; do
+		IFS='|' read -r u d t p s m up <<< "${app_list[$key]}"
+		echo "    \"$d\": {"
+		echo "        \"USER\": \"$u\","
+		echo "        \"DOMAIN\": \"$d\","
+		echo "        \"TYPE\": \"$t\","
+		echo "        \"PORT\": \"$p\","
+		echo "        \"STATUS\": \"$s\","
+		echo "        \"MEMORY\": \"$m\","
+		echo "        \"UPTIME\": \"$up\","
+		echo "        \"SERVICE\": \"hestia-app-${u}-${d}\""
+		if [ $((i + 1)) -lt "$count" ]; then
+			echo "    },"
+		else
+			echo "    }"
+		fi
+		((i++))
+	done
+	echo "}"
+else
+	echo "DOMAIN                   USER       TYPE     PORT   STATUS    MEMORY    SERVICE"
+	echo "-----------------------  ---------  -------  -----  --------  --------  -------------------------"
+	for key in "${!app_list[@]}"; do
+		IFS='|' read -r u d t p s m up <<< "${app_list[$key]}"
+		d_fmt=$(echo "$d" | cut -c1-23 | awk '{printf "%-23s", $0}')
+		u_fmt=$(echo "$u" | cut -c1-9 | awk '{printf "%-9s", $0}')
+		t_fmt=$(echo "$t" | cut -c1-7 | awk '{printf "%-7s", $0}')
+		p_fmt=$(echo "$p" | cut -c1-5 | awk '{printf "%-5s", $0}')
+		s_fmt=$(echo "$s" | cut -c1-8 | awk '{printf "%-8s", $0}')
+		m_fmt=$(echo "$m" | cut -c1-8 | awk '{printf "%-8s", $0}')
+		echo "$d_fmt  $u_fmt  $t_fmt  $p_fmt  $s_fmt  $m_fmt  hestia-app-${u}-${d}"
+	done
+fi
+
+exit 0

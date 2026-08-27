@@ -1,0 +1,34 @@
+#!/bin/bash
+# info: delete an environment variable (.env) from a web domain
+# options: USER DOMAIN KEY
+#
+# example: v-delete-web-domain-env admin neredeyasanir.localhost OLD_KEY
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+check_args '3' "$#" 'USER DOMAIN KEY'
+user=$1
+domain=$2
+key=$(echo "$3" | tr -d ' \t\r\n' | tr '[:lower:]' '[:upper:]')
+
+docroot="$HOMEDIR/$user/web/$domain/public_html"
+env_file="$docroot/.env"
+
+[ ! -f "$env_file" ] && exit 0
+
+tmp_env="/tmp/env_del_${domain}_$$"
+grep -v "^${key}=" "$env_file" > "$tmp_env"
+cat "$tmp_env" > "$env_file"
+rm -f "$tmp_env"
+
+chmod 600 "$env_file"
+chown "$user:$user" "$env_file"
+
+log_event "$OK" "$user $domain $key"
+exit 0

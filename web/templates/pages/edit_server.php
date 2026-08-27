@@ -14,6 +14,9 @@
 			<a href="/edit/server/hestiaweb/" class="button button-secondary">
 				<i class="fas fa-clock icon-blue"></i><?= tohtml( _("Panel Cronjobs")) ?>
 			</a>
+			<a href="/edit/server/github/" class="button button-secondary">
+				<i class="fab fa-github icon-blue"></i><?= tohtml( _("GitHub & CI/CD")) ?>
+			</a>
 		</div>
 		<div class="toolbar-buttons">
 			<button type="submit" class="button" form="main-form">

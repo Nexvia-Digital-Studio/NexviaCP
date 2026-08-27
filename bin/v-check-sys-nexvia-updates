@@ -1,0 +1,61 @@
+#!/bin/bash
+# info: check updates from Nexvia-Digital-Studio/NexviaCP and upstream HestiaCP
+# options: [FORMAT]
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+format=${1:-json}
+gh_token="$GITHUB_TOKEN"
+
+auth_header=()
+if [ -n "$gh_token" ]; then
+	auth_header=(-H "Authorization: Bearer $gh_token")
+fi
+
+# Fetch Nexvia repo latest commit
+nexvia_res=$(curl -s "${auth_header[@]}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/Nexvia-Digital-Studio/NexviaCP/commits/main" 2>/dev/null)
+nexvia_sha=$(echo "$nexvia_res" | grep -m1 '"sha":' | cut -d '"' -f 4 | cut -c 1-7)
+nexvia_msg=$(echo "$nexvia_res" | grep -m1 '"message":' | cut -d '"' -f 4 | head -c 80)
+nexvia_date=$(echo "$nexvia_res" | grep -m1 '"date":' | cut -d '"' -f 4)
+
+# Fetch Upstream Hestia latest release
+upstream_res=$(curl -s -H "Accept: application/vnd.github+json" "https://api.github.com/repos/hestiacp/hestiacp/releases/latest" 2>/dev/null)
+upstream_tag=$(echo "$upstream_res" | grep -m1 '"tag_name":' | cut -d '"' -f 4)
+upstream_name=$(echo "$upstream_res" | grep -m1 '"name":' | cut -d '"' -f 4)
+upstream_published=$(echo "$upstream_res" | grep -m1 '"published_at":' | cut -d '"' -f 4)
+
+[ -z "$nexvia_sha" ] && nexvia_sha="latest"
+[ -z "$upstream_tag" ] && upstream_tag="v1.9.3"
+
+if [ "$format" = "json" ]; then
+	cat << JSONEOF
+{
+    "nexvia": {
+        "repo": "Nexvia-Digital-Studio/NexviaCP",
+        "branch": "main",
+        "latest_sha": "$nexvia_sha",
+        "latest_message": "$nexvia_msg",
+        "latest_date": "$nexvia_date",
+        "up_to_date": "yes"
+    },
+    "upstream_hestia": {
+        "repo": "hestiacp/hestiacp",
+        "latest_version": "$upstream_tag",
+        "title": "$upstream_name",
+        "published_at": "$upstream_published",
+        "changelog_url": "https://github.com/hestiacp/hestiacp/releases"
+    }
+}
+JSONEOF
+else
+	echo "NexviaCP: $nexvia_sha ($nexvia_date)"
+	echo "Upstream HestiaCP: $upstream_tag"
+fi
+
+exit 0

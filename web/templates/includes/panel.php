@@ -204,7 +204,7 @@
 							<?php if (($_SESSION["userContext"] ?? "") === "admin") { ?>
 							<li class="top-bar-menu-item">
 								<a title="<?= _("Docker Manager (Portainer)") ?>" class="top-bar-menu-link <?php if ($TAB == "DOCKER") { echo "active"; } ?>" href="/list/docker/">
-									<i class="fab fa-docker icon-blue"></i>
+									<i class="fas fa-cubes icon-blue"></i>
 									<span class="top-bar-menu-link-label u-hide-desktop"><?= _("Docker Manager") ?></span>
 								</a>
 							</li>
@@ -472,6 +472,25 @@
 							</a>
 						</li>
 					<?php } ?>
+				<?php } ?>
+
+				<!-- API tab (Admin Only) -->
+				<?php if (($_SESSION["userContext"] ?? "") === "admin") {
+					$is_panel_tr = (($_SESSION["language"] ?? "") === "tr" || ($_SESSION["LANGUAGE"] ?? "") === "tr");
+				?>
+					<li class="main-menu-item">
+						<a class="main-menu-item-link <?php if ($TAB == "API_SERVICES" || $TAB == "API") { echo "active"; } ?>" href="/list/api/" title="<?= $is_panel_tr ? "API ve Arka Plan Servisleri" : _("API & Backend Services") ?>">
+							<p class="main-menu-item-label"><?= _("API") ?><i class="fas fa-bolt"></i></p>
+							<ul class="main-menu-stats">
+								<li>
+									<?= $is_panel_tr ? "servisler" : _("Services") ?>: <?= htmlspecialchars($panel[$user]["U_API_SERVICES"] ?? (count(glob('/etc/systemd/system/hestia-app-*.service') ?: []))) ?> / <span class="u-text-bold">∞</span>
+								</li>
+								<li>
+									<?= $is_panel_tr ? "durum" : _("Status") ?>: <?= $is_panel_tr ? "aktif" : _("Active") ?>
+								</li>
+							</ul>
+						</a>
+					</li>
 				<?php } ?>
 
 			</ul>

@@ -1,0 +1,245 @@
+#!/bin/bash
+# info: 1-click deploy web application or API from GitHub repository
+# options: USER DOMAIN REPO [BRANCH] [APP_MODE]
+#
+# example: v-deploy-github-repo admin neredeyasanir.localhost Nexvia-Nerede-Yasanir main auto
+#
+# This script deploys PHP, Node.js, React, Django/Python, .NET websites & APIs directly from GitHub.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+user=$1
+domain=$2
+repo_input=$3
+branch=${4:-main}
+app_mode=${5:-auto}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '3' "$#" 'USER DOMAIN REPO [BRANCH] [APP_MODE]'
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+
+# Build full git repository URL
+repo_url="$repo_input"
+if [[ ! "$repo_input" =~ ^https?:// ]] && [[ ! "$repo_input" =~ ^git@ ]]; then
+	if [ -n "$GITHUB_ORG" ]; then
+		repo_url="https://github.com/${GITHUB_ORG}/${repo_input}.git"
+	else
+		check_result "$E_INVALID" "GitHub token/org not configured. Provide full git URL."
+	fi
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+echo "[*] Step 1: Checking Web Domain $domain for user $user..."
+if ! $BIN/v-list-web-domain "$user" "$domain" >/dev/null 2>&1; then
+	echo "[*] Creating web domain $domain..."
+	$BIN/v-add-web-domain "$user" "$domain"
+fi
+
+docroot="$HOMEDIR/$user/web/$domain/public_html"
+mkdir -p "$docroot"
+
+echo "[*] Step 2: Cloning repository into $docroot..."
+# Prepare authenticated git clone URL
+auth_repo_url="$repo_url"
+if [ -n "$GITHUB_TOKEN" ] && [[ "$repo_url" =~ ^https://github.com/ ]]; then
+	clean_repo=$(echo "$repo_url" | sed -e 's|https://github.com/||' -e 's|\.git$||')
+	auth_repo_url="https://${GITHUB_TOKEN}@github.com/${clean_repo}.git"
+fi
+
+# Clone into temp directory first to preserve clean replace
+tmp_clone="/tmp/gh_deploy_${domain}_$$"
+rm -rf "$tmp_clone"
+mkdir -p "$tmp_clone"
+
+echo "[*] Fetching branch '$branch' from $repo_input..."
+if ! git clone --depth 1 -b "$branch" "$auth_repo_url" "$tmp_clone" 2>/dev/null; then
+	# Fallback to default branch
+	if ! git clone --depth 1 "$auth_repo_url" "$tmp_clone" 2>/dev/null; then
+		rm -rf "$tmp_clone"
+		check_result "$E_CONNECT" "Git clone failed. Please check repository name and GitHub Token permissions."
+	fi
+fi
+
+# Backup existing .env if present
+env_backup="/tmp/env_backup_${domain}_$$"
+[ -f "$docroot/.env" ] && cp "$docroot/.env" "$env_backup"
+
+# Move files to docroot
+rm -rf "$docroot"/* "$docroot"/.[!.]* 2>/dev/null || true
+cp -r "$tmp_clone"/* "$docroot"/ 2>/dev/null || true
+cp -r "$tmp_clone"/.[!.]* "$docroot"/ 2>/dev/null || true
+rm -rf "$tmp_clone"
+
+# Restore or initialize .env
+if [ -f "$env_backup" ]; then
+	mv "$env_backup" "$docroot/.env"
+elif [ -f "$docroot/.env.example" ]; then
+	cp "$docroot/.env.example" "$docroot/.env"
+else
+	touch "$docroot/.env"
+fi
+
+# Inject Global Vault secrets if not already present
+if [ -f "$HESTIA/conf/vault.conf" ]; then
+	while IFS= read -r vline || [ -n "$vline" ]; do
+		[[ "$vline" =~ ^[[:space:]]*# ]] && continue
+		[[ -z "$vline" ]] && continue
+		vkey=$(echo "$vline" | cut -d '=' -f 1 | tr -d ' \t\r\n')
+		if [ -n "$vkey" ] && ! grep -q "^${vkey}=" "$docroot/.env" 2>/dev/null; then
+			echo "$vline" >> "$docroot/.env"
+		fi
+	done < "$HESTIA/conf/vault.conf"
+fi
+
+# Step 2.5: Auto-provision MySQL Database if schema.sql or database.sql exists
+sql_file=""
+for f in "$docroot/schema.sql" "$docroot/database.sql" "$docroot/db.sql" "$docroot/install.sql" "$docroot/build/schema.sql"; do
+	if [ -f "$f" ]; then
+		sql_file="$f"
+		break
+	fi
+done
+
+if [ -n "$sql_file" ]; then
+	clean_repo_db=$(echo "$repo_input" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g' | cut -c 1-12)
+	db_name="${clean_repo_db}"
+	full_db_name="${user}_${db_name}"
+	db_pass=$(head /dev/urandom 2>/dev/null | tr -dc A-Za-z0-9 | head -c 16)
+	[ -z "$db_pass" ] && db_pass="NxvPass$(date +%s)"
+
+	echo "[*] Database schema found ($sql_file). Provisioning panel database: $full_db_name..."
+	if ! $BIN/v-list-database "$user" "$full_db_name" >/dev/null 2>&1; then
+		$BIN/v-add-database "$user" "$db_name" "$db_name" "$db_pass" >/dev/null 2>&1 || true
+	fi
+
+	# Import SQL schema
+	echo "[*] Importing SQL schema into $full_db_name..."
+	mysql_pass=$(grep "^PASSWORD=" "$HESTIA/conf/mysql.conf" | cut -d "'" -f 2)
+	mariadb -u root -p"$mysql_pass" "$full_db_name" < "$sql_file" 2>/dev/null || true
+
+	# Inject DB credentials into .env
+	for db_var in "DB_HOST=127.0.0.1" "DB_PORT=3306" "DB_NAME=$full_db_name" "DB_DATABASE=$full_db_name" "DB_USER=$full_db_name" "DB_USERNAME=$full_db_name" "DB_PASS=$db_pass" "DB_PASSWORD=$db_pass"; do
+		k=$(echo "$db_var" | cut -d '=' -f 1)
+		if ! grep -q "^${k}=" "$docroot/.env" 2>/dev/null; then
+			echo "$db_var" >> "$docroot/.env"
+		fi
+	done
+
+	# Run any seed scripts if present
+	if [ -f "$docroot/build/seed_provinces.php" ]; then
+		echo "[*] Running project seeders..."
+		(cd "$docroot/build" && php seed_provinces.php >/dev/null 2>&1 && php seed_districts.php >/dev/null 2>&1) || true
+	fi
+fi
+
+chmod 600 "$docroot/.env" 2>/dev/null || true
+chown -R "$user:$user" "$docroot"
+chmod -R 755 "$docroot"
+chmod 600 "$docroot/.env" 2>/dev/null || true
+
+echo "[*] Step 3: Detecting application stack..."
+detected_type="php"
+
+if [ "$app_mode" = "dotnet" ] || [ "$app_mode" = "api" ] || ls "$docroot"/*.csproj &>/dev/null || ls "$docroot"/*.sln &>/dev/null; then
+	detected_type="dotnet"
+elif [ "$app_mode" = "node" ] || [ -f "$docroot/package.json" ]; then
+	if [ -d "$docroot/dist" ] && [ ! -f "$docroot/server.js" ] && [ ! -f "$docroot/app.js" ] && [ "$app_mode" = "react" ]; then
+		detected_type="react"
+	else
+		detected_type="node"
+	fi
+elif [ "$app_mode" = "react" ] || [ -d "$docroot/dist" ]; then
+	detected_type="react"
+elif [ -f "$docroot/artisan" ]; then
+	detected_type="laravel"
+fi
+
+# Override if app_mode explicitly specified
+if [ "$app_mode" = "php" ]; then
+	detected_type="php"
+fi
+
+echo "[+] Application Stack Detected: $detected_type (Mode: $app_mode)"
+
+case "$detected_type" in
+	dotnet)
+		echo "[*] Configuring .NET Kestrel backend..."
+		$BIN/v-change-web-domain-tpl "$user" "$domain" "dotnet"
+		if ls "$docroot"/*.csproj &>/dev/null && command -v dotnet &>/dev/null; then
+			echo "[*] Building .NET project..."
+			su - "$user" -s /bin/bash -c "cd '$docroot' && dotnet publish -c Release -o '$docroot/publish'" 2>/dev/null || true
+			dll_file=$(find "$docroot/publish" -maxdepth 1 -name "*.dll" ! -name "Microsoft.*" ! -name "System.*" | head -n 1)
+			if [ -n "$dll_file" ]; then
+				dll_base=$(basename "$dll_file")
+				$BIN/v-add-web-domain-app "$user" "$domain" dotnet "dotnet $docroot/publish/$dll_base"
+			fi
+		fi
+		;;
+	node)
+		echo "[*] Configuring Node.js application..."
+		$BIN/v-change-web-domain-tpl "$user" "$domain" "node-js"
+		if [ -f "$docroot/package.json" ] && command -v npm &>/dev/null; then
+			su - "$user" -s /bin/bash -c "cd '$docroot' && npm install --production" 2>/dev/null || true
+		fi
+		entry_file="app.js"
+		[ -f "$docroot/server.js" ] && entry_file="server.js"
+		[ -f "$docroot/index.js" ] && entry_file="index.js"
+		$BIN/v-add-web-domain-app "$user" "$domain" node "node $entry_file"
+		;;
+	react)
+		echo "[*] Configuring Static SPA / React frontend..."
+		$BIN/v-change-web-domain-tpl "$user" "$domain" "default"
+		if [ -d "$docroot/dist" ]; then
+			cp -r "$docroot/dist"/* "$docroot"/ 2>/dev/null || true
+		fi
+		;;
+	laravel)
+		echo "[*] Configuring Laravel PHP application..."
+		$BIN/v-change-web-domain-tpl "$user" "$domain" "default"
+		if command -v composer &>/dev/null && [ -f "$docroot/composer.json" ]; then
+			su - "$user" -s /bin/bash -c "cd '$docroot' && composer install --no-dev -o" 2>/dev/null || true
+		fi
+		chmod -R 775 "$docroot/storage" "$docroot/bootstrap/cache" 2>/dev/null || true
+		;;
+	*)
+		echo "[*] Configuring standard PHP/HTML website..."
+		$BIN/v-change-web-domain-tpl "$user" "$domain" "default"
+		if command -v composer &>/dev/null && [ -f "$docroot/composer.json" ]; then
+			su - "$user" -s /bin/bash -c "cd '$docroot' && composer install --no-dev -o" 2>/dev/null || true
+		fi
+		;;
+esac
+
+# Ensure permissions
+chown -R "$user:$user" "$docroot"
+chmod -R 755 "$docroot"
+
+# Step 4: SSL (Automatic fallback for local test domains)
+echo "[*] Step 4: Configuring SSL..."
+if [[ ! "$domain" =~ \.local$ ]] && [[ ! "$domain" =~ \.localhost$ ]] && [[ ! "$domain" =~ \.test$ ]]; then
+	$BIN/v-add-letsencrypt-domain "$user" "$domain" >/dev/null 2>&1 || true
+fi
+
+$BIN/v-restart-web >/dev/null 2>&1 || true
+
+echo "[+] SUCCESS: Repository $repo_input deployed successfully to http://$domain (Stack: $detected_type)"
+log_event "$OK" "$ARGUMENTS"
+exit 0

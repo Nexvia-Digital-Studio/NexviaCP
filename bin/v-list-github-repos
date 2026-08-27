@@ -1,0 +1,111 @@
+#!/bin/bash
+# info: list repositories from connected GitHub account/organization
+# options: [FORMAT]
+#
+# example: v-list-github-repos json
+#
+# This script lists repositories from the configured GitHub Organization or Token.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+format=${1:-json}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+# Read GitHub configuration
+gh_token="$GITHUB_TOKEN"
+gh_org="$GITHUB_ORG"
+
+if [ -z "$gh_token" ]; then
+	if [ "$format" = "json" ]; then
+		echo '{"error": "GITHUB_TOKEN_NOT_CONFIGURED", "message": "GitHub token not configured. Use v-set-sys-github-token <ORG> <TOKEN>"}'
+	else
+		echo "ERROR: GitHub token not configured. Run: v-set-sys-github-token <ORG> <TOKEN>"
+	fi
+	exit 1
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+api_url="https://api.github.com/user/repos?per_page=100&sort=updated&affiliation=owner,organization_member"
+if [ -n "$gh_org" ]; then
+	api_url="https://api.github.com/orgs/$gh_org/repos?per_page=100&sort=updated"
+fi
+
+# Fetch from GitHub API with token
+response=$(curl -s -H "Authorization: Bearer $gh_token" -H "Accept: application/vnd.github+json" "$api_url")
+
+# Check if response is an error or array
+if echo "$response" | grep -q '"message":'; then
+	msg=$(echo "$response" | grep -o '"message": "[^"]*' | cut -d'"' -f4)
+	if [ "$format" = "json" ]; then
+		echo "{\"error\": \"GITHUB_API_ERROR\", \"message\": \"$msg\"}"
+	else
+		echo "ERROR: GitHub API: $msg"
+	fi
+	exit 2
+fi
+
+if [ "$format" = "json" ]; then
+	# Format clean JSON output with jq or python
+	if command -v python3 &> /dev/null; then
+		echo "$response" | python3 -c '
+import sys, json
+try:
+    repos = json.load(sys.stdin)
+    out = {}
+    if isinstance(repos, list):
+        for r in repos:
+            out[r.get("name", "")] = {
+                "NAME": r.get("name", ""),
+                "FULL_NAME": r.get("full_name", ""),
+                "PRIVATE": "yes" if r.get("private") else "no",
+                "BRANCH": r.get("default_branch", "main"),
+                "LANGUAGE": r.get("language") or "Other",
+                "DESCRIPTION": r.get("description") or "",
+                "CLONE_URL": r.get("clone_url", ""),
+                "SSH_URL": r.get("ssh_url", ""),
+                "UPDATED": r.get("updated_at", "")
+            }
+    print(json.dumps(out, indent=4))
+except Exception as e:
+    print(json.dumps({"error": str(e)}))
+'
+	else
+		echo "$response"
+	fi
+else
+	# Shell table
+	echo "REPOSITORY               BRANCH    PRIVATE   LANGUAGE       UPDATED"
+	echo "-----------------------  --------  --------  -------------  --------------------"
+	if command -v python3 &> /dev/null; then
+		echo "$response" | python3 -c '
+import sys, json
+repos = json.load(sys.stdin)
+if isinstance(repos, list):
+    for r in repos:
+        name = r.get("name", "")[:23].ljust(23)
+        branch = r.get("default_branch", "main")[:8].ljust(8)
+        priv = ("yes" if r.get("private") else "no").ljust(8)
+        lang = (r.get("language") or "Other")[:13].ljust(13)
+        updated = r.get("updated_at", "")[:20]
+        print(f"{name}  {branch}  {priv}  {lang}  {updated}")
+'
+	fi
+fi
+
+exit 0

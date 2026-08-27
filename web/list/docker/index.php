@@ -27,9 +27,13 @@ if (!empty($_SESSION["ROOT_USER"])) {
         $domains = json_decode($json, true);
         if (is_array($domains)) {
             foreach ($domains as $dName => $dData) {
-                $tpl = $dData["PROXY"] ?? ($dData["WEB_TEMPLATE"] ?? "");
-                // PROXY is stored like "docker-ui" or may include an extension.
-                if (strpos($tpl, "docker-ui") !== false) {
+                // The docker-ui template is selected as the WEB template (TPL)
+                // on nginx + php-fpm stacks, or as the PROXY template when a
+                // separate proxy is in front. Check both; PROXY may be a plain
+                // 'default' value that must not short-circuit the TPL lookup.
+                $tpl = $dData["TPL"] ?? "";
+                $proxy = $dData["PROXY"] ?? "";
+                if (strpos($tpl, "docker-ui") !== false || strpos($proxy, "docker-ui") !== false) {
                     $dockerDomain = $dName;
                     break;
                 }

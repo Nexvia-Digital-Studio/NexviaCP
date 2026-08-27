@@ -1,0 +1,43 @@
+#!/bin/bash
+# info: set or update a global secret in NexviaCP Vault
+# options: KEY VALUE
+#
+# example: v-set-sys-global-vault GLOBAL_GEMINI_API_KEY AIzaSy...
+#
+# Global secrets are automatically injected into newly deployed repositories and domains.
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+check_args '2' "$#" 'KEY VALUE'
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: can be executed only by root user"
+	exit 10
+fi
+
+key=$(echo "$1" | tr -d ' \t\r\n' | tr '[:lower:]' '[:upper:]')
+value=$2
+
+vault_file="$HESTIA/conf/vault.conf"
+touch "$vault_file"
+chmod 600 "$vault_file"
+chown root:root "$vault_file"
+
+tmp_v="/tmp/vault_$$"
+grep -v "^${key}=" "$vault_file" 2>/dev/null > "$tmp_v" || true
+echo "${key}=\"${value}\"" >> "$tmp_v"
+cat "$tmp_v" > "$vault_file"
+rm -f "$tmp_v"
+
+chmod 600 "$vault_file"
+chown root:root "$vault_file"
+
+log_event "$OK" "$key [MASKED]"
+exit 0

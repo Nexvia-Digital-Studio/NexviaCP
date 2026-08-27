@@ -1,0 +1,80 @@
+#!/bin/bash
+# info: pull latest changes and rebuild web domain deployed from GitHub
+# options: USER DOMAIN
+#
+# example: v-update-web-domain-git admin neredeyasanir.localhost
+#
+# This script pulls latest git changes, re-runs composer/npm/dotnet builds, and restarts services.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+user=$1
+domain=$2
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER DOMAIN'
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+
+docroot="$HOMEDIR/$user/web/$domain/public_html"
+
+if [ ! -d "$docroot/.git" ]; then
+	check_result "$E_NOTEXIST" "Domain $domain is not a git repository."
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+echo "[*] Updating git repository in $docroot..."
+cd "$docroot" || exit 1
+
+# Pull latest commits
+su - "$user" -s /bin/bash -c "cd '$docroot' && git pull" 2>&1
+
+# Build if necessary
+if [ -f "$docroot/composer.json" ] && command -v composer &>/dev/null; then
+	echo "[*] Running composer install..."
+	su - "$user" -s /bin/bash -c "cd '$docroot' && composer install --no-dev -o" 2>&1 || true
+fi
+
+if [ -f "$docroot/package.json" ] && command -v npm &>/dev/null; then
+	echo "[*] Running npm build..."
+	su - "$user" -s /bin/bash -c "cd '$docroot' && (npm run build 2>/dev/null || npm install --production)" 2>&1 || true
+fi
+
+if ls "$docroot"/*.csproj &>/dev/null && command -v dotnet &>/dev/null; then
+	echo "[*] Rebuilding .NET project..."
+	su - "$user" -s /bin/bash -c "cd '$docroot' && dotnet publish -c Release -o '$docroot/publish'" 2>&1 || true
+fi
+
+# Fix permissions
+chown -R "$user:$user" "$docroot"
+chmod -R 755 "$docroot"
+
+# Restart background app service if exists
+if [ -f "/etc/systemd/system/hestia-app-${user}-${domain}.service" ]; then
+	echo "[*] Restarting systemd service..."
+	systemctl restart "hestia-app-${user}-${domain}.service" 2>&1 || true
+fi
+
+# Reload web server
+$BIN/v-restart-web >/dev/null 2>&1 || true
+
+echo "[+] SUCCESS: Domain $domain updated successfully."
+log_event "$OK" "$ARGUMENTS"
+exit 0

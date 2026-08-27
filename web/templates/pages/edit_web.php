@@ -566,8 +566,81 @@
 					</div>
 				</div>
 			</details>
+
+			<!-- Domain-Level .env Secrets (Zero-Knowledge) -->
+			<details class="collapse u-mt20" id="web-env-secrets" open>
+				<summary class="collapse-header">
+					<i class="fas fa-shield-halved icon-purple u-mr5"></i><?= tohtml( _("Ortam Değişkenleri & Secret Yönetimi (.env)")) ?> (<?= count($domain_env_secrets ?? []) ?>)
+				</summary>
+				<div class="collapse-content">
+					<p class="u-text-muted u-mb15" style="font-size:0.88rem; line-height:1.4;">
+						🛡️ <strong>Sıfır Bilgi (Zero-Knowledge) Güvenlik Modeli:</strong>
+						Bu site için tanımladığınız API anahtarları (örn: <code>GEMINI_API_KEY</code>, <code>DB_PASSWORD</code>) sunucuda doğrudan <code>public_html/.env</code> dosyasına <code>chmod 600</code> ile kaydedilir. Güvenlik gereği arayüzde değerler asla düz metin olarak okunamaz; yalnızca güncellenebilir veya silinebilir. GitHub'dan her güncelleme yapıldığında bu dosya korunur.
+					</p>
+
+					<!-- Add or Update Secret Form -->
+					<div class="card u-mb20" style="padding:15px; border: 1px solid var(--border-color, #334155); border-radius:6px; background: rgba(0,0,0,0.02);">
+						<div style="display:grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: flex-end;">
+							<div>
+								<label class="form-label u-mb5 u-text-bold" style="font-size:12px;">Anahtar Adı (KEY)</label>
+								<input type="text" form="domain-env-form" name="env_key" placeholder="GEMINI_API_KEY" required class="form-control" style="font-family:monospace; text-transform:uppercase;">
+							</div>
+							<div>
+								<label class="form-label u-mb5 u-text-bold" style="font-size:12px;">Gizli Değer (Yalnızca Yazılabilir)</label>
+								<input type="password" form="domain-env-form" name="env_value" placeholder="••••••••••••••••••••" required class="form-control">
+							</div>
+							<div>
+								<button type="submit" form="domain-env-form" class="button button-secondary">
+									<i class="fas fa-plus icon-green"></i> Kaydet / Güncelle
+								</button>
+							</div>
+						</div>
+					</div>
+
+					<!-- List Existing Domain Secrets -->
+					<?php if (empty($domain_env_secrets)): ?>
+						<p class="u-text-muted u-text-center" style="padding: 10px 0; font-size:0.9rem;">
+							Bu alan adı için henüz özel bir ortam değişkeni (.env) tanımlanmadı.
+						</p>
+					<?php else: ?>
+						<div class="units-table" style="margin-top: 5px;">
+							<div class="units-table-header">
+								<div class="units-table-cell">Anahtar Adı</div>
+								<div class="units-table-cell u-text-center">Kayıtlı Değer</div>
+								<div class="units-table-cell u-text-center">Korumalı Konum</div>
+								<div class="units-table-cell u-text-center">İşlem</div>
+							</div>
+							<?php foreach ($domain_env_secrets as $ekey => $edata): ?>
+								<div class="units-table-row">
+									<div class="units-table-cell units-table-heading-cell u-text-bold" style="font-family:monospace;">
+										<i class="fas fa-key icon-yellow u-mr5"></i> <?= tohtml($ekey) ?>
+									</div>
+									<div class="units-table-cell u-text-center">
+										<code style="letter-spacing:2px; opacity:0.7;">••••••••••••••••</code>
+									</div>
+									<div class="units-table-cell u-text-center">
+										<span class="badge badge-info" style="font-size:11px; padding: 2px 6px;">
+											.env (chmod 600)
+										</span>
+									</div>
+									<div class="units-table-cell u-text-center">
+										<a class="button button-danger button-small" href="/edit/web/?domain=<?= urlencode($v_domain) ?>&delete_env=1&key=<?= urlencode($ekey) ?>&token=<?= tohtml($_SESSION["token"]) ?>" title="Secret'ı Sil" onclick="return confirm('Bu ortam değişkenini silmek istediğinize emin misiniz?');" style="padding: 3px 8px; font-size:11px;">
+											<i class="fas fa-trash-can"></i>
+										</a>
+									</div>
+								</div>
+							<?php endforeach; ?>
+						</div>
+					<?php endif; ?>
+				</div>
+			</details>
 		</div>
 
+	</form>
+
+	<form id="domain-env-form" method="post" action="/edit/web/?domain=<?= urlencode($v_domain) ?>">
+		<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
+		<input type="hidden" name="save_env_secret" value="1">
 	</form>
 
 </div>

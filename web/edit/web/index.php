@@ -37,6 +37,35 @@ check_return_code_redirect($return_var, $output, "/list/web/");
 $data = json_decode(implode("", $output), true);
 unset($output);
 
+$is_tr = (($_SESSION['language'] ?? '') === 'tr' || ($_SESSION['LANGUAGE'] ?? '') === 'tr');
+
+// Action: Save Domain .env Secret (Write-Only)
+if (!empty($_POST["save_env_secret"])) {
+	verify_csrf($_POST);
+	$env_k = quoteshellarg(trim($_POST["env_key"] ?? ""));
+	$env_v = quoteshellarg(trim($_POST["env_value"] ?? ""));
+	if (!empty($_POST["env_key"]) && !empty($_POST["env_value"])) {
+		exec(HESTIA_CMD . "v-set-web-domain-env " . $user . " " . quoteshellarg($v_domain) . " " . $env_k . " " . $env_v, $output, $return_var);
+		$_SESSION["error_msg"] = ($return_var == 0) ? ($is_tr ? "Ortam değişkeni (.env) güvenle kaydedildi." : _("Environment secret saved securely.")) : ($is_tr ? "Hata oluştu." : _("Error saving secret."));
+	}
+	header("Location: /edit/web/?domain=" . urlencode($v_domain) . "&token=" . $_SESSION["token"]);
+	exit();
+}
+
+// Action: Delete Domain .env Secret
+if (!empty($_GET["delete_env"]) && !empty($_GET["key"])) {
+	if (verify_csrf($_GET)) {
+		$env_k = quoteshellarg(trim($_GET["key"]));
+		exec(HESTIA_CMD . "v-delete-web-domain-env " . $user . " " . quoteshellarg($v_domain) . " " . $env_k, $output, $return_var);
+		$_SESSION["error_msg"] = $is_tr ? "Ortam değişkeni (.env) başarıyla silindi." : _("Environment secret deleted.");
+		header("Location: /edit/web/?domain=" . urlencode($v_domain) . "&token=" . $_SESSION["token"]);
+		exit();
+	}
+}
+
+// Fetch masked domain .env secrets
+$domain_env_secrets = json_decode(shell_exec(HESTIA_CMD . "v-list-web-domain-env " . $user . " " . quoteshellarg($v_domain) . " json"), true) ?: [];
+
 // Parse domain
 $v_ip = $data[$v_domain]["IP"];
 $v_template = $data[$v_domain]["TPL"];
