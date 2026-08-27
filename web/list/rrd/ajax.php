@@ -38,23 +38,23 @@ if ($return_var != 0) {
 }
 
 $serviceUnits = [
-	"la" => "Points",
-	"mem" => "Mbytes",
-	"apache2" => "Connections",
-	"nginx" => "Connections",
-	"mail" => "Queue Size",
-	"ftp" => "Connections",
-	"ssh" => "Connections",
+	"la" => "Yük",
+	"mem" => "MB",
+	"apache2" => "Bağlantı",
+	"nginx" => "Bağlantı",
+	"mail" => "Kuyruk",
+	"ftp" => "Bağlantı",
+	"ssh" => "Bağlantı",
 ];
 
 if (preg_match("/^net_/", $service)) {
-	$serviceUnits[$service] = "KBytes";
+	$serviceUnits[$service] = "KB/s";
 }
 if (preg_match("/^pgsql_/", $service)) {
-	$serviceUnits[$service] = "Queries";
+	$serviceUnits[$service] = "Sorgu/sn";
 }
 if (preg_match("/^mysql_/", $service)) {
-	$serviceUnits[$service] = "Queries";
+	$serviceUnits[$service] = "Sorgu/sn";
 }
 
 $data = json_decode(implode("", $output), true);
