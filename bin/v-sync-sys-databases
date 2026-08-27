@@ -1,0 +1,77 @@
+#!/bin/bash
+# info: auto-discover and adopt unmapped MySQL/MariaDB and PostgreSQL databases
+# options: [TARGET_USER]
+#
+# example: v-sync-sys-databases
+#          v-sync-sys-databases admin
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+# load config file
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+target_user=${1:-admin}
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+# MySQL credentials
+MYSQL_CMD="mysql"
+if [ -f /root/.my.cnf ]; then
+	MYSQL_CMD="mysql --defaults-file=/root/.my.cnf"
+elif [ -f "$HESTIA/conf/mysql.conf" ]; then
+	# shellcheck source=/usr/local/hestia/conf/mysql.conf
+	source "$HESTIA/conf/mysql.conf"
+	[ -n "$HOST" ] && [ -n "$USER" ] && MYSQL_CMD="mysql -h $HOST -u $USER -p$PASSWORD"
+fi
+
+USER_DB_CONF="$HESTIA/data/users/$target_user/db.conf"
+mkdir -p "$(dirname "$USER_DB_CONF")" 2>/dev/null || true
+[ ! -f "$USER_DB_CONF" ] && touch "$USER_DB_CONF"
+
+# System ignored databases
+IGNORED_DBS="information_schema|performance_schema|mysql|sys|phpmyadmin|roundcube"
+
+# Discover MySQL databases
+db_list=$($MYSQL_CMD -s -N -e "SHOW DATABASES;" 2>/dev/null)
+discovered_count=0
+
+for db_name in $db_list; do
+	# Skip system internal DBs
+	if [[ "$db_name" =~ ^($IGNORED_DBS)$ ]]; then
+		continue
+	fi
+
+	# Check if already registered in any user's db.conf
+	if grep -q "DB='$db_name'" "$HESTIA/data/users/"*"/db.conf" 2>/dev/null; then
+		continue
+	fi
+
+	# Get database size in MB
+	db_size=$($MYSQL_CMD -s -N -e "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 1) FROM information_schema.TABLES WHERE table_schema='$db_name';" 2>/dev/null)
+	if [ -z "$db_size" ] || [ "$db_size" = "NULL" ]; then
+		db_size="1"
+	fi
+
+	db_user="root"
+	cur_time=$(date +%H:%M:%S)
+	cur_date=$(date +%Y-%m-%d)
+
+	# Register database to target_user's db.conf
+	echo "DB='$db_name' DBUSER='$db_user' HOST='localhost' TYPE='mysql' CHARSET='utf8mb4' U_DISK='$db_size' SUSPENDED='no' TIME='$cur_time' DATE='$cur_date'" >> "$USER_DB_CONF"
+	echo "[+] Discovered and registered database: $db_name (Size: ${db_size} MB) to user $target_user"
+	discovered_count=$((discovered_count + 1))
+done
+
+# Update user counters
+$BIN/v-update-user-counters "$target_user" >/dev/null 2>&1 || true
+
+echo "[+] Database Auto-Sync Complete: $discovered_count new database(s) adopted."
+exit 0

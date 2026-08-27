@@ -41,6 +41,14 @@ if (!empty($_SESSION["DB_PGA_ALIAS"])) {
 						<i class="fas fa-database icon-orange"></i>phpPgAdmin
 					</a>
 				<?php } ?>
+				<!-- Auto-Sync & Discover Databases Button -->
+				<form method="post" action="/list/db/" style="display:inline;" onsubmit="const b = this.querySelector('button'); b.disabled=true; b.innerHTML='<i class=\'fas fa-spinner fa-spin\'></i> ' + ('<?= (($_SESSION['language'] ?? '') === 'tr') ? "Taranıyor..." : "Scanning..." ?>');">
+					<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
+					<input type="hidden" name="action_sync_db" value="1">
+					<button type="submit" class="button button-secondary" title="<?= tohtml(__tr("Scan MySQL/Postgres for unmapped databases and link them", "Ekli olmayan tüm veritabanlarını otomatik tara ve bağla")) ?>">
+						<i class="fas fa-arrows-rotate icon-blue"></i> <?= tohtml(__tr("Auto-Sync DBs", "Veritabanlarını Tara")) ?>
+					</button>
+				</form>
 				<?php if (ipUsed()) { ?>
 					<a target="_blank" href="https://hestiacp.com/docs/server-administration/databases.html#why-i-can-t-use-http-ip-phpmyadmin">
 						<i class="fas fa-circle-question"></i>
@@ -241,6 +249,12 @@ if (!empty($_SESSION["DB_PGA_ALIAS"])) {
 								</a>
 							</li>
 						<?php } ?>
+							<li class="units-table-row-action" data-key-action="js">
+								<button type="button" class="units-table-row-action-link" style="background:none; border:none; cursor:pointer; padding:0; display:flex; align-items:center; gap:4px;" onclick="openDbStudio('<?= tohtml($key) ?>');" title="<?= tohtml(__tr("Explore Database & View Tables (Nexvia DB Studio)", "Tabloları ve Verileri İncele (DB Studio)")) ?>">
+									<i class="fas fa-table-columns icon-purple"></i>
+									<span class="u-hide-desktop"><?= tohtml(__tr("Explore", "İncele")) ?></span>
+								</button>
+							</li>
 							<li class="units-table-row-action shortcut-enter" data-key-action="href">
 								<a
 									class="units-table-row-action-link"
@@ -314,3 +328,310 @@ if (!empty($_SESSION["DB_PGA_ALIAS"])) {
 	</div>
 
 </div>
+
+<!-- Nexvia DB Studio Modal -->
+<div id="db-studio-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); z-index:99999; justify-content:center; align-items:center;" onclick="if(event.target===this) closeDbStudio();">
+	<div style="background:var(--color-background, #1e222d); width:95%; max-width:1250px; height:85vh; border-radius:10px; border:1px solid var(--border-color, #334155); display:flex; flex-direction:column; overflow:hidden; box-shadow:0 20px 50px rgba(0,0,0,0.6);">
+		
+		<!-- Modal Header -->
+		<div style="padding:14px 20px; background:rgba(0,0,0,0.15); border-bottom:1px solid var(--border-color, #334155); display:flex; justify-content:space-between; align-items:center;">
+			<div style="display:flex; align-items:center; gap:10px;">
+				<div style="width:32px; height:32px; border-radius:6px; background:rgba(168,85,247,0.15); display:flex; align-items:center; justify-content:center;">
+					<i class="fas fa-table-columns icon-purple"></i>
+				</div>
+				<div>
+					<h3 style="margin:0; font-size:1.1rem; font-weight:bold; display:flex; align-items:center; gap:8px;">
+						Nexvia DB Studio: <span id="studio-db-title" style="color:var(--icon-color-blue, #38bdf8);"></span>
+					</h3>
+					<small class="u-text-muted" style="font-size:11px;"><?= tohtml(__tr("Lightweight In-Panel Database & Table Explorer", "Dahili Veritabanı ve Tablo İnceleme Gezgini")) ?></small>
+				</div>
+			</div>
+			<div style="display:flex; gap:10px; align-items:center;">
+				<button type="button" class="button button-secondary button-small" onclick="loadDbSchema();" title="<?= tohtml(__tr("Refresh Schema", "Yenile")) ?>">
+					<i class="fas fa-arrows-rotate"></i>
+				</button>
+				<button type="button" class="button button-secondary button-small" onclick="closeDbStudio();" style="padding:5px 10px;">
+					<i class="fas fa-xmark"></i>
+				</button>
+			</div>
+		</div>
+
+		<!-- Modal Body (Two-Column Layout) -->
+		<div style="display:flex; flex:1; overflow:hidden;">
+			
+			<!-- Left Pane: Tables List -->
+			<div style="width:280px; border-right:1px solid var(--border-color, #334155); background:rgba(0,0,0,0.05); display:flex; flex-direction:column;">
+				<div style="padding:10px 12px; border-bottom:1px solid var(--border-color, #334155);">
+					<input type="text" id="studio-table-search" class="form-control" placeholder="<?= tohtml(__tr("Filter tables...", "Tablo filtrele...")) ?>" onkeyup="filterStudioTables();" style="width:100%; font-size:12px; padding:6px 8px;">
+				</div>
+				<div id="studio-tables-container" style="flex:1; overflow-y:auto; padding:6px;">
+					<div style="padding:20px; text-align:center; color:var(--color-text-muted);">
+						<i class="fas fa-spinner fa-spin fa-lg"></i>
+					</div>
+				</div>
+			</div>
+
+			<!-- Right Pane: Table Inspector & Data Grid -->
+			<div style="flex:1; display:flex; flex-direction:column; background:var(--color-background, #1e222d); overflow:hidden;">
+				
+				<!-- Right Header & Tabs -->
+				<div style="padding:10px 18px; border-bottom:1px solid var(--border-color, #334155); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+					<div style="display:flex; align-items:center; gap:8px;">
+						<i class="fas fa-table icon-blue"></i>
+						<strong id="studio-active-table-name" style="font-size:1.05rem;">--</strong>
+						<span id="studio-active-table-badge" class="badge badge-info" style="font-size:11px;">0 <?= tohtml(__tr("rows", "satır")) ?></span>
+					</div>
+					<div style="display:flex; gap:6px;">
+						<button type="button" id="tab-btn-data" class="button button-primary button-small" onclick="switchStudioTab('data');" style="padding:4px 10px; font-size:12px;">
+							<i class="fas fa-table-cells"></i> <?= tohtml(__tr("Data (50 Rows)", "Veri Önizleme")) ?>
+						</button>
+						<button type="button" id="tab-btn-schema" class="button button-secondary button-small" onclick="switchStudioTab('schema');" style="padding:4px 10px; font-size:12px;">
+							<i class="fas fa-diagram-project"></i> <?= tohtml(__tr("Structure", "Tablo Yapısı")) ?>
+						</button>
+						<button type="button" id="tab-btn-sql" class="button button-secondary button-small" onclick="switchStudioTab('sql');" style="padding:4px 10px; font-size:12px;">
+							<i class="fas fa-terminal"></i> SQL
+						</button>
+					</div>
+				</div>
+
+				<!-- Tab 1: Data Grid View -->
+				<div id="studio-view-data" style="flex:1; overflow:auto; padding:12px;">
+					<div id="studio-data-table-wrapper" style="min-width:100%;">
+						<p class="u-text-muted" style="text-align:center; margin-top:40px;">
+							<?= tohtml(__tr("Select a table from the left sidebar to inspect records.", "Kayıtları incelemek için soldaki listeden bir tablo seçin.")) ?>
+						</p>
+					</div>
+				</div>
+
+				<!-- Tab 2: Schema Columns View -->
+				<div id="studio-view-schema" style="flex:1; overflow:auto; padding:12px; display:none;">
+					<div id="studio-schema-table-wrapper">
+						<p class="u-text-muted" style="text-align:center; margin-top:40px;">
+							<?= tohtml(__tr("Select a table to view column structure.", "Sütun yapısını görmek için bir tablo seçin.")) ?>
+						</p>
+					</div>
+				</div>
+
+				<!-- Tab 3: Custom SQL Query Console -->
+				<div id="studio-view-sql" style="flex:1; display:flex; flex-direction:column; padding:12px; display:none; gap:10px;">
+					<div style="display:flex; gap:10px;">
+						<textarea id="studio-custom-sql-input" class="form-control" rows="3" placeholder="SELECT * FROM table_name WHERE id > 0 LIMIT 25;" style="flex:1; font-family:monospace; font-size:12px;"></textarea>
+						<button type="button" class="button button-primary" onclick="runStudioCustomSql();" style="padding:10px 18px;">
+							<i class="fas fa-play"></i> <?= tohtml(__tr("Run", "Çalıştır")) ?>
+						</button>
+					</div>
+					<div id="studio-sql-results-wrapper" style="flex:1; overflow:auto; border:1px solid var(--border-color, #334155); border-radius:6px; padding:8px;">
+						<p class="u-text-muted" style="text-align:center; margin-top:20px;">
+							<?= tohtml(__tr("Write a read-only SELECT query and press Run.", "Okuma amaçlı bir SELECT sorgusu yazıp Çalıştır'a basın.")) ?>
+						</p>
+					</div>
+				</div>
+
+			</div>
+		</div>
+
+	</div>
+</div>
+
+<script>
+let currentStudioDb = '';
+let currentStudioTable = '';
+let currentStudioData = null;
+
+function openDbStudio(dbName) {
+	currentStudioDb = dbName;
+	currentStudioTable = '';
+	document.getElementById('studio-db-title').innerText = dbName;
+	document.getElementById('studio-active-table-name').innerText = '--';
+	document.getElementById('studio-active-table-badge').innerText = '0 rows';
+	document.getElementById('db-studio-modal').style.display = 'flex';
+	loadDbSchema();
+}
+
+function closeDbStudio() {
+	document.getElementById('db-studio-modal').style.display = 'none';
+}
+
+function loadDbSchema(selectedTable = '') {
+	const container = document.getElementById('studio-tables-container');
+	container.innerHTML = '<div style="padding:20px; text-align:center; color:var(--color-text-muted);"><i class="fas fa-spinner fa-spin fa-lg"></i></div>';
+
+	const formData = new FormData();
+	formData.append('action_explore_db', '1');
+	formData.append('db_name', currentStudioDb);
+	formData.append('table_name', selectedTable);
+	formData.append('token', '<?= tohtml($_SESSION["token"]) ?>');
+
+	fetch('/list/db/', { method: 'POST', body: formData })
+		.then(r => r.json())
+		.then(data => {
+			currentStudioData = data;
+			renderStudioTablesList(data.tables || []);
+			if (selectedTable) {
+				renderStudioTableData(data);
+			} else if (data.tables && data.tables.length > 0) {
+				selectTable(data.tables[0].name);
+			} else {
+				document.getElementById('studio-data-table-wrapper').innerHTML = '<p class="u-text-muted" style="text-align:center; margin-top:30px;"><?= tohtml(__tr("No tables found in this database.", "Bu veritabanında henüz tablo bulunmuyor.")) ?></p>';
+			}
+		})
+		.catch(err => {
+			container.innerHTML = '<p style="color:#ef4444; padding:10px; font-size:12px;">Hata: ' + err + '</p>';
+		});
+}
+
+function renderStudioTablesList(tables) {
+	const container = document.getElementById('studio-tables-container');
+	if (tables.length === 0) {
+		container.innerHTML = '<p class="u-text-muted" style="font-size:12px; padding:10px; text-align:center;"><?= tohtml(__tr("No tables", "Tablo yok")) ?></p>';
+		return;
+	}
+
+	let html = '<ul style="list-style:none; margin:0; padding:0;">';
+	tables.forEach(t => {
+		const isActive = t.name === currentStudioTable;
+		html += `
+			<li class="studio-table-item" data-table="${t.name.toLowerCase()}" style="margin-bottom:2px;">
+				<a href="javascript:void(0);" onclick="selectTable('${t.name}');" style="display:flex; justify-content:space-between; align-items:center; padding:7px 10px; border-radius:6px; font-size:12px; font-weight:${isActive ? 'bold' : 'normal'}; text-decoration:none; color:var(--color-text); background:${isActive ? 'rgba(56,189,248,0.15)' : 'transparent'};">
+					<span style="display:flex; align-items:center; gap:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+						<i class="fas fa-table" style="color:${isActive ? 'var(--icon-color-blue, #38bdf8)' : 'var(--color-text-muted)'}; font-size:11px;"></i>
+						${t.name}
+					</span>
+					<span style="font-size:10px; font-family:monospace; background:rgba(0,0,0,0.15); padding:1px 5px; border-radius:4px; color:var(--color-text-muted);">${t.rows}</span>
+				</a>
+			</li>
+		`;
+	});
+	html += '</ul>';
+	container.innerHTML = html;
+}
+
+function selectTable(tableName) {
+	currentStudioTable = tableName;
+	document.getElementById('studio-active-table-name').innerText = tableName;
+	loadDbSchema(tableName);
+}
+
+function renderStudioTableData(data) {
+	document.getElementById('studio-active-table-badge').innerText = (data.total_rows || 0) + ' <?= tohtml(__tr("rows shown", "satır gösteriliyor")) ?>';
+
+	// 1. Render Data Grid
+	const dataWrapper = document.getElementById('studio-data-table-wrapper');
+	if (!data.rows || data.rows.length === 0) {
+		dataWrapper.innerHTML = '<p class="u-text-muted" style="text-align:center; padding:30px;"><?= tohtml(__tr("Table is empty (0 records).", "Tabloda kayıt bulunmuyor (0 kayıt).")) ?></p>';
+	} else {
+		let tableHtml = '<table class="table" style="width:100%; font-size:12px; border-collapse:collapse;"><thead><tr style="background:rgba(0,0,0,0.1);">';
+		data.headers.forEach(h => {
+			tableHtml += `<th style="padding:6px 10px; text-align:left; border:1px solid var(--border-color, #334155); font-weight:bold; white-space:nowrap;">${escapeHtml(h)}</th>`;
+		});
+		tableHtml += '</tr></thead><tbody>';
+		data.rows.forEach(r => {
+			tableHtml += '<tr style="border-bottom:1px solid var(--border-color, #334155);">';
+			data.headers.forEach(h => {
+				const val = r[h] !== null && r[h] !== undefined ? r[h] : '<span style="color:var(--color-text-muted); font-style:italic;">NULL</span>';
+				tableHtml += `<td style="padding:6px 10px; border:1px solid var(--border-color, #334155); max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(String(val))}</td>`;
+			});
+			tableHtml += '</tr>';
+		});
+		tableHtml += '</tbody></table>';
+		dataWrapper.innerHTML = tableHtml;
+	}
+
+	// 2. Render Schema Structure
+	const schemaWrapper = document.getElementById('studio-schema-table-wrapper');
+	if (data.columns && data.columns.length > 0) {
+		let sHtml = '<table class="table" style="width:100%; font-size:12px; border-collapse:collapse;"><thead><tr style="background:rgba(0,0,0,0.1);">';
+		sHtml += '<th style="padding:6px 10px; text-align:left; border:1px solid var(--border-color, #334155);"><?= tohtml(__tr("Field", "Sütun Adı")) ?></th>';
+		sHtml += '<th style="padding:6px 10px; text-align:left; border:1px solid var(--border-color, #334155);"><?= tohtml(__tr("Type", "Veri Tipi")) ?></th>';
+		sHtml += '<th style="padding:6px 10px; text-align:left; border:1px solid var(--border-color, #334155);"><?= tohtml(__tr("Null", "Null")) ?></th>';
+		sHtml += '<th style="padding:6px 10px; text-align:left; border:1px solid var(--border-color, #334155);"><?= tohtml(__tr("Key", "Anahtar")) ?></th>';
+		sHtml += '<th style="padding:6px 10px; text-align:left; border:1px solid var(--border-color, #334155);"><?= tohtml(__tr("Default", "Varsayılan")) ?></th>';
+		sHtml += '<th style="padding:6px 10px; text-align:left; border:1px solid var(--border-color, #334155);"><?= tohtml(__tr("Extra", "Ekstra")) ?></th>';
+		sHtml += '</tr></thead><tbody>';
+		data.columns.forEach(c => {
+			sHtml += `<tr>
+				<td style="padding:6px 10px; border:1px solid var(--border-color, #334155); font-weight:bold;">${escapeHtml(c.field)}</td>
+				<td style="padding:6px 10px; border:1px solid var(--border-color, #334155); font-family:monospace; color:var(--icon-color-blue, #38bdf8);">${escapeHtml(c.type)}</td>
+				<td style="padding:6px 10px; border:1px solid var(--border-color, #334155);">${escapeHtml(c.null)}</td>
+				<td style="padding:6px 10px; border:1px solid var(--border-color, #334155);">${c.key ? `<span class="badge badge-warning" style="font-size:10px;">${escapeHtml(c.key)}</span>` : ''}</td>
+				<td style="padding:6px 10px; border:1px solid var(--border-color, #334155);">${escapeHtml(c.default || '')}</td>
+				<td style="padding:6px 10px; border:1px solid var(--border-color, #334155); color:var(--color-text-muted);">${escapeHtml(c.extra || '')}</td>
+			</tr>`;
+		});
+		sHtml += '</tbody></table>';
+		schemaWrapper.innerHTML = sHtml;
+	}
+}
+
+function switchStudioTab(tab) {
+	document.getElementById('studio-view-data').style.display = tab === 'data' ? 'block' : 'none';
+	document.getElementById('studio-view-schema').style.display = tab === 'schema' ? 'block' : 'none';
+	document.getElementById('studio-view-sql').style.display = tab === 'sql' ? 'flex' : 'none';
+
+	document.getElementById('tab-btn-data').className = tab === 'data' ? 'button button-primary button-small' : 'button button-secondary button-small';
+	document.getElementById('tab-btn-schema').className = tab === 'schema' ? 'button button-primary button-small' : 'button button-secondary button-small';
+	document.getElementById('tab-btn-sql').className = tab === 'sql' ? 'button button-primary button-small' : 'button button-secondary button-small';
+}
+
+function runStudioCustomSql() {
+	const sqlInput = document.getElementById('studio-custom-sql-input').value.trim();
+	if (!sqlInput) return;
+
+	const resWrapper = document.getElementById('studio-sql-results-wrapper');
+	resWrapper.innerHTML = '<div style="padding:20px; text-align:center;"><i class="fas fa-spinner fa-spin fa-lg"></i></div>';
+
+	const formData = new FormData();
+	formData.append('action_explore_db', '1');
+	formData.append('db_name', currentStudioDb);
+	formData.append('custom_sql', sqlInput);
+	formData.append('token', '<?= tohtml($_SESSION["token"]) ?>');
+
+	fetch('/list/db/', { method: 'POST', body: formData })
+		.then(r => r.json())
+		.then(data => {
+			if (data.status === 'error') {
+				resWrapper.innerHTML = `<div class="alert alert-danger" style="margin:10px 0; padding:10px; font-size:12px;"><i class="fas fa-circle-exclamation u-mr5"></i> ${escapeHtml(data.error || 'SQL Error')}</div>`;
+				return;
+			}
+			if (!data.rows || data.rows.length === 0) {
+				resWrapper.innerHTML = '<p class="u-text-muted" style="text-align:center; padding:20px;"><?= tohtml(__tr("Query executed successfully. 0 rows returned.", "Sorgu başarıyla çalıştırıldı. 0 satır döndü.")) ?></p>';
+				return;
+			}
+			let tableHtml = '<table class="table" style="width:100%; font-size:12px; border-collapse:collapse;"><thead><tr style="background:rgba(0,0,0,0.1);">';
+			data.headers.forEach(h => {
+				tableHtml += `<th style="padding:6px 10px; text-align:left; border:1px solid var(--border-color, #334155); font-weight:bold; white-space:nowrap;">${escapeHtml(h)}</th>`;
+			});
+			tableHtml += '</tr></thead><tbody>';
+			data.rows.forEach(r => {
+				tableHtml += '<tr>';
+				data.headers.forEach(h => {
+					tableHtml += `<td style="padding:6px 10px; border:1px solid var(--border-color, #334155); max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(String(r[h] || ''))}</td>`;
+				});
+				tableHtml += '</tr>';
+			});
+			tableHtml += '</tbody></table>';
+			resWrapper.innerHTML = tableHtml;
+		})
+		.catch(err => {
+			resWrapper.innerHTML = '<p style="color:#ef4444; padding:10px; font-size:12px;">Hata: ' + err + '</p>';
+		});
+}
+
+function filterStudioTables() {
+	const query = document.getElementById('studio-table-search').value.toLowerCase().trim();
+	document.querySelectorAll('.studio-table-item').forEach(el => {
+		const tName = el.getAttribute('data-table') || '';
+		el.style.display = (!query || tName.includes(query)) ? 'block' : 'none';
+	});
+}
+
+function escapeHtml(str) {
+	return String(str).replace(/[&<>"']/g, function(m) {
+		return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
+	});
+}
+
+document.addEventListener('keydown', function(e) {
+	if (e.key === 'Escape') closeDbStudio();
+});
+</script>
