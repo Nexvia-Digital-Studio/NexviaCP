@@ -15,13 +15,18 @@ source $HESTIA/func/main.sh
 source_conf "$HESTIA/conf/hestia.conf"
 
 check_args '4' "$#" 'USER DOMAIN KEY VALUE'
-is_format_valid 'user' 'domain'
-is_object_valid 'user' 'USER' "$user"
 
 user=$1
 domain=$2
-key=$(echo "$3" | tr -d ' \t\r\n' | tr '[:lower:]' '[:upper:]')
+key=$(echo "$3" | sed 's/[^A-Za-z0-9_]//g' | tr '[:lower:]' '[:upper:]')
 value=$4
+
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+
+if [ -z "$key" ]; then
+	check_result "$E_INVALID" "invalid secret KEY name"
+fi
 
 docroot="$HOMEDIR/$user/web/$domain/public_html"
 env_file="$docroot/.env"
@@ -32,19 +37,18 @@ touch "$env_file"
 chmod 600 "$env_file"
 chown "$user:$user" "$env_file"
 
-# Escape value for env file safely
-# If key already exists in .env, replace it; otherwise append
-if grep -q "^${key}=" "$env_file" 2>/dev/null; then
-	# Use sed with temporary file
-	tmp_env="/tmp/env_${domain}_$$"
-	grep -v "^${key}=" "$env_file" > "$tmp_env"
-	echo "${key}=\"${value}\"" >> "$tmp_env"
-	cat "$tmp_env" > "$env_file"
-	rm -f "$tmp_env"
-else
-	echo "${key}=\"${value}\"" >> "$env_file"
-fi
+# Escape backslashes and double quotes in value safely
+escaped_value=$(printf '%s' "$value" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
 
+tmp_env=$(mktemp /tmp/nexvia_env_XXXXXX)
+chmod 600 "$tmp_env"
+
+if [ -f "$env_file" ]; then
+	grep -v "^${key}=" "$env_file" > "$tmp_env" 2>/dev/null || true
+fi
+echo "${key}=\"${escaped_value}\"" >> "$tmp_env"
+
+mv -f "$tmp_env" "$env_file"
 chmod 600 "$env_file"
 chown "$user:$user" "$env_file"
 

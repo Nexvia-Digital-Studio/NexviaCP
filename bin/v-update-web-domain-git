@@ -1,16 +1,7 @@
 #!/bin/bash
 # info: pull latest changes and rebuild web domain deployed from GitHub
 # options: USER DOMAIN
-#
-# example: v-update-web-domain-git admin neredeyasanir.localhost
-#
-# This script pulls latest git changes, re-runs composer/npm/dotnet builds, and restarts services.
 
-#----------------------------------------------------------#
-#                Variables & Functions                     #
-#----------------------------------------------------------#
-
-# Argument definition
 user=$1
 domain=$2
 
@@ -22,13 +13,15 @@ source $HESTIA/func/main.sh
 # load config file
 source_conf "$HESTIA/conf/hestia.conf"
 
-#----------------------------------------------------------#
-#                    Verifications                         #
-#----------------------------------------------------------#
-
 check_args '2' "$#" 'USER DOMAIN'
 is_format_valid 'user' 'domain'
 is_object_valid 'user' 'USER' "$user"
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
 
 docroot="$HOMEDIR/$user/web/$domain/public_html"
 
@@ -36,14 +29,10 @@ if [ ! -d "$docroot/.git" ]; then
 	check_result "$E_NOTEXIST" "Domain $domain is not a git repository."
 fi
 
-#----------------------------------------------------------#
-#                       Action                             #
-#----------------------------------------------------------#
-
 echo "[*] Updating git repository in $docroot..."
 cd "$docroot" || exit 1
 
-# Pull latest commits
+# Pull latest commits as user
 su - "$user" -s /bin/bash -c "cd '$docroot' && git pull" 2>&1
 
 # Build if necessary
@@ -58,23 +47,24 @@ if [ -f "$docroot/package.json" ] && command -v npm &>/dev/null; then
 fi
 
 if ls "$docroot"/*.csproj &>/dev/null && command -v dotnet &>/dev/null; then
-	echo "[*] Rebuilding .NET project..."
+	echo "[*] Re-building .NET project..."
 	su - "$user" -s /bin/bash -c "cd '$docroot' && dotnet publish -c Release -o '$docroot/publish'" 2>&1 || true
 fi
 
-# Fix permissions
+# Permissions Hardening
 chown -R "$user:$user" "$docroot"
-chmod -R 755 "$docroot"
+find "$docroot" -type d -exec chmod 755 {} + 2>/dev/null || true
+find "$docroot" -type f -exec chmod 644 {} + 2>/dev/null || true
+[ -f "$docroot/.env" ] && chmod 600 "$docroot/.env"
+[ -d "$docroot/.git" ] && chmod -R 700 "$docroot/.git"
 
-# Restart background app service if exists
-if [ -f "/etc/systemd/system/hestia-app-${user}-${domain}.service" ]; then
-	echo "[*] Restarting systemd service..."
-	systemctl restart "hestia-app-${user}-${domain}.service" 2>&1 || true
+# Restart isolated app service if configured
+unit_name="hestia-app-${user}-${domain}"
+if systemctl is-active --quiet "$unit_name" 2>/dev/null; then
+	echo "[*] Restarting application service: $unit_name..."
+	systemctl restart "$unit_name" 2>/dev/null || true
 fi
 
-# Reload web server
-$BIN/v-restart-web >/dev/null 2>&1 || true
-
-echo "[+] SUCCESS: Domain $domain updated successfully."
-log_event "$OK" "$ARGUMENTS"
+echo "[+] SUCCESS: Domain $domain updated from GitHub."
+log_event "$OK" "$user $domain git updated"
 exit 0

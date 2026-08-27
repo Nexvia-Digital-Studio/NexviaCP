@@ -1,10 +1,6 @@
 #!/bin/bash
-# info: list masked environment variables (.env) for a web domain
+# info: safely list masked environment keys (.env) for a web domain
 # options: USER DOMAIN [FORMAT]
-#
-# example: v-list-web-domain-env admin neredeyasanir.localhost json
-#
-# Security: Returns ONLY masked values to guarantee zero-knowledge secrecy.
 
 # Includes
 # shellcheck source=/etc/hestiacp/hestia.conf
@@ -15,49 +11,51 @@ source $HESTIA/func/main.sh
 source_conf "$HESTIA/conf/hestia.conf"
 
 check_args '2' "$#" 'USER DOMAIN [FORMAT]'
-is_format_valid 'user' 'domain'
 
 user=$1
 domain=$2
 format=${3:-json}
 
-docroot="$HOMEDIR/$user/web/$domain/public_html"
-env_file="$docroot/.env"
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+
+env_file="$HOMEDIR/$user/web/$domain/public_html/.env"
 
 if [ ! -f "$env_file" ]; then
-	echo "{}"
+	if [ "$format" = "json" ]; then
+		echo "{}"
+	fi
 	exit 0
 fi
 
-if [ "$format" = "json" ]; then
-	echo "{"
-	first=1
-	while IFS= read -r line || [ -n "$line" ]; do
-		# Ignore comments and empty lines
-		[[ "$line" =~ ^[[:space:]]*# ]] && continue
-		[[ -z "$line" ]] && continue
-		
-		key=$(echo "$line" | cut -d '=' -f 1 | tr -d ' \t\r\n')
-		val_len=$(echo "$line" | cut -d '=' -f 2- | wc -c)
-		
-		[ -z "$key" ] && continue
-		
-		if [ $first -eq 0 ]; then
-			echo ","
-		fi
-		first=0
-		
-		printf '    "%s": {\n        "KEY": "%s",\n        "MASKED": "••••••••••••••••",\n        "EXISTS": "yes"\n    }' "$key" "$key"
-	done < "$env_file"
-	echo ""
-	echo "}"
-else
-	while IFS= read -r line || [ -n "$line" ]; do
-		[[ "$line" =~ ^[[:space:]]*# ]] && continue
-		[[ -z "$line" ]] && continue
-		key=$(echo "$line" | cut -d '=' -f 1 | tr -d ' \t\r\n')
-		[ -n "$key" ] && echo "$key: ••••••••••••••••"
-	done < "$env_file"
-fi
+python3 - "$env_file" "$format" << 'PYEOF'
+import sys, json, os
+
+env_path = sys.argv[1]
+format_type = sys.argv[2] if len(sys.argv) > 2 else "json"
+
+res = {}
+if os.path.exists(env_path):
+    with open(env_path, 'r', errors='ignore') as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            if '=' in line:
+                key, _ = line.split('=', 1)
+                key = key.strip()
+                if key:
+                    res[key] = {
+                        "KEY": key,
+                        "MASKED": "••••••••••••••••",
+                        "EXISTS": "yes"
+                    }
+
+if format_type == "json":
+    print(json.dumps(res, indent=4))
+else:
+    for k in res:
+        print(k)
+PYEOF
 
 exit 0

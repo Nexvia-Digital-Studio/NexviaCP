@@ -433,7 +433,7 @@ add_pgsql_database_temp_user() {
 	dbpass_esc=$(sql_escape "$dbpass")
 
 	# Create a LOGIN role scoped to the single target database only.
-	query="CREATE ROLE $dbuser WITH LOGIN PASSWORD '$dbpass_esc' VALID UNTIL 'now() + interval '1 hour''"
+	query="CREATE ROLE $dbuser WITH LOGIN PASSWORD '$dbpass_esc' VALID UNTIL now() + interval '1 hour'"
 	psql_query "$query" > /dev/null
 
 	query="GRANT CONNECT ON DATABASE $database TO $dbuser"
@@ -453,9 +453,7 @@ add_pgsql_database_temp_user() {
 
 delete_pgsql_database_temp_user() {
 	psql_connect $host
-	# Revoke + drop role (reassign owned handles any objects the temp role made).
-	query="REASSIGN OWNED BY $dbuser TO $dbuser"
-	psql_query "$query" > /dev/null 2>&1 || true
+	# Revoke + drop role
 	query="DROP OWNED BY $dbuser"
 	psql_query "$query" > /dev/null 2>&1 || true
 	query="DROP ROLE IF EXISTS $dbuser"

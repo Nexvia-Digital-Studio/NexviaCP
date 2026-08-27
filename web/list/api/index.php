@@ -20,7 +20,11 @@ if (!empty($_GET["restart"]) && !empty($_GET["domain"]) && !empty($_GET["user"])
 		$v_domain = quoteshellarg($_GET["domain"]);
 		$v_user = quoteshellarg($_GET["user"]);
 		exec(HESTIA_CMD . "v-restart-web-domain-app " . $v_user . " " . $v_domain, $output, $return_var);
-		$_SESSION["error_msg"] = ($return_var == 0) ? ($is_tr ? "Servis başarıyla yeniden başlatıldı." : _("Service restarted successfully")) : ($is_tr ? "Servis başlatılırken hata oluştu." : _("Error restarting service"));
+		if ($return_var == 0) {
+			$_SESSION["ok_msg"] = $is_tr ? "Servis başarıyla yeniden başlatıldı." : _("Service restarted successfully");
+		} else {
+			$_SESSION["error_msg"] = $is_tr ? "Servis başlatılırken hata oluştu." : _("Error restarting service");
+		}
 		header("Location: /list/api/");
 		exit();
 	}
@@ -38,7 +42,7 @@ if (!empty($_POST["deploy_repo"])) {
 		if (!empty($_POST["deploy_domain"]) && !empty($_POST["deploy_repo_name"])) {
 			exec(HESTIA_CMD . "v-deploy-github-repo " . $v_user . " " . $v_domain . " " . $v_repo . " " . $v_branch . " " . $v_mode, $output, $return_var);
 			if ($return_var == 0) {
-				$_SESSION["error_msg"] = ($is_tr ? "API servisi başarıyla kuruldu ve canlıya alındı: " : _("API service deployed successfully: ")) . "https://" . $_POST["deploy_domain"];
+				$_SESSION["ok_msg"] = ($is_tr ? "API servisi başarıyla kuruldu ve canlıya alındı: " : _("API service deployed successfully: ")) . "https://" . $_POST["deploy_domain"];
 			} else {
 				$_SESSION["error_msg"] = ($is_tr ? "Dağıtım hatası: " : _("Deployment error: ")) . implode(" ", array_slice($output, -3));
 			}

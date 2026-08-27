@@ -14,7 +14,7 @@ if (!empty($_GET["git_update"]) && !empty($_GET["domain"])) {
 		$v_domain = quoteshellarg($_GET["domain"]);
 		exec(HESTIA_CMD . "v-update-web-domain-git " . $user . " " . $v_domain, $output, $return_var);
 		if ($return_var == 0) {
-			$_SESSION["error_msg"] = $is_tr ? "Web sitesi GitHub'dan en güncel sürüme yükseltildi." : _("Web site updated successfully from GitHub.");
+			$_SESSION["ok_msg"] = $is_tr ? "Web sitesi GitHub'dan en güncel sürüme yükseltildi." : _("Web site updated successfully from GitHub.");
 		} else {
 			$_SESSION["error_msg"] = ($is_tr ? "Güncelleme hatası: " : _("Update error: ")) . implode(" ", array_slice($output, -3));
 		}
@@ -26,7 +26,7 @@ if (!empty($_GET["git_update"]) && !empty($_GET["domain"])) {
 // Action: 1-Click Deploy Web Site from GitHub
 if (!empty($_POST["deploy_repo"]) && ($_SESSION["userContext"] ?? "") === "admin") {
 	if (verify_csrf($_POST)) {
-		$v_target_user = quoteshellarg($_POST["deploy_user"] ?? $user);
+		$v_target_user = quoteshellarg(trim($_POST["deploy_user"] ?? $user_plain, "'\" "));
 		$v_domain_name = quoteshellarg($_POST["deploy_domain"] ?? "");
 		$v_repo = quoteshellarg($_POST["deploy_repo_name"] ?? "");
 		$v_branch = quoteshellarg($_POST["deploy_branch"] ?? "main");
@@ -35,7 +35,7 @@ if (!empty($_POST["deploy_repo"]) && ($_SESSION["userContext"] ?? "") === "admin
 		if (!empty($_POST["deploy_domain"]) && !empty($_POST["deploy_repo_name"])) {
 			exec(HESTIA_CMD . "v-deploy-github-repo " . $v_target_user . " " . $v_domain_name . " " . $v_repo . " " . $v_branch . " " . $v_mode, $output, $return_var);
 			if ($return_var == 0) {
-				$_SESSION["error_msg"] = ($is_tr ? "Web sitesi başarıyla kuruldu ve yayınlandı: " : _("Web site deployed successfully: ")) . $_POST["deploy_domain"];
+				$_SESSION["ok_msg"] = ($is_tr ? "Web sitesi başarıyla kuruldu ve yayınlandı: " : _("Web site deployed successfully: ")) . $_POST["deploy_domain"];
 			} else {
 				$_SESSION["error_msg"] = ($is_tr ? "Dağıtım hatası: " : _("Deployment error: ")) . implode(" ", array_slice($output, -3));
 			}

@@ -1,10 +1,6 @@
 #!/bin/bash
 # info: sync and pull updates for all domains connected to GitHub repos
 # options: [REPO_NAME]
-#
-# example: v-sync-github-repos Nexvia-Nerede-Yasanir
-#
-# This script scans all user domains and updates any site cloned from GitHub.
 
 # Includes
 # shellcheck source=/etc/hestiacp/hestia.conf
@@ -14,9 +10,15 @@ source $HESTIA/func/main.sh
 # load config file
 source_conf "$HESTIA/conf/hestia.conf"
 
-target_repo="$1"
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
 
-echo "[*] Scanning domains for GitHub sync..."
+target_repo=$(echo "$1" | sed 's/[^a-zA-Z0-9._-]//g')
+
+echo "[*] Scanning domains for GitHub sync (Filter: ${target_repo:-all})..."
 
 for u_dir in "$HOMEDIR"/*; do
 	[ ! -d "$u_dir/web" ] && continue
@@ -28,9 +30,10 @@ for u_dir in "$HOMEDIR"/*; do
 
 		# Check remote URL
 		remote_url=$(git -C "$d_dir/public_html" config --get remote.origin.url 2>/dev/null)
+		repo_base=$(basename "$remote_url" .git)
 
 		if [ -n "$target_repo" ]; then
-			if [[ "$remote_url" != *"$target_repo"* ]]; then
+			if [ "$repo_base" != "$target_repo" ] && [[ "$remote_url" != *"/$target_repo.git" ]] && [[ "$remote_url" != *"/$target_repo" ]]; then
 				continue
 			fi
 		fi

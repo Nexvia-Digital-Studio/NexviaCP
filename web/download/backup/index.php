@@ -7,17 +7,21 @@ include $_SERVER["DOCUMENT_ROOT"] . "/inc/main.php";
 // Check token
 verify_csrf($_GET);
 
-$backup = $_GET["backup"];
+$backup = basename($_GET["backup"] ?? "");
+if (empty($backup)) {
+	header("Location: /list/backup/");
+	exit();
+}
 
 if (!file_exists("/backup/" . $backup)) {
-	$backup = quoteshellarg($_GET["backup"]);
+	$v_backup = quoteshellarg($backup);
 	exec(
-		HESTIA_CMD . "v-schedule-user-backup-download " . $user . " " . $backup,
+		HESTIA_CMD . "v-schedule-user-backup-download " . $user . " " . $v_backup,
 		$output,
 		$return_var,
 	);
 	if ($return_var == 0) {
-		$_SESSION["error_msg"] = _("Download of remote backup file has been scheduled.");
+		$_SESSION["ok_msg"] = _("Download of remote backup file has been scheduled.");
 	} else {
 		$_SESSION["error_msg"] = implode("<br>", $output);
 		if (empty($_SESSION["error_msg"])) {

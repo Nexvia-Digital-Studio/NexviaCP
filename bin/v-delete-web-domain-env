@@ -1,8 +1,6 @@
 #!/bin/bash
-# info: delete an environment variable (.env) from a web domain
+# info: delete an environment variable (.env) from a domain
 # options: USER DOMAIN KEY
-#
-# example: v-delete-web-domain-env admin neredeyasanir.localhost OLD_KEY
 
 # Includes
 # shellcheck source=/etc/hestiacp/hestia.conf
@@ -13,22 +11,24 @@ source $HESTIA/func/main.sh
 source_conf "$HESTIA/conf/hestia.conf"
 
 check_args '3' "$#" 'USER DOMAIN KEY'
+
 user=$1
 domain=$2
-key=$(echo "$3" | tr -d ' \t\r\n' | tr '[:lower:]' '[:upper:]')
+key=$(echo "$3" | sed 's/[^A-Za-z0-9_]//g' | tr '[:lower:]' '[:upper:]')
 
-docroot="$HOMEDIR/$user/web/$domain/public_html"
-env_file="$docroot/.env"
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
 
-[ ! -f "$env_file" ] && exit 0
+env_file="$HOMEDIR/$user/web/$domain/public_html/.env"
 
-tmp_env="/tmp/env_del_${domain}_$$"
-grep -v "^${key}=" "$env_file" > "$tmp_env"
-cat "$tmp_env" > "$env_file"
-rm -f "$tmp_env"
+if [ -f "$env_file" ] && [ -n "$key" ]; then
+	tmp_env=$(mktemp /tmp/nexvia_del_XXXXXX)
+	chmod 600 "$tmp_env"
+	grep -v "^${key}=" "$env_file" > "$tmp_env" 2>/dev/null || true
+	mv -f "$tmp_env" "$env_file"
+	chmod 600 "$env_file"
+	chown "$user:$user" "$env_file"
+fi
 
-chmod 600 "$env_file"
-chown "$user:$user" "$env_file"
-
-log_event "$OK" "$user $domain $key"
+log_event "$OK" "$user $domain $key deleted"
 exit 0

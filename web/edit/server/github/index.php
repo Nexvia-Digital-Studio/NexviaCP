@@ -28,7 +28,7 @@ if (!empty($_POST["save"])) {
 	if ($return_var == 0) {
 		$_SESSION["GITHUB_ORG"] = $v_org_val;
 		$_SESSION["GITHUB_TOKEN"] = $v_token_val;
-		$_SESSION["error_msg"] = $is_tr ? "GitHub entegrasyon ayarları başarıyla kaydedildi." : _("GitHub integration settings saved successfully.");
+		$_SESSION["ok_msg"] = $is_tr ? "GitHub entegrasyon ayarları başarıyla kaydedildi." : _("GitHub integration settings saved successfully.");
 	} else {
 		$_SESSION["error_msg"] = $is_tr ? "GitHub ayarları kaydedilirken hata oluştu." : _("Error saving GitHub settings.");
 	}
@@ -44,7 +44,11 @@ if (!empty($_POST["save_vault"])) {
 
 	if (!empty($_POST["vault_key"]) && !empty($_POST["vault_value"])) {
 		exec(HESTIA_CMD . "v-set-sys-global-vault " . $v_key . " " . $v_val, $output, $return_var);
-		$_SESSION["error_msg"] = ($return_var == 0) ? ($is_tr ? "Global Secret (Anahtar) güvenle kaydedildi." : _("Global secret saved securely.")) : ($is_tr ? "Secret kaydedilirken hata oluştu." : _("Error saving secret."));
+		if ($return_var == 0) {
+			$_SESSION["ok_msg"] = $is_tr ? "Global Secret (Anahtar) güvenle kaydedildi." : _("Global secret saved securely.");
+		} else {
+			$_SESSION["error_msg"] = $is_tr ? "Secret kaydedilirken hata oluştu." : _("Error saving secret.");
+		}
 	}
 	header("Location: /edit/server/github/");
 	exit();
@@ -55,7 +59,7 @@ if (!empty($_GET["delete_vault"]) && !empty($_GET["key"])) {
 	if (verify_csrf($_GET)) {
 		$v_key = quoteshellarg(trim($_GET["key"]));
 		exec(HESTIA_CMD . "v-delete-sys-global-vault " . $v_key, $output, $return_var);
-		$_SESSION["error_msg"] = $is_tr ? "Global Secret başarıyla silindi." : _("Global secret deleted.");
+		$_SESSION["ok_msg"] = $is_tr ? "Global Secret başarıyla silindi." : _("Global secret deleted.");
 		header("Location: /edit/server/github/");
 		exit();
 	}

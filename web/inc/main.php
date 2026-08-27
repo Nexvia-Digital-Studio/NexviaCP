@@ -229,11 +229,11 @@ function show_alert_message($data) {
 	$msgClass = "";
 	if (!empty($data["error_msg"])) {
 		$msgIcon = "fa-circle-exclamation";
-		$msgText = htmlentities($data["error_msg"]);
+		$msgText = htmlentities($data["error_msg"], ENT_QUOTES, 'UTF-8');
 		$msgClass = "inline-alert-danger";
 	} elseif (!empty($data["ok_msg"])) {
 		$msgIcon = "fa-circle-check";
-		$msgText = $data["ok_msg"];
+		$msgText = htmlentities($data["ok_msg"], ENT_QUOTES, 'UTF-8');
 		$msgClass = "inline-alert-success";
 	}
 
@@ -244,6 +244,13 @@ function show_alert_message($data) {
 			$msgIcon,
 			$msgText,
 		);
+	}
+}
+
+if (!function_exists('__tr')) {
+	function __tr(string $en, string $tr): string {
+		$lang = $_SESSION['language'] ?? $_SESSION['LANGUAGE'] ?? 'en';
+		return ($lang === 'tr') ? $tr : _($en);
 	}
 }
 

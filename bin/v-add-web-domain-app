@@ -55,14 +55,21 @@ case "${3:-}" in
 	*) check_result "$E_INVALID" "invalid APP_TYPE (use node|dotnet|websocket|custom)" ;;
 esac
 
-check_hestia_demo_mode
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
 
 #----------------------------------------------------------#
 #                       Action                             #
 #----------------------------------------------------------#
 
 app_type="$3"
-start_cmd="${4:-}"
+start_cmd=$(printf '%s' "${4:-}" | tr -d '\r\n')
+if [ -n "$start_cmd" ] && [[ ! "$start_cmd" =~ ^[a-zA-Z0-9_\ ./\:\"\'\=\-]+$ ]]; then
+	check_result "$E_INVALID" "invalid characters in START_CMD"
+fi
 
 docroot="$HOMEDIR/$user/web/$domain/public_html"
 domain_home="$HOMEDIR/$user/web/$domain"

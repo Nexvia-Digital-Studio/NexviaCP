@@ -33,6 +33,12 @@ check_args '3' "$#" 'USER DOMAIN REPO [BRANCH] [APP_MODE]'
 is_format_valid 'user' 'domain'
 is_object_valid 'user' 'USER' "$user"
 
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
 # Build full git repository URL
 repo_url="$repo_input"
 if [[ ! "$repo_input" =~ ^https?:// ]] && [[ ! "$repo_input" =~ ^git@ ]]; then
@@ -64,29 +70,31 @@ if [ -n "$GITHUB_TOKEN" ] && [[ "$repo_url" =~ ^https://github.com/ ]]; then
 	auth_repo_url="https://${GITHUB_TOKEN}@github.com/${clean_repo}.git"
 fi
 
-# Clone into temp directory first to preserve clean replace
-tmp_clone="/tmp/gh_deploy_${domain}_$$"
-rm -rf "$tmp_clone"
+# Secure temporary directory with auto-cleanup
+tmp_dir=$(mktemp -d -t nexvia_deploy_XXXXXX)
+trap 'rm -rf "$tmp_dir"' EXIT
+tmp_clone="$tmp_dir/clone"
 mkdir -p "$tmp_clone"
 
 echo "[*] Fetching branch '$branch' from $repo_input..."
 if ! git clone --depth 1 -b "$branch" "$auth_repo_url" "$tmp_clone" 2>/dev/null; then
 	# Fallback to default branch
 	if ! git clone --depth 1 "$auth_repo_url" "$tmp_clone" 2>/dev/null; then
-		rm -rf "$tmp_clone"
 		check_result "$E_CONNECT" "Git clone failed. Please check repository name and GitHub Token permissions."
 	fi
 fi
 
 # Backup existing .env if present
-env_backup="/tmp/env_backup_${domain}_$$"
+env_backup="$tmp_dir/env_backup"
 [ -f "$docroot/.env" ] && cp "$docroot/.env" "$env_backup"
 
 # Move files to docroot
 rm -rf "$docroot"/* "$docroot"/.[!.]* 2>/dev/null || true
 cp -r "$tmp_clone"/* "$docroot"/ 2>/dev/null || true
 cp -r "$tmp_clone"/.[!.]* "$docroot"/ 2>/dev/null || true
-rm -rf "$tmp_clone"
+
+# Strip token from remote URL in git config for security
+git -C "$docroot" remote set-url origin "$repo_url" 2>/dev/null || true
 
 # Restore or initialize .env
 if [ -f "$env_backup" ]; then
@@ -109,7 +117,7 @@ if [ -f "$HESTIA/conf/vault.conf" ]; then
 	done < "$HESTIA/conf/vault.conf"
 fi
 
-# Step 2.5: Auto-provision MySQL Database if schema.sql or database.sql exists
+# Step 2.5: Auto-provision MySQL Database if schema.sql exists
 sql_file=""
 for f in "$docroot/schema.sql" "$docroot/database.sql" "$docroot/db.sql" "$docroot/install.sql" "$docroot/build/schema.sql"; do
 	if [ -f "$f" ]; then
@@ -143,17 +151,15 @@ if [ -n "$sql_file" ]; then
 		fi
 	done
 
-	# Run any seed scripts if present
+	# Run any seed scripts under user privileges
 	if [ -f "$docroot/build/seed_provinces.php" ]; then
 		echo "[*] Running project seeders..."
-		(cd "$docroot/build" && php seed_provinces.php >/dev/null 2>&1 && php seed_districts.php >/dev/null 2>&1) || true
+		su - "$user" -s /bin/bash -c "cd '$docroot/build' && php seed_provinces.php >/dev/null 2>&1 && php seed_districts.php >/dev/null 2>&1" || true
 	fi
 fi
 
 chmod 600 "$docroot/.env" 2>/dev/null || true
 chown -R "$user:$user" "$docroot"
-chmod -R 755 "$docroot"
-chmod 600 "$docroot/.env" 2>/dev/null || true
 
 echo "[*] Step 3: Detecting application stack..."
 detected_type="php"
@@ -208,38 +214,39 @@ case "$detected_type" in
 		echo "[*] Configuring Static SPA / React frontend..."
 		$BIN/v-change-web-domain-tpl "$user" "$domain" "default"
 		if [ -d "$docroot/dist" ]; then
-			cp -r "$docroot/dist"/* "$docroot"/ 2>/dev/null || true
+			cp -rf "$docroot/dist"/* "$docroot"/ 2>/dev/null || true
+		elif [ -f "$docroot/package.json" ] && command -v npm &>/dev/null; then
+			su - "$user" -s /bin/bash -c "cd '$docroot' && npm run build" 2>/dev/null || true
+			[ -d "$docroot/dist" ] && cp -rf "$docroot/dist"/* "$docroot"/ 2>/dev/null || true
 		fi
 		;;
 	laravel)
-		echo "[*] Configuring Laravel PHP application..."
+		echo "[*] Configuring Laravel PHP framework..."
 		$BIN/v-change-web-domain-tpl "$user" "$domain" "default"
-		if command -v composer &>/dev/null && [ -f "$docroot/composer.json" ]; then
+		if command -v composer &>/dev/null; then
 			su - "$user" -s /bin/bash -c "cd '$docroot' && composer install --no-dev -o" 2>/dev/null || true
 		fi
-		chmod -R 775 "$docroot/storage" "$docroot/bootstrap/cache" 2>/dev/null || true
+		su - "$user" -s /bin/bash -c "cd '$docroot' && php artisan key:generate --force 2>/dev/null" || true
 		;;
-	*)
-		echo "[*] Configuring standard PHP/HTML website..."
+	php)
+		echo "[*] Configuring PHP / Native application..."
 		$BIN/v-change-web-domain-tpl "$user" "$domain" "default"
-		if command -v composer &>/dev/null && [ -f "$docroot/composer.json" ]; then
+		if [ -f "$docroot/composer.json" ] && command -v composer &>/dev/null; then
 			su - "$user" -s /bin/bash -c "cd '$docroot' && composer install --no-dev -o" 2>/dev/null || true
 		fi
 		;;
 esac
 
-# Ensure permissions
+# Final Permissions Hardening
 chown -R "$user:$user" "$docroot"
-chmod -R 755 "$docroot"
+find "$docroot" -type d -exec chmod 755 {} + 2>/dev/null || true
+find "$docroot" -type f -exec chmod 644 {} + 2>/dev/null || true
+[ -f "$docroot/.env" ] && chmod 600 "$docroot/.env"
+[ -d "$docroot/.git" ] && chmod -R 700 "$docroot/.git"
 
-# Step 4: SSL (Automatic fallback for local test domains)
-echo "[*] Step 4: Configuring SSL..."
-if [[ ! "$domain" =~ \.local$ ]] && [[ ! "$domain" =~ \.localhost$ ]] && [[ ! "$domain" =~ \.test$ ]]; then
-	$BIN/v-add-letsencrypt-domain "$user" "$domain" >/dev/null 2>&1 || true
-fi
+# Restart web server
+$BIN/v-restart-web 2>/dev/null || systemctl reload nginx 2>/dev/null || true
 
-$BIN/v-restart-web >/dev/null 2>&1 || true
-
-echo "[+] SUCCESS: Repository $repo_input deployed successfully to http://$domain (Stack: $detected_type)"
-log_event "$OK" "$ARGUMENTS"
+echo "[+] SUCCESS: Deployment completed for $domain"
+log_event "$OK" "GitHub repo $repo_input deployed to $domain ($detected_type)"
 exit 0

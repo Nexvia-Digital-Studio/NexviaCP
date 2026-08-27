@@ -113,12 +113,9 @@ if (!is_file($deployScript) || !is_executable($deployScript)) {
     exit;
 }
 
-// Run deploy.sh as the domain owner (never root, never web user).
-// sudoers allows hestiaweb to run /usr/local/hestia/bin/* only, so we use
-// the runuser binary which does not require sudo.
+// Run deploy.sh directly (PHP-FPM pool is already running as the domain user).
 $cmd = sprintf(
-    'runuser -u %s -- %s 2>&1',
-    escapeshellarg($domainUser),
+    '/bin/bash %s 2>&1',
     escapeshellarg($deployScript)
 );
 

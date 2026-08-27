@@ -46,7 +46,11 @@ if (!empty($_POST["save_env_secret"])) {
 	$env_v = quoteshellarg(trim($_POST["env_value"] ?? ""));
 	if (!empty($_POST["env_key"]) && !empty($_POST["env_value"])) {
 		exec(HESTIA_CMD . "v-set-web-domain-env " . $user . " " . quoteshellarg($v_domain) . " " . $env_k . " " . $env_v, $output, $return_var);
-		$_SESSION["error_msg"] = ($return_var == 0) ? ($is_tr ? "Ortam değişkeni (.env) güvenle kaydedildi." : _("Environment secret saved securely.")) : ($is_tr ? "Hata oluştu." : _("Error saving secret."));
+		if ($return_var == 0) {
+			$_SESSION["ok_msg"] = $is_tr ? "Ortam değişkeni (.env) güvenle kaydedildi." : _("Environment secret saved securely.");
+		} else {
+			$_SESSION["error_msg"] = $is_tr ? "Hata oluştu." : _("Error saving secret.");
+		}
 	}
 	header("Location: /edit/web/?domain=" . urlencode($v_domain) . "&token=" . $_SESSION["token"]);
 	exit();
@@ -57,7 +61,7 @@ if (!empty($_GET["delete_env"]) && !empty($_GET["key"])) {
 	if (verify_csrf($_GET)) {
 		$env_k = quoteshellarg(trim($_GET["key"]));
 		exec(HESTIA_CMD . "v-delete-web-domain-env " . $user . " " . quoteshellarg($v_domain) . " " . $env_k, $output, $return_var);
-		$_SESSION["error_msg"] = $is_tr ? "Ortam değişkeni (.env) başarıyla silindi." : _("Environment secret deleted.");
+		$_SESSION["ok_msg"] = $is_tr ? "Ortam değişkeni (.env) başarıyla silindi." : _("Environment secret deleted.");
 		header("Location: /edit/web/?domain=" . urlencode($v_domain) . "&token=" . $_SESSION["token"]);
 		exit();
 	}

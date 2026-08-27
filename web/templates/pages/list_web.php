@@ -250,7 +250,7 @@
 							if (strpos($_SERVER['HTTP_HOST'] ?? '', ':8083') !== false || ($_SERVER['SERVER_PORT'] ?? '') == '8083') {
 								$web_port_suffix = ":9080";
 							}
-							$is_git_domain = file_exists(($_SESSION['HOMEDIR'] ?? '/home') . '/' . $user . '/web/' . $key . '/public_html/.git') || file_exists('/home/' . $user . '/web/' . $key . '/public_html/.git');
+							$is_git_domain = file_exists(($_SESSION['HOMEDIR'] ?? '/home') . '/' . $user_plain . '/web/' . $key . '/public_html/.git') || file_exists('/home/' . $user_plain . '/web/' . $key . '/public_html/.git');
 						?>
 						<li class="units-table-row-action" data-key-action="href">
 							<a
@@ -380,24 +380,24 @@
 
 <!-- Modal: GitHub Web Site Deploy -->
 <?php if (($_SESSION["userContext"] ?? "") === "admin"): ?>
-<div id="github-web-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.65); z-index:9999; justify-content:center; align-items:center;">
+<div id="github-web-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.65); z-index:9999; justify-content:center; align-items:center;" onclick="if(event.target===this) this.style.display='none';">
 	<div class="form-container" style="background:var(--color-background, #fff); max-width:580px; width:92%; border-radius:8px; padding:25px 30px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
-		<h2 class="u-mb15"><i class="fab fa-github icon-blue"></i> <?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "GitHub'dan Web Sitesi Kur" : _("Deploy Web Site from GitHub")) ?></h2>
+		<h2 class="u-mb15"><i class="fab fa-github icon-blue"></i> <?= tohtml(__tr("Deploy Web Site from GitHub", "GitHub'dan Web Sitesi Kur")) ?></h2>
 		<p class="u-text-muted u-mb20" style="font-size:0.9rem; line-height:1.4;">
-			<?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "GitHub organizasyonunuzdan bir site seçin (PHP, HTML, React, Node.js, .NET). Otomatik olarak kurulup yayına alınacaktır." : _("Select a repository to deploy as a web application with automated build and webhook sync.")) ?>
+			<?= tohtml(__tr("Select a repository from your GitHub organization (PHP, HTML, React, Node.js, .NET). It will be deployed automatically with isolated runtime and environment management.", "GitHub organizasyonunuzdan bir site seçin (PHP, HTML, React, Node.js, .NET). Otomatik olarak kurulup yayına alınacaktır.")) ?>
 		</p>
 		
-		<form method="post" action="/list/web/">
+		<form method="post" action="/list/web/" onsubmit="const b = this.querySelector('button[type=submit]'); b.disabled=true; b.innerHTML='<i class=\'fas fa-spinner fa-spin\'></i> ' + ('<?= (($_SESSION['language'] ?? '') === 'tr') ? "Kuruluyor..." : "Deploying..." ?>');">
 			<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
 			<input type="hidden" name="deploy_repo" value="1">
 			
 			<div class="u-mb15">
-				<label class="form-label u-mb5 u-text-bold"><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "GitHub Deposu (Repo)" : _("GitHub Repository")) ?></label>
+				<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("GitHub Repository", "GitHub Deposu (Repo)")) ?></label>
 				<select name="deploy_repo_name" class="form-select" required style="width:100%;">
 					<?php if (empty($github_repos) || isset($github_repos["error"])): ?>
-						<option value=""><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "-- Repo bulunamadı / Token ayarlanmadı --" : _("-- No repos found / Token not set --")) ?></option>
+						<option value=""><?= tohtml(__tr("-- No repos found / Token not set --", "-- Repo bulunamadı / Token ayarlanmadı --")) ?></option>
 					<?php else: ?>
-						<option value=""><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "-- Depo Seçiniz --" : _("-- Select Repository --")) ?></option>
+						<option value=""><?= tohtml(__tr("-- Select Repository --", "-- Depo Seçiniz --")) ?></option>
 						<?php foreach ($github_repos as $rname => $rdata): ?>
 							<option value="<?= tohtml($rname) ?>">
 								<?= tohtml($rdata["NAME"] ?? $rname) ?> (<?= tohtml($rdata["LANGUAGE"] ?? "Web") ?>) <?= ($rdata["PRIVATE"] ?? "") === "yes" ? "🔒" : "" ?>
@@ -408,39 +408,47 @@
 			</div>
 
 			<div class="u-mb15">
-				<label class="form-label u-mb5 u-text-bold"><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Alan Adı (Domain)" : _("Domain Name")) ?></label>
+				<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("Domain Name", "Alan Adı (Domain)")) ?></label>
 				<input type="text" name="deploy_domain" placeholder="neredeyasanir.localhost" required class="form-control" style="width:100%;">
 				<small class="u-text-muted" style="display:block; margin-top:4px;">
-					💡 <?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Yerel test için alanadı.localhost (örn: neredeyasanir.localhost) yazabilirsiniz. Tarayıcınızda doğrudan http://neredeyasanir.localhost:9080 üzerinden açılır!" : _("For local testing, you can use domain.localhost (e.g. site.localhost:9080).")) ?>
+					💡 <?= tohtml(__tr("For local testing, you can use domain.localhost (e.g. site.localhost:9080).", "Yerel test için alanadı.localhost (örn: neredeyasanir.localhost) yazabilirsiniz. Tarayıcınızda doğrudan http://neredeyasanir.localhost:9080 üzerinden açılır!")) ?>
 				</small>
 			</div>
 
 			<div class="u-mb15" style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
 				<div>
-					<label class="form-label u-mb5 u-text-bold"><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Kullanıcı" : _("User")) ?></label>
-					<input type="text" name="deploy_user" value="<?= tohtml($user) ?>" class="form-control" style="width:100%;" readonly>
+					<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("User", "Kullanıcı")) ?></label>
+					<input type="text" name="deploy_user" value="<?= tohtml($user_plain) ?>" class="form-control" style="width:100%;" readonly>
 				</div>
 				<div>
-					<label class="form-label u-mb5 u-text-bold"><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Uygulama Modu" : _("App Mode")) ?></label>
+					<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("App Mode", "Uygulama Modu")) ?></label>
 					<select name="deploy_mode" class="form-select" style="width:100%;">
-						<option value="auto"><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "⚡ Otomatik Algıla (Akıllı)" : _("⚡ Auto-Detect (Smart)")) ?></option>
-						<option value="php"><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "🐘 PHP / HTML / Laravel" : _("🐘 PHP / HTML / Laravel")) ?></option>
-						<option value="react"><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "⚛️ React / Vite (SPA Dist)" : _("⚛️ React / Vite (SPA Dist)")) ?></option>
-						<option value="node"><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "🟢 Node.js / Next.js" : _("🟢 Node.js / Next.js")) ?></option>
-						<option value="dotnet"><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "🟣 .NET Core Web API / MVC" : _("🟣 .NET Core Web API / MVC")) ?></option>
+						<option value="auto"><?= tohtml(__tr("⚡ Auto-Detect (Smart)", "⚡ Otomatik Algıla (Akıllı)")) ?></option>
+						<option value="php"><?= tohtml(__tr("🐘 PHP / HTML / Laravel", "🐘 PHP / HTML / Laravel")) ?></option>
+						<option value="react"><?= tohtml(__tr("⚛️ React / Vite (SPA Dist)", "⚛️ React / Vite (SPA Dist)")) ?></option>
+						<option value="node"><?= tohtml(__tr("🟢 Node.js / Next.js", "🟢 Node.js / Next.js")) ?></option>
+						<option value="dotnet"><?= tohtml(__tr("🟣 .NET Core Web API / MVC", "🟣 .NET Core Web API / MVC")) ?></option>
 					</select>
 				</div>
 			</div>
 
 			<div class="u-mt20" style="display:flex; justify-content:flex-end; gap:10px;">
 				<button type="button" class="button button-secondary" onclick="document.getElementById('github-web-modal').style.display='none'">
-					<?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "İptal" : _("Cancel")) ?>
+					<?= tohtml(__tr("Cancel", "İptal")) ?>
 				</button>
 				<button type="submit" class="button button-primary">
-					<i class="fas fa-rocket"></i> <?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Kur & Yayına Al" : _("Deploy & Launch")) ?>
+					<i class="fas fa-rocket"></i> <?= tohtml(__tr("Deploy & Launch", "Kur & Yayına Al")) ?>
 				</button>
 			</div>
 		</form>
 	</div>
 </div>
+<script>
+document.addEventListener('keydown', function(e) {
+	if (e.key === 'Escape') {
+		const m = document.getElementById('github-web-modal');
+		if (m) m.style.display = 'none';
+	}
+});
+</script>
 <?php endif; ?>

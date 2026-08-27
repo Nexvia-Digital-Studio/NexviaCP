@@ -135,12 +135,12 @@ function __t($en, $tr) {
 </div>
 
 <!-- Modal: Deploy Standalone API -->
-<div id="deploy-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.65); z-index:9999; justify-content:center; align-items:center;">
+<div id="deploy-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.65); z-index:9999; justify-content:center; align-items:center;" onclick="if(event.target===this) this.style.display='none';">
 	<div class="form-container" style="background:var(--color-background, #fff); max-width:580px; width:92%; border-radius:8px; padding:25px 30px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
 		<h2 class="u-mb15"><i class="fas fa-circle-plus icon-green"></i> <?= tohtml(__t("Deploy Standalone API", "Yeni API Servisi Kur")) ?></h2>
 		<p class="u-text-muted u-mb20" style="font-size:0.9rem; line-height:1.4;"><?= tohtml(__t("Select an API repository to deploy as a standalone backend service on an isolated dynamic port with Let's Encrypt SSL.", "Bağımsız bir API deposu seçerek dinamik izole port ve SSL sertifikasıyla doğrudan yayına alabilirsiniz.")) ?></p>
 		
-		<form method="post" action="/list/api/">
+		<form method="post" action="/list/api/" onsubmit="const b = this.querySelector('button[type=submit]'); b.disabled=true; b.innerHTML='<i class=\'fas fa-spinner fa-spin\'></i> ' + ('<?= (($_SESSION['language'] ?? '') === 'tr') ? "Kuruluyor..." : "Deploying..." ?>');">
 			<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
 			<input type="hidden" name="deploy_repo" value="1">
 			
@@ -198,3 +198,11 @@ function __t($en, $tr) {
 		</form>
 	</div>
 </div>
+<script>
+document.addEventListener('keydown', function(e) {
+	if (e.key === 'Escape') {
+		const m = document.getElementById('deploy-modal');
+		if (m) m.style.display = 'none';
+	}
+});
+</script>

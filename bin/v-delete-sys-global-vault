@@ -11,15 +11,24 @@ source $HESTIA/func/main.sh
 source_conf "$HESTIA/conf/hestia.conf"
 
 check_args '1' "$#" 'KEY'
-key=$(echo "$1" | tr -d ' \t\r\n' | tr '[:lower:]' '[:upper:]')
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+key=$(echo "$1" | sed 's/[^A-Za-z0-9_]//g' | tr '[:lower:]' '[:upper:]')
 vault_file="$HESTIA/conf/vault.conf"
 
-[ ! -f "$vault_file" ] && exit 0
+if [ -f "$vault_file" ] && [ -n "$key" ]; then
+	tmp_v=$(mktemp /tmp/nexvia_vault_del_XXXXXX)
+	chmod 600 "$tmp_v"
+	grep -v "^${key}=" "$vault_file" > "$tmp_v" 2>/dev/null || true
+	mv -f "$tmp_v" "$vault_file"
+	chmod 600 "$vault_file"
+	chown root:root "$vault_file"
+fi
 
-tmp_v="/tmp/vault_del_$$"
-grep -v "^${key}=" "$vault_file" > "$tmp_v"
-cat "$tmp_v" > "$vault_file"
-rm -f "$tmp_v"
-
-chmod 600 "$vault_file"
+log_event "$OK" "$key deleted from vault"
 exit 0

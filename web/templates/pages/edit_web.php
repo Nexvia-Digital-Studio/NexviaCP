@@ -490,15 +490,9 @@
 						<strong>https://<?= tohtml(trim($v_domain, "'")) ?>/deploy.php</strong></span>
 					</div>
 					<div class="alert alert-success u-mt10 u-mb10" role="alert">
-						<i class="fas fa-shield-halved u-mr5"></i>
-						<span><strong><?= tohtml( _("HMAC-SHA256 Webhook Secret:")) ?></strong><br>
-						<code style="word-break:break-all;"><?= tohtml(trim($v_git_secret, "'")) ?></code><br>
-						<small class="u-mt5"><?= tohtml( _("GitHub/GitLab webhook 'Secret' alanına yukarıdaki anahtarı yapıştırın. Her istek HMAC-SHA256 ile doğrulanır.")) ?></small></span>
-					</div>
-					<?php } else { ?>
-					<div class="alert alert-warning u-mt10 u-mb10" role="alert">
+						<div class="alert alert-info u-mb10" role="alert">
 						<i class="fas fa-circle-info u-mr5"></i>
-						<span><?= tohtml( _("Bir Git Repository URL'si girip 'Kaydet'e bastığınızda, bu domain için HMAC-SHA256 Webhook Secret otomatik oluşturulacak ve webhook URL'si görünecektir.")) ?></span>
+						<span><?= tohtml(__tr("When you enter a Git Repository URL and click 'Save', an HMAC-SHA256 Webhook Secret will be generated and displayed for this domain.", "Bir Git Repository URL'si girip 'Kaydet'e bastığınızda, bu domain için HMAC-SHA256 Webhook Secret otomatik oluşturulacak ve webhook URL'si görünecektir.")) ?></span>
 					</div>
 					<?php } ?>
 
@@ -506,7 +500,7 @@
 					<div class="u-mt10">
 						<label class="form-check">
 							<input type="checkbox" class="form-check-input" name="v_git_disable" value="yes">
-							<span class="form-check-label"><?= tohtml( _("Git Auto-Deploy'u devre dışı bırak (webhook secret döndürülür)")) ?></span>
+							<span class="form-check-label"><?= tohtml(__tr("Disable Git Auto-Deploy (rotates webhook secret)", "Git Auto-Deploy'u devre dışı bırak (webhook secret döndürülür)")) ?></span>
 						</label>
 					</div>
 					<?php } ?>
@@ -515,17 +509,17 @@
 
 			<details class="collapse u-mt20" id="web-resource-limits" <?= !empty($v_web_cgroup_high) || !empty($v_web_cpu_quota) ? "open" : "" ?>>
 				<summary class="collapse-header">
-					<i class="fas fa-microchip icon-blue u-mr5"></i><?= tohtml( _("Site Kaynak Limitleri (RAM / CPU)")) ?>
+					<i class="fas fa-microchip icon-blue u-mr5"></i><?= tohtml(__tr("Site Resource Limits (RAM / CPU)", "Site Kaynak Limitleri (RAM / CPU)")) ?>
 				</summary>
 				<div class="collapse-content">
 					<div class="alert alert-info u-mb10" role="alert">
 						<i class="fas fa-circle-info u-mr5"></i>
-						<span><?= tohtml( _("Her siteyi izole etmek için baseline (normal RAM) ve peak (yoğunluk RAM) sınırı belirleyin. Akıllı Dinamik RAM, baseline ile peak arasında otomatik ölçeklendirme yapar.")) ?></span>
+						<span><?= tohtml(__tr("Set baseline and peak memory limits to isolate this site. Dynamic RAM scaling automatically adjusts allocation between baseline and peak based on pressure.", "Her siteyi izole etmek için baseline (normal RAM) ve peak (yoğunluk RAM) sınırı belirleyin. Akıllı Dinamik RAM, baseline ile peak arasında otomatik ölçeklendirme yapar.")) ?></span>
 					</div>
 
 					<div class="u-mb10">
 						<label for="v_web_cgroup_high" class="form-label">
-							<?= tohtml( _("Baseline RAM (MemoryHigh) — Normal çalışma sınırı")) ?>
+							<?= tohtml(__tr("Baseline RAM (MemoryHigh) — Standard operational boundary", "Baseline RAM (MemoryHigh) — Normal çalışma sınırı")) ?>
 						</label>
 						<div class="u-d-flex u-gap5 u-mb5">
 							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cgroup_high" data-value="128M">128M</button>
@@ -534,12 +528,12 @@
 							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cgroup_high" data-value="1G">1G</button>
 						</div>
 						<input type="text" class="form-control" name="v_web_cgroup_high" id="v_web_cgroup_high" value="<?= tohtml(trim($v_web_cgroup_high, "'")) ?>" placeholder="256M">
-						<small class="form-text text-muted"><?= tohtml( _("Örn: 256M. Boş bırakılırsa sınırsız.")) ?></small>
+						<small class="form-text text-muted"><?= tohtml(__tr("e.g. 256M. Leave empty for unlimited.", "Örn: 256M. Boş bırakılırsa sınırsız.")) ?></small>
 					</div>
 
 					<div class="u-mb10">
 						<label for="v_web_cgroup_max" class="form-label">
-							<?= tohtml( _("Peak RAM (MemoryMax) — Yoğunluk anı üst sınırı")) ?>
+							<?= tohtml(__tr("Peak RAM (MemoryMax) — Maximum ceiling during spikes", "Peak RAM (MemoryMax) — Yoğunluk anı üst sınırı")) ?>
 						</label>
 						<div class="u-d-flex u-gap5 u-mb5">
 							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cgroup_max" data-value="1G">1G</button>
@@ -548,12 +542,12 @@
 							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cgroup_max" data-value="8G">8G</button>
 						</div>
 						<input type="text" class="form-control" name="v_web_cgroup_max" id="v_web_cgroup_max" value="<?= tohtml(trim($v_web_cgroup_max, "'")) ?>" placeholder="2G">
-						<small class="form-text text-muted"><?= tohtml( _("Örn: 2G. Peak ≥ Baseline olmalıdır.")) ?></small>
+						<small class="form-text text-muted"><?= tohtml(__tr("e.g. 2G. Peak must be >= Baseline.", "Örn: 2G. Peak ≥ Baseline olmalıdır.")) ?></small>
 					</div>
 
 					<div class="u-mb10">
 						<label for="v_web_cpu_quota" class="form-label">
-							<?= tohtml( _("CPU Kotası")) ?>
+							<?= tohtml(__tr("CPU Quota", "CPU Kotası")) ?>
 						</label>
 						<div class="u-d-flex u-gap5 u-mb5">
 							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cpu_quota" data-value="25%">25%</button>
@@ -562,87 +556,85 @@
 							<button type="button" class="button button-secondary js-memory-preset" data-target="v_web_cpu_quota" data-value="200%">200%</button>
 						</div>
 						<input type="text" class="form-control" name="v_web_cpu_quota" id="v_web_cpu_quota" value="<?= tohtml(trim($v_web_cpu_quota, "'")) ?>" placeholder="100%">
-						<small class="form-text text-muted"><?= tohtml( _("50% = yarım çekirdek, 100% = tam çekirdek, 200% = 2 çekirdek.")) ?></small>
+						<small class="form-text text-muted"><?= tohtml(__tr("50% = half core, 100% = 1 core, 200% = 2 cores.", "50% = yarım çekirdek, 100% = tam çekirdek, 200% = 2 çekirdek.")) ?></small>
 					</div>
-				</div>
-			</details>
-
-			<!-- Domain-Level .env Secrets (Zero-Knowledge) -->
-			<details class="collapse u-mt20" id="web-env-secrets" open>
-				<summary class="collapse-header">
-					<i class="fas fa-shield-halved icon-purple u-mr5"></i><?= tohtml( _("Ortam Değişkenleri & Secret Yönetimi (.env)")) ?> (<?= count($domain_env_secrets ?? []) ?>)
-				</summary>
-				<div class="collapse-content">
-					<p class="u-text-muted u-mb15" style="font-size:0.88rem; line-height:1.4;">
-						🛡️ <strong>Sıfır Bilgi (Zero-Knowledge) Güvenlik Modeli:</strong>
-						Bu site için tanımladığınız API anahtarları (örn: <code>GEMINI_API_KEY</code>, <code>DB_PASSWORD</code>) sunucuda doğrudan <code>public_html/.env</code> dosyasına <code>chmod 600</code> ile kaydedilir. Güvenlik gereği arayüzde değerler asla düz metin olarak okunamaz; yalnızca güncellenebilir veya silinebilir. GitHub'dan her güncelleme yapıldığında bu dosya korunur.
-					</p>
-
-					<!-- Add or Update Secret Form -->
-					<div class="card u-mb20" style="padding:15px; border: 1px solid var(--border-color, #334155); border-radius:6px; background: rgba(0,0,0,0.02);">
-						<div style="display:grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: flex-end;">
-							<div>
-								<label class="form-label u-mb5 u-text-bold" style="font-size:12px;">Anahtar Adı (KEY)</label>
-								<input type="text" form="domain-env-form" name="env_key" placeholder="GEMINI_API_KEY" required class="form-control" style="font-family:monospace; text-transform:uppercase;">
-							</div>
-							<div>
-								<label class="form-label u-mb5 u-text-bold" style="font-size:12px;">Gizli Değer (Yalnızca Yazılabilir)</label>
-								<input type="password" form="domain-env-form" name="env_value" placeholder="••••••••••••••••••••" required class="form-control">
-							</div>
-							<div>
-								<button type="submit" form="domain-env-form" class="button button-secondary">
-									<i class="fas fa-plus icon-green"></i> Kaydet / Güncelle
-								</button>
-							</div>
-						</div>
-					</div>
-
-					<!-- List Existing Domain Secrets -->
-					<?php if (empty($domain_env_secrets)): ?>
-						<p class="u-text-muted u-text-center" style="padding: 10px 0; font-size:0.9rem;">
-							Bu alan adı için henüz özel bir ortam değişkeni (.env) tanımlanmadı.
-						</p>
-					<?php else: ?>
-						<div class="units-table" style="margin-top: 5px;">
-							<div class="units-table-header">
-								<div class="units-table-cell">Anahtar Adı</div>
-								<div class="units-table-cell u-text-center">Kayıtlı Değer</div>
-								<div class="units-table-cell u-text-center">Korumalı Konum</div>
-								<div class="units-table-cell u-text-center">İşlem</div>
-							</div>
-							<?php foreach ($domain_env_secrets as $ekey => $edata): ?>
-								<div class="units-table-row">
-									<div class="units-table-cell units-table-heading-cell u-text-bold" style="font-family:monospace;">
-										<i class="fas fa-key icon-yellow u-mr5"></i> <?= tohtml($ekey) ?>
-									</div>
-									<div class="units-table-cell u-text-center">
-										<code style="letter-spacing:2px; opacity:0.7;">••••••••••••••••</code>
-									</div>
-									<div class="units-table-cell u-text-center">
-										<span class="badge badge-info" style="font-size:11px; padding: 2px 6px;">
-											.env (chmod 600)
-										</span>
-									</div>
-									<div class="units-table-cell u-text-center">
-										<a class="button button-danger button-small" href="/edit/web/?domain=<?= urlencode($v_domain) ?>&delete_env=1&key=<?= urlencode($ekey) ?>&token=<?= tohtml($_SESSION["token"]) ?>" title="Secret'ı Sil" onclick="return confirm('Bu ortam değişkenini silmek istediğinize emin misiniz?');" style="padding: 3px 8px; font-size:11px;">
-											<i class="fas fa-trash-can"></i>
-										</a>
-									</div>
-								</div>
-							<?php endforeach; ?>
-						</div>
-					<?php endif; ?>
 				</div>
 			</details>
 		</div>
 
 	</form>
 
-	<form id="domain-env-form" method="post" action="/edit/web/?domain=<?= urlencode($v_domain) ?>">
-		<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
-		<input type="hidden" name="save_env_secret" value="1">
-	</form>
+	<!-- Domain-Level .env Secrets (Zero-Knowledge) -->
+	<details class="collapse u-mt20" id="web-env-secrets" open>
+		<summary class="collapse-header">
+			<i class="fas fa-shield-halved icon-purple u-mr5"></i><?= tohtml(__tr("Environment Variables & Secrets (.env)", "Ortam Değişkenleri & Secret Yönetimi (.env)")) ?> (<?= count($domain_env_secrets ?? []) ?>)
+		</summary>
+		<div class="collapse-content">
+			<p class="u-text-muted u-mb15" style="font-size:0.88rem; line-height:1.4;">
+				🛡️ <strong><?= tohtml(__tr("Zero-Knowledge Security Model:", "Sıfır Bilgi (Zero-Knowledge) Güvenlik Modeli:")) ?></strong>
+				<?= tohtml(__tr("Secrets defined here (e.g. GEMINI_API_KEY, DB_PASSWORD) are written directly to public_html/.env with chmod 600. For security reasons, values cannot be read in plaintext via UI/API; they can only be updated or deleted. Secrets are preserved across git deployments.", "Bu site için tanımladığınız API anahtarları (örn: GEMINI_API_KEY, DB_PASSWORD) sunucuda doğrudan public_html/.env dosyasına chmod 600 ile kaydedilir. Güvenlik gereği arayüzde değerler asla düz metin olarak okunamaz; yalnızca güncellenebilir veya silinebilir. GitHub'dan her güncelleme yapıldığında bu dosya korunur.")) ?>
+			</p>
 
+			<!-- Add or Update Secret Form -->
+			<form method="post" action="/edit/web/?domain=<?= urlencode($v_domain) ?>">
+				<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
+				<input type="hidden" name="save_env_secret" value="1">
+				<div class="card u-mb20" style="padding:15px; border: 1px solid var(--border-color, #334155); border-radius:6px; background: rgba(0,0,0,0.02);">
+					<div style="display:flex; flex-wrap:wrap; gap: 10px; align-items: flex-end;">
+						<div style="flex:1; min-width:200px;">
+							<label class="form-label u-mb5 u-text-bold" style="font-size:12px;"><?= tohtml(__tr("Secret Key Name", "Anahtar Adı (KEY)")) ?></label>
+							<input type="text" name="env_key" placeholder="GEMINI_API_KEY" required class="form-control" style="font-family:monospace; text-transform:uppercase;">
+						</div>
+						<div style="flex:1; min-width:200px;">
+							<label class="form-label u-mb5 u-text-bold" style="font-size:12px;"><?= tohtml(__tr("Secret Value (Write-Only)", "Gizli Değer (Yalnızca Yazılabilir)")) ?></label>
+							<input type="password" name="env_value" placeholder="••••••••••••••••••••" required class="form-control">
+						</div>
+						<div>
+							<button type="submit" class="button button-secondary">
+								<i class="fas fa-plus icon-green"></i> <?= tohtml(__tr("Save Secret", "Kaydet / Güncelle")) ?>
+							</button>
+						</div>
+					</div>
+				</div>
+			</form>
+
+			<!-- List Existing Domain Secrets -->
+			<?php if (empty($domain_env_secrets)): ?>
+				<p class="u-text-muted u-text-center" style="padding: 10px 0; font-size:0.9rem;">
+					<?= tohtml(__tr("No custom environment variables (.env) defined for this domain yet.", "Bu alan adı için henüz özel bir ortam değişkeni (.env) tanımlanmadı.")) ?>
+				</p>
+			<?php else: ?>
+				<div class="units-table" style="margin-top: 5px;">
+					<div class="units-table-header">
+						<div class="units-table-cell"><?= tohtml(__tr("Secret Key", "Anahtar Adı")) ?></div>
+						<div class="units-table-cell u-text-center"><?= tohtml(__tr("Stored Value", "Kayıtlı Değer")) ?></div>
+						<div class="units-table-cell u-text-center"><?= tohtml(__tr("Protected Location", "Korumalı Konum")) ?></div>
+						<div class="units-table-cell u-text-center"><?= tohtml(__tr("Action", "İşlem")) ?></div>
+					</div>
+					<?php foreach ($domain_env_secrets as $ekey => $edata): ?>
+						<div class="units-table-row">
+							<div class="units-table-cell units-table-heading-cell u-text-bold" style="font-family:monospace;">
+								<i class="fas fa-key icon-yellow u-mr5"></i> <?= tohtml($ekey) ?>
+							</div>
+							<div class="units-table-cell u-text-center">
+								<code style="letter-spacing:2px; opacity:0.7;">••••••••••••••••</code>
+							</div>
+							<div class="units-table-cell u-text-center">
+								<span class="badge badge-info" style="font-size:11px; padding: 2px 6px;">
+									.env (chmod 600)
+								</span>
+							</div>
+							<div class="units-table-cell u-text-center">
+								<a class="button button-danger button-small" href="/edit/web/?domain=<?= urlencode($v_domain) ?>&delete_env=1&key=<?= urlencode($ekey) ?>&token=<?= tohtml($_SESSION["token"]) ?>" title="<?= tohtml(__tr("Delete Secret", "Secret'ı Sil")) ?>" onclick="return confirm('<?= tohtml(__tr("Are you sure you want to delete this secret?", "Bu ortam değişkenini silmek istediğinize emin misiniz?")) ?>');" style="padding: 3px 8px; font-size:11px;">
+									<i class="fas fa-trash-can"></i>
+								</a>
+							</div>
+						</div>
+					<?php endforeach; ?>
+				</div>
+			<?php endif; ?>
+		</div>
+	</details>
 </div>
 
 <div class="u-hidden js-ftp-account-template">

@@ -19,6 +19,13 @@
 #                Variables & Functions                     #
 #----------------------------------------------------------#
 
+# Argument definition
+user=$1
+domain=$2
+domain_idn=$2
+repo_url=$3
+branch=${4:-main}
+
 # Includes
 # shellcheck source=/etc/hestiacp/hestia.conf
 source /etc/hestiacp/hestia.conf

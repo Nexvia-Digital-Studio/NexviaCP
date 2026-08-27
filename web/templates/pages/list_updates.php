@@ -159,11 +159,11 @@ $up_data = $nexvia_info["upstream_hestia"] ?? [];
 </div>
 
 <!-- MODAL 1: Full Changelog Viewer -->
-<div id="changelog-modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); align-items:center; justify-content:center;">
+<div id="changelog-modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); align-items:center; justify-content:center;" onclick="if(event.target===this) closeChangelogModal();">
 	<div class="card" style="width:90%; max-width:600px; padding:25px; border-radius:10px; box-shadow:0 20px 25px -5px rgba(0,0,0,0.5); background:var(--color-background, #1e293b); border:1px solid var(--border-color, #475569);">
 		<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
 			<h2 style="margin:0; font-size:1.2rem; font-weight:bold; display:flex; align-items:center; gap:8px;">
-				<i class="fab fa-github" style="color:var(--icon-color-blue, #38bdf8);"></i> Son Güncelleme Ayrıntıları
+				<i class="fab fa-github" style="color:var(--icon-color-blue, #38bdf8);"></i> <?= tohtml(__tr("Latest Commit Details", "Son Güncelleme Ayrıntıları")) ?>
 			</h2>
 			<button type="button" class="button button-secondary" onclick="closeChangelogModal();" style="padding:4px 10px;">&times;</button>
 		</div>
@@ -173,10 +173,10 @@ $up_data = $nexvia_info["upstream_hestia"] ?? [];
 				<strong>Commit Hash:</strong> <code><?= tohtml($nx_data["full_sha"] ?? $nx_data["latest_sha"] ?? "main") ?></code>
 			</div>
 			<div style="font-size:12px; margin-bottom:8px;">
-				<strong>Yazar:</strong> <?= tohtml($nx_data["author"] ?? "Nexvia Digital Studio") ?> &bull; <strong>Tarih:</strong> <?= tohtml($nx_data["latest_date"] ?? "") ?>
+				<strong><?= tohtml(__tr("Author:", "Yazar:")) ?></strong> <?= tohtml($nx_data["author"] ?? "Nexvia Digital Studio") ?> &bull; <strong><?= tohtml(__tr("Date:", "Tarih:")) ?></strong> <?= tohtml($nx_data["latest_date"] ?? "") ?>
 			</div>
 			<hr style="border:none; border-top:1px solid var(--border-color, #334155); margin:10px 0;">
-			<div style="font-size:13px; font-weight:bold; margin-bottom:6px;">Commit Açıklaması:</div>
+			<div style="font-size:13px; font-weight:bold; margin-bottom:6px;"><?= tohtml(__tr("Commit Message:", "Commit Açıklaması:")) ?></div>
 			<div style="white-space:pre-wrap; font-family:monospace; font-size:12px; line-height:1.5; color:var(--color-text);">
 				<?= tohtml($nx_data["latest_message"] ?? "NexviaCP Core Updates") ?>
 			</div>
@@ -184,23 +184,23 @@ $up_data = $nexvia_info["upstream_hestia"] ?? [];
 
 		<div style="display:flex; justify-content:flex-end; gap:10px;">
 			<a href="<?= tohtml($nx_data["commit_url"] ?? "https://github.com/Nexvia-Digital-Studio/NexviaCP") ?>" target="_blank" class="button button-secondary">
-				<i class="fas fa-external-link-alt"></i> GitHub'da İncele
+				<i class="fas fa-external-link-alt"></i> <?= tohtml(__tr("View on GitHub", "GitHub'da İncele")) ?>
 			</a>
 			<button type="button" class="button button-primary" onclick="closeChangelogModal(); openUpdateModal();">
-				<i class="fas fa-rotate"></i> Şimdi Güncelle
+				<i class="fas fa-rotate"></i> <?= tohtml(__tr("Update Now", "Şimdi Güncelle")) ?>
 			</button>
 		</div>
 	</div>
 </div>
 
 <!-- MODAL 2: Interactive Live Update Modal with Steps -->
-<div id="update-modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.65); backdrop-filter:blur(5px); align-items:center; justify-content:center;">
+<div id="update-modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.65); backdrop-filter:blur(5px); align-items:center; justify-content:center;" onclick="if(event.target===this && document.getElementById('update-modal-close-btn').style.display !== 'none') closeUpdateModal();">
 	<div class="card" style="width:90%; max-width:550px; padding:25px; border-radius:10px; box-shadow:0 25px 30px -5px rgba(0,0,0,0.6); background:var(--color-background, #1e293b); border:1px solid var(--border-color, #475569);">
 		
 		<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
 			<h2 style="margin:0; font-size:1.2rem; font-weight:bold; display:flex; align-items:center; gap:10px;">
 				<i class="fas fa-rotate fa-spin-pulse" id="update-modal-spinner" style="color:var(--icon-color-blue, #38bdf8);"></i>
-				<span>NexviaCP Çekirdek Güncelleme</span>
+				<span><?= tohtml(__tr("NexviaCP Core Live Update", "NexviaCP Çekirdek Güncelleme")) ?></span>
 			</h2>
 			<button type="button" class="button button-secondary" id="update-modal-close-btn" onclick="closeUpdateModal();" style="padding:4px 10px;">&times;</button>
 		</div>
@@ -208,36 +208,36 @@ $up_data = $nexvia_info["upstream_hestia"] ?? [];
 		<!-- Step Progress Tracker -->
 		<div style="display:flex; flex-direction:column; gap:12px; margin-bottom:20px;">
 			<div id="step-1" class="step-item" style="display:flex; align-items:center; gap:12px; font-size:13px; color:var(--color-text-muted);">
-				<i class="fas fa-circle-notch fa-spin" id="icon-step-1"></i>
-				<span>1. GitHub Bağlantısı Doğrulanıyor (<code>main</code>)...</span>
+				<i class="far fa-circle" id="icon-step-1"></i>
+				<span><?= tohtml(__tr("1. Verifying GitHub Connection (main)...", "1. GitHub Bağlantısı Doğrulanıyor (main)...")) ?></span>
 			</div>
 			<div id="step-2" class="step-item" style="display:flex; align-items:center; gap:12px; font-size:13px; color:var(--color-text-muted);">
 				<i class="far fa-circle" id="icon-step-2"></i>
-				<span>2. En Yeni Çekirdek Dosyaları & Şablonlar İndiriliyor...</span>
+				<span><?= tohtml(__tr("2. Downloading Latest Core Files & Templates...", "2. En Yeni Çekirdek Dosyaları & Şablonlar İndiriliyor...")) ?></span>
 			</div>
 			<div id="step-3" class="step-item" style="display:flex; align-items:center; gap:12px; font-size:13px; color:var(--color-text-muted);">
 				<i class="far fa-circle" id="icon-step-3"></i>
-				<span>3. Dosya İzinleri ve Güvenlik Kuralları Uygulanıyor...</span>
+				<span><?= tohtml(__tr("3. Applying File Permissions & Security Hardening...", "3. Dosya İzinleri ve Güvenlik Kuralları Uygulanıyor...")) ?></span>
 			</div>
 			<div id="step-4" class="step-item" style="display:flex; align-items:center; gap:12px; font-size:13px; color:var(--color-text-muted);">
 				<i class="far fa-circle" id="icon-step-4"></i>
-				<span>4. Panel Servisleri (PHP-FPM & Nginx) Yeniden Başlatılıyor...</span>
+				<span><?= tohtml(__tr("4. Gracefully Reloading Panel Services (PHP-FPM & Nginx)...", "4. Panel Servisleri (PHP-FPM & Nginx) Yeniden Başlatılıyor...")) ?></span>
 			</div>
 			<div id="step-5" class="step-item" style="display:flex; align-items:center; gap:12px; font-size:13px; color:var(--color-text-muted);">
 				<i class="far fa-circle" id="icon-step-5"></i>
-				<span>5. Güncelleme Tamamlandı!</span>
+				<span><?= tohtml(__tr("5. Update Completed Successfully!", "5. Güncelleme Tamamlandı!")) ?></span>
 			</div>
 		</div>
 
 		<!-- Status / Result Message Box -->
 		<div id="update-status-box" style="background:rgba(0,0,0,0.25); border-radius:6px; border:1px solid var(--border-color, #334155); padding:12px; font-size:12px; font-family:monospace; max-height:100px; overflow-y:auto; margin-bottom:15px;">
-			Güncelleme başlatılmaya hazır. GitHub deposundaki en son commit uygulanacak.
+			<?= tohtml(__tr("Ready to initiate update. Latest GitHub commit will be applied.", "Güncelleme başlatılmaya hazır. GitHub deposundaki en son commit uygulanacak.")) ?>
 		</div>
 
 		<div style="display:flex; justify-content:flex-end; gap:10px;" id="update-modal-actions">
-			<button type="button" class="button button-secondary" onclick="closeUpdateModal();">İptal</button>
+			<button type="button" class="button button-secondary" onclick="closeUpdateModal();"><?= tohtml(__tr("Cancel", "İptal")) ?></button>
 			<button type="button" class="button button-primary" id="btn-start-update" onclick="executeLiveUpdate();">
-				<i class="fas fa-cloud-arrow-down"></i> Güncellemeyi Başlat
+				<i class="fas fa-cloud-arrow-down"></i> <?= tohtml(__tr("Start Update", "Güncellemeyi Başlat")) ?>
 			</button>
 		</div>
 	</div>
@@ -258,19 +258,31 @@ function closeUpdateModal() {
 	document.getElementById('update-modal').style.display = 'none';
 }
 
+document.addEventListener('keydown', function(e) {
+	if (e.key === 'Escape') {
+		closeChangelogModal();
+		const closeBtn = document.getElementById('update-modal-close-btn');
+		if (closeBtn && closeBtn.style.display !== 'none') {
+			closeUpdateModal();
+		}
+	}
+});
+
 async function executeLiveUpdate() {
 	const btn = document.getElementById('btn-start-update');
 	const closeBtn = document.getElementById('update-modal-close-btn');
 	const statusBox = document.getElementById('update-status-box');
 	const actions = document.getElementById('update-modal-actions');
+	const isTr = '<?= (($_SESSION['language'] ?? '') === 'tr') ? '1' : '0' ?>' === '1';
 	
 	btn.disabled = true;
 	closeBtn.style.display = 'none';
-	btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Güncelleniyor...';
+	btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + (isTr ? 'Güncelleniyor...' : 'Updating...');
 
 	function setStep(num, state) {
 		const el = document.getElementById('step-' + num);
 		const icon = document.getElementById('icon-step-' + num);
+		if (!el || !icon) return;
 		if (state === 'active') {
 			el.style.color = 'var(--icon-color-blue, #38bdf8)';
 			el.style.fontWeight = 'bold';
@@ -281,18 +293,19 @@ async function executeLiveUpdate() {
 			icon.className = 'fas fa-circle-check icon-green';
 		} else if (state === 'error') {
 			el.style.color = '#ef4444';
+			el.style.fontWeight = 'bold';
 			icon.className = 'fas fa-circle-xmark icon-red';
 		}
 	}
 
 	setStep(1, 'active');
-	statusBox.innerText = 'GitHub reposuna bağlanılıyor (Nexvia-Digital-Studio/NexviaCP)...';
+	statusBox.innerText = isTr ? 'GitHub reposuna bağlanılıyor (Nexvia-Digital-Studio/NexviaCP)...' : 'Connecting to GitHub repository...';
 
 	setTimeout(() => {
 		setStep(1, 'done');
 		setStep(2, 'active');
-		statusBox.innerText = 'En yeni çekirdek dosyaları klonlanıyor...';
-	}, 1200);
+		statusBox.innerText = isTr ? 'En yeni çekirdek dosyaları indiriliyor...' : 'Fetching latest core files...';
+	}, 1000);
 
 	try {
 		const res = await fetch('/list/updates/?ajax_update=1&token=<?= tohtml($_SESSION["token"]) ?>');
@@ -301,27 +314,35 @@ async function executeLiveUpdate() {
 			data = await res.json();
 		} catch(e) {}
 
+		if (data && data.status === 'error') {
+			setStep(2, 'error');
+			statusBox.innerText = '✗ ' + (data.message || (isTr ? 'Güncelleme hatası oluştu.' : 'Update failed.'));
+			actions.innerHTML = '<button type="button" class="button button-secondary u-width-full" onclick="closeUpdateModal();">' + (isTr ? 'Kapat' : 'Close') + '</button>';
+			closeBtn.style.display = 'block';
+			return;
+		}
+
 		setStep(2, 'done');
 		setStep(3, 'active');
-		statusBox.innerText = 'İzinler uygulandı (chmod +x, root:root)...';
+		statusBox.innerText = isTr ? 'İzinler uygulandı (chmod, root:root)...' : 'Applying file permissions and security rules...';
 
 		setTimeout(() => {
 			setStep(3, 'done');
 			setStep(4, 'active');
-			statusBox.innerText = 'Servisler yeniden başlatılıyor (PHP & Nginx)...';
+			statusBox.innerText = isTr ? 'Servisler yeniden başlatılıyor (PHP & Nginx)...' : 'Reloading panel services...';
 
 			setTimeout(() => {
 				setStep(4, 'done');
 				setStep(5, 'done');
-				statusBox.innerText = '✓ Başarılı: ' + ((data && data.message) ? data.message : 'NexviaCP çekirdeği başarıyla güncellendi!');
-				actions.innerHTML = '<button type="button" class="button button-success u-width-full" onclick="location.reload();"><i class="fas fa-check"></i> Sayfayı Yenile & Tamamla</button>';
+				statusBox.innerText = '✓ ' + ((data && data.message) ? data.message : (isTr ? 'NexviaCP çekirdeği başarıyla güncellendi!' : 'NexviaCP core updated successfully!'));
+				actions.innerHTML = '<button type="button" class="button button-success u-width-full" onclick="location.reload();"><i class="fas fa-check"></i> ' + (isTr ? 'Sayfayı Yenile & Tamamla' : 'Reload Page & Complete') + '</button>';
 				closeBtn.style.display = 'block';
 			}, 1000);
 		}, 800);
 
 	} catch (err) {
-		// In case of instant socket close from service restart, ping panel to confirm completion
-		statusBox.innerText = 'Servisler yeniden başlatılıyor, panel doğrulanıyor...';
+		// If connection drops due to graceful PHP-FPM / Nginx reload, ping to confirm
+		statusBox.innerText = isTr ? 'Servisler yeniden başlatılıyor, panel doğrulanıyor...' : 'Reloading services, verifying panel...';
 		setTimeout(async () => {
 			try {
 				await fetch('/list/updates/');
@@ -329,14 +350,14 @@ async function executeLiveUpdate() {
 				setStep(3, 'done');
 				setStep(4, 'done');
 				setStep(5, 'done');
-				statusBox.innerText = '✓ Başarılı: NexviaCP çekirdeği güncellendi ve servisler yeniden başlatıldı.';
-				actions.innerHTML = '<button type="button" class="button button-success u-width-full" onclick="location.reload();"><i class="fas fa-check"></i> Sayfayı Yenile & Tamamla</button>';
+				statusBox.innerText = '✓ ' + (isTr ? 'NexviaCP çekirdeği güncellendi ve servisler yeniden başlatıldı.' : 'NexviaCP core updated and services reloaded.');
+				actions.innerHTML = '<button type="button" class="button button-success u-width-full" onclick="location.reload();"><i class="fas fa-check"></i> ' + (isTr ? 'Sayfayı Yenile & Tamamla' : 'Reload Page & Complete') + '</button>';
 				closeBtn.style.display = 'block';
 			} catch (pingErr) {
 				setStep(4, 'done');
 				setStep(5, 'done');
-				statusBox.innerText = '✓ Güncelleme tamamlandı. Lütfen sayfayı yenileyiniz.';
-				actions.innerHTML = '<button type="button" class="button button-primary u-width-full" onclick="location.reload();"><i class="fas fa-rotate"></i> Sayfayı Yenile</button>';
+				statusBox.innerText = '✓ ' + (isTr ? 'Güncelleme tamamlandı. Lütfen sayfayı yenileyiniz.' : 'Update complete. Please reload the page.');
+				actions.innerHTML = '<button type="button" class="button button-primary u-width-full" onclick="location.reload();"><i class="fas fa-rotate"></i> ' + (isTr ? 'Sayfayı Yenile' : 'Reload Page') + '</button>';
 				closeBtn.style.display = 'block';
 			}
 		}, 2000);
