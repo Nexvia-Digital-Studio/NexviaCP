@@ -64,12 +64,11 @@ esac
 # Final version string, e.g.: 1.10.0-1+deb13~alpha / 1.10.0-1+ubuntu26.04
 HESTIA_INSTALL_BUILD="${HESTIA_BASE_VER}-1+${os_id}${HESTIA_CHANNEL}"
 
-# Supported PHP versions
-# Supported PHP versions (EOL 5.6-7.3 intentionally dropped; the panel
-# README documents 7.4 - 8.5 support)
-multiphp_v=("7.4" "8.0" "8.1" "8.2" "8.3" "8.4" "8.5")
+# Supported PHP versions (only versions still receiving security fixes;
+# EOL versions 5.6-8.1 intentionally dropped to keep installs lean)
+multiphp_v=("8.2" "8.3" "8.4" "8.5")
 # One of the following PHP versions is required for Roundcube / phpmyadmin
-multiphp_required=("8.1" "8.2" "8.3" "8.4" "8.5")
+multiphp_required=("8.2" "8.3" "8.4" "8.5")
 # Default PHP version if none supplied
 fpm_v="8.5"
 # MariaDB version

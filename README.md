@@ -46,7 +46,7 @@ NexviaCP, müşterilerinize SSH yetkisi vermeden güvenle hizmet sunabilmeniz i�
 - **Node.js & Reverse Proxy:** Express.js, Next.js, NestJS ve Fastify uygulamalarını yayınlama (`node-js` şablonu).
 - **Canlı WebSocket Desteği:** Socket.io ve canlı bildirim/mesajlaşma uygulamaları için Nginx Upgrade şablonları (`websocket` şablonu).
 - **Nginx + PHP-FPM Hibrit Performans:** Statik dosyalar için yüksek hızlı Nginx, dinamik kodlar için izole PHP-FPM havuzları.
-- **Çoklu PHP Sürümü:** Aynı sunucuda PHP 7.4, 8.0, 8.1, 8.2, 8.3, 8.4 ve 8.5 sürümlerini site bazlı seçebilme.
+- **Çoklu PHP Sürümü:** Aynı sunucuda PHP 8.2, 8.3, 8.4 ve 8.5 sürümlerini site bazlı seçebilme.
 - **Domain & Subdomain:** Sınırsız alan adı, alt alan adı (subdomain), takma ad (alias) ve HTTP yönlendirmeleri.
 
 </details>
@@ -192,7 +192,7 @@ Bu betik NexviaCP'nin `bin/`, `func/`, `web/` ve şablon dosyalarını `/usr/loc
 | `--portainer` | Portainer CE (admin-only, 127.0.0.1) | no |
 | `--dotnet` | Mevcut .NET SDK'ları (8.0 / 9.0 / 10.0) | no |
 | `--postgresql` | PostgreSQL | no |
-| `--multiphp` | Çoklu PHP sürümleri (7.4-8.5) | no |
+| `--multiphp` | Çoklu PHP sürümleri (8.2-8.5) | no |
 | `--resourcelimit` | Kullanıcı bazlı RAM/CPU limit arayüzü | no |
 
 #### Kaynak güncellemesi (repo değiştiğinde)
