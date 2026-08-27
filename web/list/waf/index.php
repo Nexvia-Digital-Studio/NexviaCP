@@ -147,8 +147,34 @@ if (!empty($_POST["action_unban_ip"])) {
 }
 
 // -------------------------------------------------------------
+// POST Action 6: Manage Global Security & PR Whitelist
+// -------------------------------------------------------------
+if (!empty($_POST["action_global_whitelist"])) {
+	verify_csrf($_POST);
+	$v_act = quoteshellarg($_POST["whitelist_act"] ?? "set");
+	$v_ips = quoteshellarg($_POST["whitelist_ips"] ?? "");
+
+	exec(HESTIA_CMD . "v-set-sys-global-whitelist " . $v_act . " " . $v_ips, $output, $return_var);
+	if ($return_var === 0) {
+		$_SESSION["ok_msg"] = ($is_tr ? "Genel Güvenlik ve PR Whitelist IP listesi güncellendi." : _("Global Security and PR Whitelist updated."));
+	} else {
+		$_SESSION["error_msg"] = implode(" ", $output);
+	}
+	header("Location: /list/waf/");
+	exit();
+}
+
+// -------------------------------------------------------------
 // Fetch Aggregated Security Threat Data
 // -------------------------------------------------------------
+$detected_client_ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+if (strpos($detected_client_ip, ',') !== false) {
+	$detected_client_ip = trim(explode(',', $detected_client_ip)[0]);
+}
+
+exec(HESTIA_CMD . "v-set-sys-global-whitelist list", $gw_output, $return_var);
+$global_whitelist_ips = array_filter(array_map('trim', $gw_output));
+
 $target_user_param = $is_admin ? "all" : quoteshellarg($current_user);
 exec(HESTIA_CMD . "v-list-sys-security-threats " . $target_user_param . " json", $sec_output, $return_var);
 $security_data = json_decode(implode("", $sec_output), true) ?: [

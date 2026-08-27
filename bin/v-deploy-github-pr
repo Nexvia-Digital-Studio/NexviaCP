@@ -330,10 +330,13 @@ find "$docroot" -type f -exec chmod 644 {} + 2>/dev/null || true
 [ -f "$docroot/.env" ] && chmod 600 "$docroot/.env"
 [ -d "$docroot/.git" ] && chmod -R 700 "$docroot/.git"
 
+# Apply Private PR Access Control Shield (Global Whitelist + Magic Token)
+$BIN/v-set-web-domain-pr-access "$user" "$pr_domain" "private" >/dev/null 2>&1 || true
+
 # Reload web server
 $BIN/v-restart-web 2>/dev/null || systemctl reload nginx 2>/dev/null || true
 
-echo "[+] SUCCESS: Staging preview environment deployed: https://$pr_domain (PR #$pr_number)"
-log_event "$OK" "GitHub PR #$pr_number deployed to $pr_domain ($detected_type, DB: $full_db_name)"
+echo "[+] SUCCESS: Staging preview environment deployed & secured: https://$pr_domain (PR #$pr_number)"
+log_event "$OK" "GitHub PR #$pr_number deployed to $pr_domain ($detected_type, DB: $full_db_name, Access: Protected)"
 
 exit 0

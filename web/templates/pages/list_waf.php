@@ -118,6 +118,53 @@
 		</div>
 	</div>
 
+	<!-- Section: Global Security & PR Preview Whitelist -->
+	<div class="card u-mb25" style="padding:20px; border-radius:8px; border:1px solid var(--border-color, #334155); background:var(--color-background, #fff);">
+		<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px; margin-bottom:15px;">
+			<div>
+				<h2 style="font-size:1.15rem; margin:0; font-weight:bold; display:flex; align-items:center; gap:8px;">
+					<i class="fas fa-network-wired icon-purple"></i>
+					<?= tohtml(__tr("Global Security & PR Preview IP Whitelist", "Genel Güvenlik & PR Önizleme IP Whitelist")) ?>
+				</h2>
+				<small class="u-text-muted" style="font-size:12px;">
+					<?= tohtml(__tr("Whitelisted IPs automatically bypass WAF rate limits and gain instant private access to PR preview staging environments (pr-*.domain.com).", "Bu listedeki IP'ler tüm PR test ortamlarına (pr-*.domain.com) ve WAF kalkanına otomatik güvenli erişim sağlar.")) ?>
+				</small>
+			</div>
+			<div style="display:flex; align-items:center; gap:10px;">
+				<div style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); border-radius:6px; padding:6px 12px; font-size:12px;">
+					<span class="u-text-muted"><?= tohtml(__tr("Your Detected IP:", "Tespit Edilen IP:")) ?></span>
+					<strong style="color:var(--icon-color-blue, #38bdf8); font-family:monospace; margin-left:4px;"><?= tohtml($detected_client_ip) ?></strong>
+				</div>
+				<form method="post" action="/list/waf/" style="margin:0;">
+					<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
+					<input type="hidden" name="action_global_whitelist" value="1">
+					<input type="hidden" name="whitelist_act" value="add">
+					<input type="hidden" name="whitelist_ips" value="<?= tohtml($detected_client_ip) ?>">
+					<button type="submit" class="button button-secondary button-small" style="padding:6px 12px; font-size:12px;">
+						<i class="fas fa-plus icon-green"></i> <?= tohtml(__tr("Add My IP (1-Click)", "Mevcut IP'mi Ekle (Tek Tıkla)")) ?>
+					</button>
+				</form>
+			</div>
+		</div>
+
+		<form method="post" action="/list/waf/" style="margin:0;">
+			<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
+			<input type="hidden" name="action_global_whitelist" value="1">
+			<input type="hidden" name="whitelist_act" value="set">
+			<div style="display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap;">
+				<div style="flex:1; min-width:280px;">
+					<textarea name="whitelist_ips" class="form-control" rows="2" placeholder="85.105.12.34 176.240.10.5 192.168.1.0/24" style="width:100%; font-family:monospace; font-size:12px;"><?= tohtml(implode(" ", $global_whitelist_ips ?? [])) ?></textarea>
+					<small class="u-text-muted"><?= tohtml(__tr("Enter your and your partner's IP addresses / CIDR ranges separated by spaces.", "Sizin ve ortağınızın IP adreslerini boşlukla ayırarak giriniz.")) ?></small>
+				</div>
+				<div>
+					<button type="submit" class="button button-primary" style="padding:8px 16px;">
+						<i class="fas fa-floppy-disk"></i> <?= tohtml(__tr("Save Global Whitelist", "Whitelist'i Kaydet")) ?>
+					</button>
+				</div>
+			</div>
+		</form>
+	</div>
+
 	<!-- Section: Domain Threat Shield Matrix -->
 	<div style="margin-bottom: 30px;">
 		<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">

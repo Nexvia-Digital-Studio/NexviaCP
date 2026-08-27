@@ -1,0 +1,75 @@
+#!/bin/bash
+# info: configure global security IP whitelist (for PR previews, admin panel, and WAF bypass)
+# options: [ACTION] [IP_OR_LIST]
+#
+# example: v-set-sys-global-whitelist add 85.105.12.34
+#          v-set-sys-global-whitelist remove 85.105.12.34
+#          v-set-sys-global-whitelist set "85.105.12.34 176.240.10.5"
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+# load config file
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+action=${1:-list}
+ip_input=$2
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+WHITELIST_DIR="$HESTIA/data/security"
+mkdir -p "$WHITELIST_DIR" 2>/dev/null || true
+WHITELIST_FILE="$WHITELIST_DIR/global_whitelist.conf"
+[ ! -f "$WHITELIST_FILE" ] && touch "$WHITELIST_FILE"
+chmod 600 "$WHITELIST_FILE"
+
+case "$action" in
+	add)
+		[ -z "$ip_input" ] && check_result "$E_INVALID" "IP address required"
+		clean_ip=$(echo "$ip_input" | tr -cd '0-9a-fA-F:./')
+		if ! grep -q "^$clean_ip$" "$WHITELIST_FILE" 2>/dev/null; then
+			echo "$clean_ip" >> "$WHITELIST_FILE"
+			echo "[+] Added IP $clean_ip to global whitelist."
+		else
+			echo "[*] IP $clean_ip already present in global whitelist."
+		fi
+		;;
+	remove|delete)
+		[ -z "$ip_input" ] && check_result "$E_INVALID" "IP address required"
+		clean_ip=$(echo "$ip_input" | tr -cd '0-9a-fA-F:./')
+		sed -i "/^$clean_ip$/d" "$WHITELIST_FILE" 2>/dev/null || true
+		echo "[+] Removed IP $clean_ip from global whitelist."
+		;;
+	set)
+		> "$WHITELIST_FILE"
+		for item in $ip_input; do
+			clean_ip=$(echo "$item" | tr -cd '0-9a-fA-F:./')
+			[ -n "$clean_ip" ] && echo "$clean_ip" >> "$WHITELIST_FILE"
+		done
+		echo "[+] Global whitelist updated."
+		;;
+	list|*)
+		cat "$WHITELIST_FILE" 2>/dev/null
+		;;
+esac
+
+# Re-apply PR access rules to all active PR environments
+for u_dir in "$HOMEDIR"/*; do
+	[ ! -d "$u_dir/data" ] && continue
+	pr_conf="$u_dir/data/pr_environments.conf"
+	[ ! -f "$pr_conf" ] && continue
+	user=$(basename "$u_dir")
+	while IFS= read -r line; do
+		pr_dom=$(echo "$line" | grep -o "PR_DOMAIN='[^']*'" | cut -d"'" -f2)
+		[ -n "$pr_dom" ] && $BIN/v-set-web-domain-pr-access "$user" "$pr_dom" >/dev/null 2>&1 || true
+	done < "$pr_conf"
+done
+
+exit 0

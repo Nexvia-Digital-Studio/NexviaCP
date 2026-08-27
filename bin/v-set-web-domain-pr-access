@@ -1,0 +1,124 @@
+#!/bin/bash
+# info: configure private IP whitelisting and magic-link security for a PR preview domain
+# options: USER PR_DOMAIN [ACCESS_MODE] [EXTRA_IPS]
+#
+# example: v-set-web-domain-pr-access admin pr-12.example.com private "192.168.1.50"
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+# load config file
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+user=$1
+pr_domain=$2
+access_mode=${3:-private}
+extra_ips=$4
+
+check_args '2' "$#" 'USER PR_DOMAIN [ACCESS_MODE] [EXTRA_IPS]'
+is_format_valid 'user' 'pr_domain'
+is_object_valid 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$pr_domain"
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+conf_dir="$HOMEDIR/$user/conf/web/$pr_domain"
+mkdir -p "$conf_dir" 2>/dev/null || true
+
+nginx_inc_http="$conf_dir/nginx.conf_pr_access"
+nginx_inc_ssl="$conf_dir/nginx.ssl.conf_pr_access"
+token_file="$conf_dir/preview_token.secret"
+
+# Generate persistent secret token if not exists
+if [ ! -f "$token_file" ]; then
+	openssl rand -hex 16 > "$token_file"
+	chmod 600 "$token_file"
+	chown "$user:$user" "$token_file" 2>/dev/null || true
+fi
+preview_token=$(cat "$token_file" 2>/dev/null)
+
+if [ "$access_mode" = "public" ]; then
+	# Remove restriction
+	rm -f "$nginx_inc_http" "$nginx_inc_ssl"
+	systemctl reload nginx 2>/dev/null || true
+	echo "[+] PR preview $pr_domain is now PUBLIC."
+	exit 0
+fi
+
+# Collect whitelisted IPs
+GLOBAL_WHITELIST_FILE="$HESTIA/data/security/global_whitelist.conf"
+whitelist_ips=""
+
+# Add local loopback
+whitelist_ips="127.0.0.1 ::1"
+
+# Add Global Whitelist IPs
+if [ -f "$GLOBAL_WHITELIST_FILE" ]; then
+	while IFS= read -r g_ip; do
+		clean_gip=$(echo "$g_ip" | tr -cd '0-9a-fA-F:./')
+		[ -n "$clean_gip" ] && whitelist_ips="$whitelist_ips $clean_gip"
+	done < "$GLOBAL_WHITELIST_FILE"
+fi
+
+# Add Extra IPs
+for e_ip in $extra_ips; do
+	clean_eip=$(echo "$e_ip" | tr -cd '0-9a-fA-F:./')
+	[ -n "$clean_eip" ] && whitelist_ips="$whitelist_ips $clean_eip"
+done
+
+# Build Nginx IP allow block
+ip_rules=""
+for ip in $whitelist_ips; do
+	ip_rules="${ip_rules}    allow $ip;\n"
+done
+
+# Generate Nginx configuration rule
+cat << NGINXEOF > "$nginx_inc_http"
+# NexviaCP PR Preview Access Control Shield
+# Magic Token / Cookie Bypass & Whitelist Enforcement
+
+set \$pr_auth_granted 0;
+
+# Check if magic token query parameter is provided
+if (\$arg_preview_token = "$preview_token") {
+    set \$pr_auth_granted 1;
+    add_header Set-Cookie "nexvia_pr_auth=$preview_token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000" always;
+}
+
+# Check if client has the valid preview cookie
+if (\$cookie_nexvia_pr_auth = "$preview_token") {
+    set \$pr_auth_granted 1;
+}
+
+# If token authorized, bypass IP restrictions; otherwise enforce IP whitelist
+location / {
+    # If client is cookie/token authorized, proxy or serve directly
+    if (\$pr_auth_granted = 1) {
+        break;
+    }
+
+$(echo -e "$ip_rules")
+    deny all;
+
+    # Fallback to try files
+    try_files \$uri \$uri/ /index.php?\$args /index.html;
+}
+NGINXEOF
+
+cp -f "$nginx_inc_http" "$nginx_inc_ssl" 2>/dev/null || true
+chmod 640 "$nginx_inc_http" "$nginx_inc_ssl" 2>/dev/null || true
+chown "root:$user" "$nginx_inc_http" "$nginx_inc_ssl" 2>/dev/null || true
+
+# Test & Reload Nginx
+nginx -t >/dev/null 2>&1 && systemctl reload nginx 2>/dev/null || true
+
+echo "[+] PR Preview $pr_domain protected with IP Whitelist & Magic Token."
+echo "    Magic Bypass URL: http://${pr_domain}/?preview_token=${preview_token}"
+exit 0

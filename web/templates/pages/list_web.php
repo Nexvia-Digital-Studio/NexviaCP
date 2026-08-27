@@ -235,6 +235,11 @@
 						<a href="/edit/web/?<?= tohtml(http_build_query(["domain" => $key, "token" => $_SESSION['token']])) ?>" title="<?= tohtml( _("Edit Domain")) ?>: <?= tohtml($key) ?>">
 							<?= tohtml($key) ?>
 						</a>
+						<?php if (strpos($key, 'pr-') === 0): ?>
+							<span class="badge badge-warning" style="font-size:10px; margin-left:4px; padding:2px 5px;" title="<?= tohtml(__tr("GitHub PR Preview Staging Environment (Protected Access)", "GitHub PR Test Önizleme Ortamı (Korumalı Erişim)")) ?>">
+								<i class="fas fa-code-pull-request"></i> PR
+							</span>
+						<?php endif; ?>
 						<?php if (($_SESSION["userContext"] ?? "") === "admin"): ?>
 							<a href="/list/resources/" style="text-decoration:none;">
 								<?= $prio_badges[$d_prio] ?? $prio_badges[0] ?>
