@@ -44,9 +44,14 @@ $up_data = $nexvia_info["upstream_hestia"] ?? [];
 							<small class="u-text-muted">Nexvia-Digital-Studio/NexviaCP (main)</small>
 						</div>
 					</div>
-					<span class="badge badge-info" style="font-size:11px; padding:3px 8px;">
-						<i class="fas fa-circle-check icon-green"></i> Canlı Sürüm
-					</span>
+					<div style="display:flex; gap:6px; align-items:center;">
+						<span class="badge badge-primary" style="font-size:11px; padding:3px 8px;">
+							<i class="fas fa-code-branch"></i> v2.1.0
+						</span>
+						<span class="badge badge-info" style="font-size:11px; padding:3px 8px;">
+							<i class="fas fa-circle-check icon-green"></i> Canlı Sürüm
+						</span>
+					</div>
 				</div>
 				
 				<div class="u-mb15" style="background: rgba(0,0,0,0.03); border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; padding: 12px;">
