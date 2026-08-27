@@ -46,9 +46,9 @@ cp -rf "$tmp_dir/web"/* "$HESTIA/web/" 2>/dev/null || true
 
 rm -rf "$tmp_dir"
 
-# Restart services
-echo "[*] Reloading panel services..."
-systemctl restart hestia 2>/dev/null || systemctl restart hestia-php hestia-nginx 2>/dev/null || true
+# Reload panel services gracefully in background so HTTP response is returned cleanly
+echo "[*] Scheduling graceful service reload..."
+(sleep 1 && (systemctl reload hestia-php hestia-nginx 2>/dev/null || systemctl restart hestia-php hestia-nginx 2>/dev/null)) >/dev/null 2>&1 &
 
 echo "[+] SUCCESS: NexviaCP updated to the latest version successfully."
 log_event "$OK" "NexviaCP core updated to latest $branch"
