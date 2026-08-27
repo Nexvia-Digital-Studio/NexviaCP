@@ -292,6 +292,7 @@ let isStreamingActive = true;
 let isAutoScrollActive = true;
 let pollTimer = null;
 let rawLogsData = <?= json_encode($initial_logs) ?> || [];
+let rawLogTexts = [];
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -448,6 +449,7 @@ function renderLogs() {
 
 	let visibleCount = 0;
 	let html = '';
+	rawLogTexts = [];
 
 	rawLogsData.forEach((item, index) => {
 		// Filter by Level / Status
@@ -476,7 +478,7 @@ function renderLogs() {
 		if (item.method) {
 			const m = item.method.toUpperCase();
 			const badgeClass = 'badge-' + m.toLowerCase();
-			methodBadge = `<span class="log-badge ${badgeClass}">${m}</span>`;
+			methodBadge = `<span class="log-badge ${escapeHtml(badgeClass)}">${escapeHtml(m)}</span>`;
 		}
 
 		// Status badge
@@ -486,25 +488,27 @@ function renderLogs() {
 			if (item.status.startsWith('3')) sClass = 'badge-3xx';
 			if (item.status.startsWith('4')) sClass = 'badge-4xx';
 			if (item.status.startsWith('5')) sClass = 'badge-5xx';
-			statusBadge = `<span class="log-badge ${sClass}">${item.status}</span>`;
+			statusBadge = `<span class="log-badge ${sClass}">${escapeHtml(item.status)}</span>`;
 		}
 
 		// Level badge for error/app logs
 		let levelBadge = '';
 		if (item.level && !item.status) {
 			const lClass = 'badge-level-' + item.level.toLowerCase();
-			levelBadge = `<span class="log-badge ${lClass}">${item.level}</span>`;
+			levelBadge = `<span class="log-badge ${escapeHtml(lClass)}">${escapeHtml(item.level)}</span>`;
 		}
 
 		const ipHtml = item.ip ? `<span class="log-ip">${escapeHtml(item.ip)}</span>` : '';
 		const pathHtml = item.path ? `<span class="log-path">${escapeHtml(item.path)}</span>` : '';
 		const msgHtml = item.message ? `<span class="log-msg">${escapeHtml(item.message)}</span>` : (item.raw ? `<span class="log-msg">${escapeHtml(item.raw)}</span>` : '');
 
-		const copyData = escapeHtml(item.raw || `${ts} [${item.level || item.status}] ${item.message || item.path || ''}`);
+		// Raw (unescaped) text for the copy button, stored by row index so no
+		// user-controlled data is ever embedded inside an inline JS string literal.
+		rawLogTexts[index] = item.raw || `${ts} [${item.level || item.status}] ${item.message || item.path || ''}`;
 
 		html += `
 		<div class="log-row">
-			<div class="log-gutter">${lineNum}</div>
+			<div class="log-gutter">${escapeHtml(lineNum)}</div>
 			<div class="log-ts">${escapeHtml(ts)}</div>
 			${methodBadge}
 			${statusBadge}
@@ -512,7 +516,7 @@ function renderLogs() {
 			${ipHtml}
 			${pathHtml}
 			${msgHtml}
-			<button type="button" class="log-copy-btn" onclick="copyToClipboard('${copyData}')" title="<?= tohtml(__tr("Copy line", "Satırı kopyala")) ?>">
+				<button type="button" class="log-copy-btn" onclick="copyToClipboard(${index})" title="<?= tohtml(__tr("Copy line", "Satırı kopyala")) ?>">
 				<i class="fas fa-copy"></i>
 			</button>
 		</div>`;
@@ -546,7 +550,9 @@ function escapeHtml(str) {
 		.replace(/'/g, '&#039;');
 }
 
-function copyToClipboard(text) {
+function copyToClipboard(index) {
+	const text = rawLogTexts[index];
+	if (text === undefined || text === null) return;
 	navigator.clipboard.writeText(text).then(() => {
 		// subtle feedback
 	});

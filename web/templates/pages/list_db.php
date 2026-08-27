@@ -250,7 +250,7 @@ if (!empty($_SESSION["DB_PGA_ALIAS"])) {
 							</li>
 						<?php } ?>
 							<li class="units-table-row-action" data-key-action="js">
-								<button type="button" class="units-table-row-action-link" style="background:none; border:none; cursor:pointer; padding:0; display:flex; align-items:center; gap:4px;" onclick="openDbStudio('<?= tohtml($key) ?>');" title="<?= tohtml(__tr("Explore Database & View Tables (Nexvia DB Studio)", "Tabloları ve Verileri İncele (DB Studio)")) ?>">
+								<button type="button" class="units-table-row-action-link" style="background:none; border:none; cursor:pointer; padding:0; display:flex; align-items:center; gap:4px;" onclick="openDbStudio('<?= tohtml(addslashes($key)) ?>');" title="<?= tohtml(__tr("Explore Database & View Tables (Nexvia DB Studio)", "Tabloları ve Verileri İncele (DB Studio)")) ?>">
 									<i class="fas fa-table-columns icon-purple"></i>
 									<span class="u-hide-desktop"><?= tohtml(__tr("Explore", "İncele")) ?></span>
 								</button>
@@ -437,6 +437,7 @@ if (!empty($_SESSION["DB_PGA_ALIAS"])) {
 let currentStudioDb = '';
 let currentStudioTable = '';
 let currentStudioData = null;
+let studioTables = [];
 
 function openDbStudio(dbName) {
 	currentStudioDb = dbName;
@@ -470,17 +471,18 @@ function loadDbSchema(selectedTable = '') {
 			if (selectedTable) {
 				renderStudioTableData(data);
 			} else if (data.tables && data.tables.length > 0) {
-				selectTable(data.tables[0].name);
+				selectTable(0);
 			} else {
 				document.getElementById('studio-data-table-wrapper').innerHTML = '<p class="u-text-muted" style="text-align:center; margin-top:30px;"><?= tohtml(__tr("No tables found in this database.", "Bu veritabanında henüz tablo bulunmuyor.")) ?></p>';
 			}
 		})
 		.catch(err => {
-			container.innerHTML = '<p style="color:#ef4444; padding:10px; font-size:12px;">Hata: ' + err + '</p>';
+			container.innerHTML = '<p style="color:#ef4444; padding:10px; font-size:12px;">Hata: ' + escapeHtml(err) + '</p>';
 		});
 }
 
 function renderStudioTablesList(tables) {
+	studioTables = tables;
 	const container = document.getElementById('studio-tables-container');
 	if (tables.length === 0) {
 		container.innerHTML = '<p class="u-text-muted" style="font-size:12px; padding:10px; text-align:center;"><?= tohtml(__tr("No tables", "Tablo yok")) ?></p>';
@@ -488,16 +490,16 @@ function renderStudioTablesList(tables) {
 	}
 
 	let html = '<ul style="list-style:none; margin:0; padding:0;">';
-	tables.forEach(t => {
+	tables.forEach((t, i) => {
 		const isActive = t.name === currentStudioTable;
 		html += `
-			<li class="studio-table-item" data-table="${t.name.toLowerCase()}" style="margin-bottom:2px;">
-				<a href="javascript:void(0);" onclick="selectTable('${t.name}');" style="display:flex; justify-content:space-between; align-items:center; padding:7px 10px; border-radius:6px; font-size:12px; font-weight:${isActive ? 'bold' : 'normal'}; text-decoration:none; color:var(--color-text); background:${isActive ? 'rgba(56,189,248,0.15)' : 'transparent'};">
+			<li class="studio-table-item" data-table="${escapeHtml(t.name.toLowerCase())}" style="margin-bottom:2px;">
+				<a href="javascript:void(0);" onclick="selectTable(${i});" style="display:flex; justify-content:space-between; align-items:center; padding:7px 10px; border-radius:6px; font-size:12px; font-weight:${isActive ? 'bold' : 'normal'}; text-decoration:none; color:var(--color-text); background:${isActive ? 'rgba(56,189,248,0.15)' : 'transparent'};">
 					<span style="display:flex; align-items:center; gap:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
 						<i class="fas fa-table" style="color:${isActive ? 'var(--icon-color-blue, #38bdf8)' : 'var(--color-text-muted)'}; font-size:11px;"></i>
-						${t.name}
+						${escapeHtml(t.name)}
 					</span>
-					<span style="font-size:10px; font-family:monospace; background:rgba(0,0,0,0.15); padding:1px 5px; border-radius:4px; color:var(--color-text-muted);">${t.rows}</span>
+					<span style="font-size:10px; font-family:monospace; background:rgba(0,0,0,0.15); padding:1px 5px; border-radius:4px; color:var(--color-text-muted);">${escapeHtml(t.rows)}</span>
 				</a>
 			</li>
 		`;
@@ -506,7 +508,10 @@ function renderStudioTablesList(tables) {
 	container.innerHTML = html;
 }
 
-function selectTable(tableName) {
+function selectTable(tableIndex) {
+	const table = studioTables[tableIndex];
+	if (!table) return;
+	const tableName = table.name;
 	currentStudioTable = tableName;
 	document.getElementById('studio-active-table-name').innerText = tableName;
 	loadDbSchema(tableName);
@@ -613,7 +618,7 @@ function runStudioCustomSql() {
 			resWrapper.innerHTML = tableHtml;
 		})
 		.catch(err => {
-			resWrapper.innerHTML = '<p style="color:#ef4444; padding:10px; font-size:12px;">Hata: ' + err + '</p>';
+			resWrapper.innerHTML = '<p style="color:#ef4444; padding:10px; font-size:12px;">Hata: ' + escapeHtml(err) + '</p>';
 		});
 }
 
