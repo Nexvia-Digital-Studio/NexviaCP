@@ -306,6 +306,76 @@
 		</div>
 	</div>
 
+	<style>
+		.main-menu {
+			background: var(--color-background-menu, #1e222d);
+			border-top: 1px solid var(--border-color, #2b303c);
+			border-bottom: 1px solid var(--border-color, #2b303c);
+		}
+		.main-menu .container {
+			max-width: 100% !important;
+			display: flex;
+			justify-content: center;
+			padding: 0 15px;
+		}
+		.main-menu-list {
+			display: flex !important;
+			justify-content: center !important;
+			align-items: stretch !important;
+			flex-wrap: wrap !important;
+			margin: 0 auto !important;
+			padding: 0 !important;
+			width: 100% !important;
+			max-width: 1550px !important;
+			gap: 2px 6px;
+			list-style: none;
+		}
+		.main-menu-item {
+			flex: 0 1 auto !important;
+			min-width: 78px;
+			max-width: 125px;
+			text-align: center;
+			display: flex;
+		}
+		.main-menu-item-link {
+			display: flex !important;
+			flex-direction: column;
+			align-items: center;
+			justify-content: flex-start;
+			padding: 8px 8px !important;
+			width: 100%;
+			height: 100%;
+			text-align: center;
+			border-radius: 4px;
+			transition: background 0.15s ease-in-out;
+			text-decoration: none;
+		}
+		.main-menu-item-label {
+			white-space: nowrap !important;
+			font-size: 11px !important;
+			font-weight: 600 !important;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 5px;
+			margin: 0 0 3px 0 !important;
+		}
+		.main-menu-stats {
+			font-size: 10px !important;
+			line-height: 1.3 !important;
+			text-align: center !important;
+			margin: 0 !important;
+			padding: 0 !important;
+			list-style: none;
+		}
+		.main-menu-stats li {
+			white-space: nowrap !important;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			max-width: 110px;
+		}
+	</style>
+
 	<nav x-data="{ open: false }" class="main-menu">
 		<div class="container">
 			<button x-on:click="open = !open" type="button" class="main-menu-toggle">
@@ -319,7 +389,7 @@
 			</button>
 			<ul x-cloak x-show="open" class="main-menu-list">
 
-				<!-- Users tab -->
+				<!-- 1. Users tab -->
 				<?php if ($_SESSION["userContext"] == "admin" && $_SESSION["look"] === "") { ?>
 					<?php if ($_SESSION["user"] !== "admin" && $_SESSION["POLICY_SYSTEM_HIDE_ADMIN"] === "yes") {
      	$user_count = $panel[$user]["U_USERS"] - 1;
@@ -343,7 +413,7 @@
 					</li>
 				<?php } ?>
 
-				<!-- Web tab -->
+				<!-- 2. Web tab -->
 				<?php if (isset($_SESSION["WEB_SYSTEM"]) && !empty($_SESSION["WEB_SYSTEM"])) { ?>
 					<?php if ($panel[$user]["WEB_DOMAINS"] != "0") { ?>
 						<li class="main-menu-item">
@@ -357,14 +427,10 @@
 								<p class="main-menu-item-label"><?= _("WEB") ?><i class="fas fa-earth-americas"></i></p>
 								<ul class="main-menu-stats">
 									<li>
-										<?= _("Domains") ?>: <?= $panel[$user]["U_WEB_DOMAINS"] ?> / <?= $panel[$user]["WEB_DOMAINS"] == "unlimited" ? "<span class=\"u-text-bold\">∞</span>" : $panel[$user]["WEB_DOMAINS"] ?> (<?= $panel[
- 	$user
- ]["SUSPENDED_WEB"] ?>)
+										<?= _("Domains") ?>: <?= $panel[$user]["U_WEB_DOMAINS"] ?> / <?= $panel[$user]["WEB_DOMAINS"] == "unlimited" ? "<span class=\"u-text-bold\">∞</span>" : $panel[$user]["WEB_DOMAINS"] ?>
 									</li>
 									<li>
-										<?= _("Aliases") ?>: <?= $panel[$user]["U_WEB_ALIASES"] ?> / <?= $panel[$user]["WEB_ALIASES"] == "unlimited" || $panel[$user]["WEB_DOMAINS"] == "unlimited"
- 	? "<span class=\"u-text-bold\">∞</span>"
- 	: $panel[$user]["WEB_ALIASES"] * $panel[$user]["WEB_DOMAINS"] ?>
+										<?= _("Aliases") ?>: <?= $panel[$user]["U_WEB_ALIASES"] ?>
 									</li>
 								</ul>
 							</a>
@@ -372,7 +438,7 @@
 					<?php } ?>
 				<?php } ?>
 
-				<!-- DNS tab -->
+				<!-- 3. DNS tab -->
 				<?php if (isset($_SESSION["DNS_SYSTEM"]) && !empty($_SESSION["DNS_SYSTEM"])) { ?>
 					<?php if ($panel[$user]["DNS_DOMAINS"] != "0") { ?>
 						<li class="main-menu-item">
@@ -384,14 +450,10 @@
 								<p class="main-menu-item-label"><?= _("DNS") ?><i class="fas fa-book-atlas"></i></p>
 								<ul class="main-menu-stats">
 									<li>
-										<?= _("Zones") ?>: <?= $panel[$user]["U_DNS_DOMAINS"] ?> / <?= $panel[$user]["DNS_DOMAINS"] == "unlimited" ? "<span class=\"u-text-bold\">∞</span>" : $panel[$user]["DNS_DOMAINS"] ?> (<?= $panel[
- 	$user
- ]["SUSPENDED_DNS"] ?>)
+										<?= _("Zones") ?>: <?= $panel[$user]["U_DNS_DOMAINS"] ?> / <?= $panel[$user]["DNS_DOMAINS"] == "unlimited" ? "<span class=\"u-text-bold\">∞</span>" : $panel[$user]["DNS_DOMAINS"] ?>
 									</li>
 									<li>
-										<?= _("Records") ?>: <?= $panel[$user]["U_DNS_RECORDS"] ?> / <?= $panel[$user]["DNS_RECORDS"] == "unlimited" || $panel[$user]["DNS_DOMAINS"] == "unlimited"
- 	? "<span class=\"u-text-bold\">∞</span>"
- 	: $panel[$user]["DNS_RECORDS"] * $panel[$user]["DNS_DOMAINS"] ?>
+										<?= _("Records") ?>: <?= $panel[$user]["U_DNS_RECORDS"] ?>
 									</li>
 								</ul>
 							</a>
@@ -399,7 +461,7 @@
 					<?php } ?>
 				<?php } ?>
 
-				<!-- Mail tab -->
+				<!-- 4. Mail tab -->
 				<?php if (isset($_SESSION["MAIL_SYSTEM"]) && !empty($_SESSION["MAIL_SYSTEM"])) { ?>
 					<?php if ($panel[$user]["MAIL_DOMAINS"] != "0") { ?>
 						<li class="main-menu-item">
@@ -411,14 +473,10 @@
 								<p class="main-menu-item-label"><?= _("MAIL") ?><i class="fas fa-envelopes-bulk"></i></p>
 								<ul class="main-menu-stats">
 									<li>
-										<?= _("Domains") ?>: <?= $panel[$user]["U_MAIL_DOMAINS"] ?> / <?= $panel[$user]["MAIL_DOMAINS"] == "unlimited" ? "<span class=\"u-text-bold\">∞</span>" : $panel[$user]["MAIL_DOMAINS"] ?> (<?= $panel[
- 	$user
- ]["SUSPENDED_MAIL"] ?>)
+										<?= _("Domains") ?>: <?= $panel[$user]["U_MAIL_DOMAINS"] ?> / <?= $panel[$user]["MAIL_DOMAINS"] == "unlimited" ? "<span class=\"u-text-bold\">∞</span>" : $panel[$user]["MAIL_DOMAINS"] ?>
 									</li>
 									<li>
-										<?= _("Accounts") ?>: <?= $panel[$user]["U_MAIL_ACCOUNTS"] ?> / <?= $panel[$user]["MAIL_ACCOUNTS"] == "unlimited" || $panel[$user]["MAIL_DOMAINS"] == "unlimited"
- 	? "<span class=\"u-text-bold\">∞</span>"
- 	: $panel[$user]["MAIL_ACCOUNTS"] * $panel[$user]["MAIL_DOMAINS"] ?>
+										<?= _("Accounts") ?>: <?= $panel[$user]["U_MAIL_ACCOUNTS"] ?>
 									</li>
 								</ul>
 							</a>
@@ -426,7 +484,7 @@
 					<?php } ?>
 				<?php } ?>
 
-				<!-- Databases tab -->
+				<!-- 5. Databases tab -->
 				<?php if (isset($_SESSION["DB_SYSTEM"]) && !empty($_SESSION["DB_SYSTEM"])) { ?>
 					<?php if ($panel[$user]["DATABASES"] != "0") { ?>
 						<li class="main-menu-item">
@@ -438,9 +496,7 @@
 								<p class="main-menu-item-label"><?= _("DB") ?><i class="fas fa-database"></i></p>
 								<ul class="main-menu-stats">
 									<li>
-										<?= _("Databases") ?>: <?= $panel[$user]["U_DATABASES"] ?> / <?= $panel[$user]["DATABASES"] == "unlimited" ? "<span class=\"u-text-bold\">∞</span>" : $panel[$user]["DATABASES"] ?> (<?= $panel[$user][
- 	"SUSPENDED_DB"
- ] ?>)
+										<?= _("Databases") ?>: <?= $panel[$user]["U_DATABASES"] ?> / <?= $panel[$user]["DATABASES"] == "unlimited" ? "<span class=\"u-text-bold\">∞</span>" : $panel[$user]["DATABASES"] ?>
 									</li>
 								</ul>
 							</a>
@@ -448,7 +504,7 @@
 					<?php } ?>
 				<?php } ?>
 
-				<!-- Cron tab -->
+				<!-- 6. Cron tab -->
 				<?php if (isset($_SESSION["CRON_SYSTEM"]) && !empty($_SESSION["CRON_SYSTEM"])) { ?>
 					<?php if ($panel[$user]["CRON_JOBS"] != "0") { ?>
 						<li class="main-menu-item">
@@ -460,9 +516,7 @@
 								<p class="main-menu-item-label"><?= _("CRON") ?><i class="fas fa-clock"></i></p>
 								<ul class="main-menu-stats">
 									<li>
-										<?= _("Jobs") ?>: <?= $panel[$user]["U_CRON_JOBS"] ?> / <?= $panel[$user]["CRON_JOBS"] == "unlimited" ? "<span class=\"u-text-bold\">∞</span>" : $panel[$user]["CRON_JOBS"] ?> (<?= $panel[$user][
- 	"SUSPENDED_CRON"
- ] ?>)
+										<?= _("Jobs") ?>: <?= $panel[$user]["U_CRON_JOBS"] ?> / <?= $panel[$user]["CRON_JOBS"] == "unlimited" ? "<span class=\"u-text-bold\">∞</span>" : $panel[$user]["CRON_JOBS"] ?>
 									</li>
 								</ul>
 							</a>
@@ -470,7 +524,7 @@
 					<?php } ?>
 				<?php } ?>
 
-				<!-- Backups tab -->
+				<!-- 7. Backups tab -->
 				<?php if (isset($_SESSION["BACKUP_SYSTEM"]) && !empty($_SESSION["BACKUP_SYSTEM"])) { ?>
 					<?php if ($panel[$user]["BACKUPS"] != "0" || $panel[$user]["U_BACKUPS"] != "0" || $panel[$user]["BACKUPS_INCREMENTAL"] == "yes") { ?>
 						<li class="main-menu-item">
@@ -488,7 +542,7 @@
 					<?php } ?>
 				<?php } ?>
 
-				<!-- API tab (Admin Only) -->
+				<!-- 8. API tab (Admin Only) -->
 				<?php if (($_SESSION["userContext"] ?? "") === "admin") {
 					$is_panel_tr = (($_SESSION["language"] ?? "") === "tr" || ($_SESSION["LANGUAGE"] ?? "") === "tr");
 				?>
@@ -506,7 +560,7 @@
 						</a>
 					</li>
 
-					<!-- Smart Resource Governance Tab (Admin Only) -->
+					<!-- 9. Smart Resource Governance Tab (Admin Only) -->
 					<li class="main-menu-item">
 						<a class="main-menu-item-link <?php if ($TAB == "RESOURCES" || $TAB == "GOVERNANCE") { echo "active"; } ?>" href="/list/resources/" title="<?= $is_panel_tr ? "Akıllı Kaynak Yönetişimi & Öncelik Matrisi" : _("Smart Resource Governance & Priority Matrix") ?>">
 							<p class="main-menu-item-label"><?= $is_panel_tr ? "KAYNAK" : _("RESOURCES") ?><i class="fas fa-microchip"></i></p>
@@ -521,7 +575,7 @@
 						</a>
 					</li>
 
-					<!-- Cache & Performance Optimizer Tab (Admin Only) -->
+					<!-- 10. Cache & Performance Optimizer Tab (Admin Only) -->
 					<li class="main-menu-item">
 						<a class="main-menu-item-link <?php if ($TAB == "CACHE" || $TAB == "PERFORMANCE") { echo "active"; } ?>" href="/list/cache/" title="<?= $is_panel_tr ? "Performans, Redis & Veritabanı Optimize Edici" : _("Performance, Cache & Database Optimizer") ?>">
 							<p class="main-menu-item-label"><?= $is_panel_tr ? "ÖNBELLEK" : _("CACHE") ?><i class="fas fa-gauge-high"></i></p>
@@ -536,31 +590,31 @@
 						</a>
 					</li>
 
-					<!-- AI Ops & Self-Healing Hub Tab (Admin Only) -->
+					<!-- 11. Threat Shield & WAF Security Tab (Admin Only) -->
+					<li class="main-menu-item">
+						<a class="main-menu-item-link <?php if ($TAB == "WAF" || $TAB == "SECURITY" || $TAB == "THREATS") { echo "active"; } ?>" href="/list/waf/" title="<?= $is_panel_tr ? "Kurumsal Tehdit Kalkanı, WAF & Zararlı Kod Tarayıcı" : _("Enterprise Threat Shield, WAF & Malware Scanner") ?>">
+							<p class="main-menu-item-label"><?= $is_panel_tr ? "GÜVENLİK" : _("SECURITY") ?><i class="fas fa-shield-halved"></i></p>
+							<ul class="main-menu-stats">
+								<li>
+									<?= $is_panel_tr ? "waf" : _("WAF") ?>: <?= $is_panel_tr ? "aktif" : _("Active") ?>
+								</li>
+								<li>
+									<?= $is_panel_tr ? "tarayıcı" : _("Scanner") ?>: <?= $is_panel_tr ? "hazır" : _("Ready") ?>
+								</li>
+							</ul>
+						</a>
+					</li>
+
+					<!-- 12. AI Ops & Self-Healing Hub Tab (Admin Only) -->
 					<li class="main-menu-item">
 						<a class="main-menu-item-link <?php if ($TAB == "AI_HEALING" || $TAB == "HEALING") { echo "active"; } ?>" href="/list/ai-healing/" title="<?= $is_panel_tr ? "AI Ops, Oto-Onarım & E-Posta Bildirim Merkezi" : _("AI Ops, Self-Healing Engine & HTML Notification Hub") ?>">
-							<p class="main-menu-item-label"><?= $is_panel_tr ? "AI OTO-ONARIM" : _("AI HEALING") ?><i class="fas fa-heart-pulse"></i></p>
+							<p class="main-menu-item-label"><?= $is_panel_tr ? "AI ONARIM" : _("AI HEALING") ?><i class="fas fa-heart-pulse"></i></p>
 							<ul class="main-menu-stats">
 								<li>
 									<?= $is_panel_tr ? "durum" : _("Status") ?>: <?= $is_panel_tr ? "aktif" : _("Active") ?>
 								</li>
 								<li>
 									<?= $is_panel_tr ? "bildirim" : _("Alerts") ?>: <?= $is_panel_tr ? "HTML" : _("HTML") ?>
-								</li>
-							</ul>
-						</a>
-					</li>
-
-					<!-- Threat Shield & WAF Security Tab (Admin Only) -->
-					<li class="main-menu-item">
-						<a class="main-menu-item-link <?php if ($TAB == "WAF" || $TAB == "SECURITY" || $TAB == "THREATS") { echo "active"; } ?>" href="/list/waf/" title="<?= $is_panel_tr ? "Kurumsal Tehdit Kalkanı, WAF & Zararlı Kod Tarayıcı" : _("Enterprise Threat Shield, WAF & Malware Scanner") ?>">
-							<p class="main-menu-item-label"><?= $is_panel_tr ? "GÜVENLİK" : _("SHIELD") ?><i class="fas fa-shield-halved"></i></p>
-							<ul class="main-menu-stats">
-								<li>
-									<?= $is_panel_tr ? "waf" : _("WAF") ?>: <?= $is_panel_tr ? "Aktif" : _("Active") ?>
-								</li>
-								<li>
-									<?= $is_panel_tr ? "tarayıcı" : _("Scanner") ?>: <?= $is_panel_tr ? "Hazır" : _("Ready") ?>
 								</li>
 							</ul>
 						</a>
