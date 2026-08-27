@@ -12,6 +12,45 @@ if (!file_exists($conf_file) && defined('HESTIA')) {
 	$conf_file = HESTIA . "/conf/cloud-backup.conf";
 }
 
+// Security gate: the cloud backup credentials are global (server-wide), so
+// only administrators may read or change them.
+if (($_SESSION['userContext'] ?? '') !== 'admin') {
+	header("Location: /list/user/");
+	exit();
+}
+
+// Load Cloud Backup Settings (before the actions so the save handler can
+// fall back to the currently stored secrets when the form leaves them blank)
+$cloud_settings = [
+	"PROVIDER" => "r2",
+	"ENDPOINT" => "",
+	"BUCKET" => "nexvia-backups",
+	"ACCESS_KEY" => "",
+	"SECRET_KEY" => "",
+	"ACCOUNT_ID" => "",
+	"ENCRYPTION_ENABLED" => "yes",
+	"ENCRYPTION_KEY" => "",
+	"RETENTION_COUNT" => "14",
+	"AUTO_SYNC" => "daily",
+	"STATUS" => "unconfigured",
+	"LAST_SYNC" => ""
+];
+
+if (file_exists($conf_file)) {
+	$conf_lines = file($conf_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+	foreach ($conf_lines as $cline) {
+		if (strpos($cline, '=') !== false && !preg_match('/^\s*#/', $cline)) {
+			list($k, $v) = explode('=', $cline, 2);
+			$k = trim($k);
+			$v = trim($v, " \t\n\r\0\x0B\"'");
+			if (isset($cloud_settings[$k])) {
+				$cloud_settings[$k] = $v;
+			}
+		}
+	}
+}
+unset($conf_lines, $cline, $k, $v);
+
 // 1. Action: Save Cloud Backup Settings
 if (!empty($_POST["save_settings"])) {
 	if (verify_csrf($_POST)) {
@@ -26,6 +65,15 @@ if (!empty($_POST["save_settings"])) {
 		$retention_count = intval($_POST["retention_count"] ?? 14);
 		if ($retention_count < 1) $retention_count = 14;
 		$auto_sync = preg_replace('/[^a-zA-Z0-9_-]/', '', $_POST["auto_sync"] ?? "daily");
+
+		// Secret fields are write-only in the UI: an empty POST value means
+		// "keep the currently stored secret" instead of wiping it.
+		if ($secret_key === "") {
+			$secret_key = $cloud_settings["SECRET_KEY"] ?? "";
+		}
+		if ($encryption_key === "") {
+			$encryption_key = $cloud_settings["ENCRYPTION_KEY"] ?? "";
+		}
 
 		// If Cloudflare R2 and endpoint is empty, construct from account_id
 		if ($provider === "r2" && !empty($account_id) && empty($endpoint)) {
@@ -45,12 +93,9 @@ if (!empty($_POST["save_settings"])) {
 		$config_content .= "AUTO_SYNC='" . addslashes($auto_sync) . "'\n";
 		$config_content .= "STATUS='configured'\n";
 
-		// Keep existing LAST_SYNC if available
-		if (file_exists($conf_file)) {
-			$existing = file_get_contents($conf_file);
-			if (preg_match("/LAST_SYNC='([^']+)'/", $existing, $m)) {
-				$config_content .= "LAST_SYNC='" . $m[1] . "'\n";
-			}
+		// Keep existing LAST_SYNC if available (date-shaped values only)
+		if (preg_match("/LAST_SYNC='([0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9:]+[0-9+:-]*)'/", (string)@file_get_contents($conf_file), $m)) {
+			$config_content .= "LAST_SYNC='" . $m[1] . "'\n";
 		}
 
 		@file_put_contents($conf_file, $config_content);
@@ -130,36 +175,6 @@ if (!empty($_GET["restore_file"])) {
 	}
 }
 
-// Load Cloud Backup Settings
-$cloud_settings = [
-	"PROVIDER" => "r2",
-	"ENDPOINT" => "",
-	"BUCKET" => "nexvia-backups",
-	"ACCESS_KEY" => "",
-	"SECRET_KEY" => "",
-	"ACCOUNT_ID" => "",
-	"ENCRYPTION_ENABLED" => "yes",
-	"ENCRYPTION_KEY" => "",
-	"RETENTION_COUNT" => "14",
-	"AUTO_SYNC" => "daily",
-	"STATUS" => "unconfigured",
-	"LAST_SYNC" => ""
-];
-
-if (file_exists($conf_file)) {
-	$conf_lines = file($conf_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-	foreach ($conf_lines as $cline) {
-		if (strpos($cline, '=') !== false && !preg_match('/^\s*#/', $cline)) {
-			list($k, $v) = explode('=', $cline, 2);
-			$k = trim($k);
-			$v = trim($v, " \t\n\r\0\x0B\"'");
-			if (isset($cloud_settings[$k])) {
-				$cloud_settings[$k] = $v;
-			}
-		}
-	}
-}
-
 // Fetch Remote Cloud Backups
 exec(HESTIA_CMD . "v-backup-cloud-sync " . quoteshellarg($user) . " list json", $list_output, $ret_val);
 $cloud_backups = json_decode(implode("\n", $list_output), true) ?: [];
@@ -167,6 +182,13 @@ $cloud_backups = json_decode(implode("\n", $list_output), true) ?: [];
 // Fetch Local Backups count
 exec(HESTIA_CMD . "v-list-user-backups " . quoteshellarg($user) . " json", $local_b_out, $ret_val);
 $local_backups = json_decode(implode("", $local_b_out), true) ?: [];
+
+// Secrets are write-only: hand the template "is set" flags only and strip the
+// raw values so they can never end up in the rendered HTML.
+$secret_set = !empty($cloud_settings["SECRET_KEY"]);
+$enc_set = !empty($cloud_settings["ENCRYPTION_KEY"]);
+$cloud_settings["SECRET_KEY"] = "";
+$cloud_settings["ENCRYPTION_KEY"] = "";
 
 // Render page
 render_page($user, $TAB, "list_cloud_backup");

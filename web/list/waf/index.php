@@ -10,10 +10,22 @@ $is_tr = (($_SESSION['language'] ?? '') === 'tr' || ($_SESSION['LANGUAGE'] ?? ''
 $current_user = $_SESSION['user'] ?? 'admin';
 $is_admin = (($_SESSION['userContext'] ?? '') === 'admin');
 
-// Security Guard
-if (!$is_admin && empty($_SESSION['user'])) {
-	header("Location: /login/");
+// Security Guard: the WAF shield exposes firewall-wide controls, so only
+// administrators may reach this page at all.
+if (!$is_admin) {
+	header("Location: /list/user/");
 	exit();
+}
+
+// Defense in depth: even though the gate above makes this page admin-only,
+// never let a non-admin context target another account through a forged user
+// field.
+if (!$is_admin) {
+	foreach (["waf_user", "geoip_user", "scan_user"] as $user_field) {
+		if (isset($_POST[$user_field]) && $_POST[$user_field] !== $current_user) {
+			$_POST[$user_field] = $current_user;
+		}
+	}
 }
 
 // -------------------------------------------------------------
@@ -167,9 +179,12 @@ if (!empty($_POST["action_global_whitelist"])) {
 // -------------------------------------------------------------
 // Fetch Aggregated Security Threat Data
 // -------------------------------------------------------------
-$detected_client_ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
-if (strpos($detected_client_ip, ',') !== false) {
-	$detected_client_ip = trim(explode(',', $detected_client_ip)[0]);
+// Client IP for the whitelist helper: use the validated helper (only trusts
+// Cloudflare headers when the peer really is a Cloudflare IP), never raw
+// spoofable X-Forwarded-For / CF-Connecting-IP values.
+$detected_client_ip = function_exists("get_real_user_ip") ? get_real_user_ip() : ($_SERVER["REMOTE_ADDR"] ?? "");
+if ($detected_client_ip === "") {
+	$detected_client_ip = $_SERVER["REMOTE_ADDR"] ?? "127.0.0.1";
 }
 
 exec(HESTIA_CMD . "v-set-sys-global-whitelist list", $gw_output, $return_var);

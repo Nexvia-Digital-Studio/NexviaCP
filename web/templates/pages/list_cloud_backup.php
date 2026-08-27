@@ -213,10 +213,10 @@
 					<input type="text" class="form-control" name="access_key" value="<?= tohtml($cloud_settings['ACCESS_KEY']) ?>" required placeholder="AKIA... or R2 Access Key">
 				</div>
 
-				<!-- Secret Access Key -->
+				<!-- Secret Access Key (write-only: empty submit keeps the stored secret) -->
 				<div>
-					<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("Secret Access Key / Token", "Secret Access Key / Token")) ?> *</label>
-					<input type="password" class="form-control" name="secret_key" value="<?= tohtml($cloud_settings['SECRET_KEY']) ?>" required placeholder="••••••••••••••••••••••••">
+					<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("Secret Access Key / Token", "Secret Access Key / Token")) ?> <?= !empty($secret_set) ? "" : "*" ?></label>
+					<input type="password" class="form-control" name="secret_key" value="" autocomplete="new-password" <?= !empty($secret_set) ? "" : "required" ?> placeholder="<?= !empty($secret_set) ? tohtml(__tr("•••••••• (saved) — leave empty to keep", "•••••••• (kayıtlı) — değiştirmemek için boş bırakın")) : tohtml(__tr("—", "—")) ?>">
 				</div>
 
 				<!-- Custom Endpoint URL (optional) -->
@@ -245,7 +245,7 @@
 				<div>
 					<label class="form-label u-mb5 u-text-bold" style="font-size: 12px;"><?= tohtml(__tr("Master Encryption Passphrase", "Ana Şifreleme Parolası (Master Key)")) ?></label>
 					<div style="display: flex; gap: 8px;">
-						<input type="password" id="enc-key-input" class="form-control" name="encryption_key" value="<?= tohtml($cloud_settings['ENCRYPTION_KEY']) ?>" placeholder="<?= tohtml(__tr("Enter strong secret master key", "Güçlü bir ana şifreleme parolası girin")) ?>">
+						<input type="password" id="enc-key-input" class="form-control" name="encryption_key" value="" autocomplete="new-password" placeholder="<?= !empty($enc_set) ? tohtml(__tr("•••••••• (saved) — leave empty to keep", "•••••••• (kayıtlı) — değiştirmemek için boş bırakın")) : tohtml(__tr("—", "—")) ?>">
 						<button type="button" class="button button-secondary" onclick="togglePassVisibility('enc-key-input')" title="<?= tohtml(__tr("Show/Hide", "Göster/Gizle")) ?>">
 							<i class="fas fa-eye"></i>
 						</button>

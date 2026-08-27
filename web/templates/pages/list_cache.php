@@ -318,15 +318,17 @@
 					<div style="font-size:10px; color:var(--color-text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="<?= tohtml($db_item["assigned_domain"] ?? "") ?>">
 						<?= $is_assigned ? tohtml($db_item["assigned_domain"]) : tohtml(__tr("Available", "Boş")) ?>
 					</div>
-					<?php if ($keys_num > 0) { ?>
-						<form method="post" action="/list/cache/" style="margin-top:6px;" onsubmit="return confirm('<?= tohtml(__tr("Flush all keys in DB", "DB")) ?> <?= $i ?> <?= tohtml(__tr("?", "için tüm veriler silinsin mi?")) ?>');">
-							<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
-							<input type="hidden" name="flush_single_db" value="1">
-							<input type="hidden" name="db_index" value="<?= $i ?>">
-							<button type="submit" class="button button-danger button-small" style="font-size:9px; padding: 2px 6px; width:100%;" title="<?= tohtml(__tr("Flush DB keys", "DB Temizle")) ?>">
-								<?= tohtml(__tr("Flush", "Sıfırla")) ?>
-							</button>
-						</form>
+					<?php if ($is_admin ?? (($_SESSION["userContext"] ?? "") === "admin")) { ?>
+						<?php if ($keys_num > 0) { ?>
+							<form method="post" action="/list/cache/" style="margin-top:6px;" onsubmit="return confirm('<?= tohtml(__tr("Flush all keys in DB", "DB")) ?> <?= $i ?> <?= tohtml(__tr("?", "için tüm veriler silinsin mi?")) ?>');">
+								<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
+								<input type="hidden" name="flush_single_db" value="1">
+								<input type="hidden" name="db_index" value="<?= $i ?>">
+								<button type="submit" class="button button-danger button-small" style="font-size:9px; padding: 2px 6px; width:100%;" title="<?= tohtml(__tr("Flush DB keys", "DB Temizle")) ?>">
+									<?= tohtml(__tr("Flush", "Sıfırla")) ?>
+								</button>
+							</form>
+						<?php } ?>
 					<?php } ?>
 				</div>
 			<?php } ?>
