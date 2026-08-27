@@ -1,0 +1,51 @@
+#!/bin/bash
+# info: enable or disable MariaDB/MySQL slow query log safely
+# options: [STATUS] [LONG_QUERY_TIME]
+#
+# example: v-change-sys-mysql-slowlog on 1
+#          v-change-sys-mysql-slowlog off
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+# load config file
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+status=${1:-on}
+long_time=${2:-1}
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+# Find MySQL client & credentials
+MYSQL_CMD="mysql"
+if [ -f /root/.my.cnf ]; then
+	MYSQL_CMD="mysql --defaults-file=/root/.my.cnf"
+elif [ -f "$HESTIA/conf/mysql.conf" ]; then
+	# shellcheck source=/usr/local/hestia/conf/mysql.conf
+	source "$HESTIA/conf/mysql.conf"
+	[ -n "$HOST" ] && [ -n "$USER" ] && MYSQL_CMD="mysql -h $HOST -u $USER -p$PASSWORD"
+fi
+
+# Prepare slow query log file
+SLOW_LOG_FILE="/var/log/mysql/mariadb-slow.log"
+mkdir -p /var/log/mysql 2>/dev/null || true
+touch "$SLOW_LOG_FILE" 2>/dev/null || true
+chown -R mysql:mysql /var/log/mysql 2>/dev/null || true
+chmod 640 "$SLOW_LOG_FILE" 2>/dev/null || true
+
+if [ "$status" = "on" ] || [ "$status" = "yes" ] || [ "$status" = "1" ]; then
+	$MYSQL_CMD -e "SET GLOBAL slow_query_log = 'ON'; SET GLOBAL slow_query_log_file = '$SLOW_LOG_FILE'; SET GLOBAL long_query_time = $long_time; SET GLOBAL log_queries_not_using_indexes = 'ON';" 2>/dev/null || true
+	echo "[+] MariaDB / MySQL Slow Query Log ENABLED (Threshold: ${long_time}s, Target: $SLOW_LOG_FILE)."
+else
+	$MYSQL_CMD -e "SET GLOBAL slow_query_log = 'OFF';" 2>/dev/null || true
+	echo "[+] MariaDB / MySQL Slow Query Log DISABLED."
+fi
+
+exit 0

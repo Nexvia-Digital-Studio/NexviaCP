@@ -97,11 +97,11 @@ if (!empty($_POST["toggle_fastcgi"])) {
 if (!empty($_POST["enable_slow_log"])) {
 	verify_csrf($_POST);
 	if ($is_admin) {
-		exec('mysql -e "SET GLOBAL slow_query_log = \'ON\'; SET GLOBAL long_query_time = 1; SET GLOBAL log_queries_not_using_indexes = \'ON\';" 2>/dev/null', $s_out, $s_code);
+		exec(HESTIA_CMD . "v-change-sys-mysql-slowlog on 1", $s_out, $s_code);
 		if ($s_code == 0) {
 			$_SESSION["ok_msg"] = $is_tr ? "MariaDB/MySQL yavaş sorgu günlüğü (Slow Query Log) başarıyla aktif edildi (>1.0s)." : _("MariaDB/MySQL slow query log activated successfully (>1.0s).");
 		} else {
-			$_SESSION["error_msg"] = $is_tr ? "Slow query log aktifleştirilirken hata oluştu." : _("Error enabling slow query log.");
+			$_SESSION["error_msg"] = ($is_tr ? "Slow query log aktifleştirilirken hata oluştu: " : _("Error enabling slow query log: ")) . implode(" ", $s_out);
 		}
 	}
 	header("Location: /list/cache/");
