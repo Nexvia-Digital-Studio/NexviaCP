@@ -260,9 +260,12 @@ add_web_config() {
 	#   -Alternatively a depreciation period with proper notifications should be considered
 
 	# Load the app backend port (Node.js / .NET / WebSocket domains) so the
-	# %app_port% template placeholder can be substituted. Empty for plain PHP
-	# domains, which renders the app proxy templates unusable on purpose.
+	# %app_port% template placeholder can be substituted. Plain PHP domains
+	# have no backend port; they must degrade to "502 on this vhost only"
+	# (discard port 9), never to an invalid nginx config that would fail
+	# 'nginx -t' and take down every hosted site on reload/restart.
 	app_port=$(get_object_value 'web' 'DOMAIN' "$domain" '$APP_BACKEND_PORT')
+	[ -z "$app_port" ] && app_port=9
 
 	cat "${WEBTPL_LOCATION}/$2" \
 		| sed -e "s|%ip%|$local_ip|g" \
