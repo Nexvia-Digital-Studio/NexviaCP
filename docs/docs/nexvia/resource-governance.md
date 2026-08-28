@@ -3,7 +3,6 @@ title: Resource Governance & cgroups
 description: Per-domain RAM/CPU limits, priority-based adaptive tuning and memory-pressure scaling in NexviaCP.
 ---
 
-# Resource Governance & cgroups
 
 NexviaCP gives every web domain its own kernel-enforced resource envelope. PHP sites get limits injected into their PHP-FPM pool (`memory_limit`, `pm.max_children`), while Node.js/.NET/WebSocket backends run in a dedicated systemd unit with `MemoryHigh`, `MemoryMax` and `CPUQuota` applied. On top of the static limits, an adaptive tuner re-allocates CPU, RAM and I/O based on traffic, memory pressure and a per-site priority.
 

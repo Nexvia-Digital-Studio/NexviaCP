@@ -3,7 +3,6 @@ title: AI Healing
 description: Self-healing engine that detects 5xx bursts, stuck PHP-FPM pools and crashed services, restarts them and reports root-cause analysis.
 ---
 
-# AI Healing
 
 NexviaCP's healing engine watches your sites for 500/502 Bad Gateway bursts, stuck PHP-FPM pools and crashed Node.js/.NET systemd services. When a failure is detected it heals the service (restart it safely), generates a root-cause diagnosis and dispatches a responsive HTML email to the admin. Every action is recorded as an event you can review later.
 

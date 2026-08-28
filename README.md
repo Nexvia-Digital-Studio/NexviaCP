@@ -185,7 +185,7 @@ Bu betik NexviaCP'nin `bin/`, `func/`, `web/` ve şablon dosyalarını `/usr/loc
 #### Tüm NexviaCP bayrakları
 
 | Bayrak | Açıklama | Varsayılan |
-|---|---|---|
+| --- | --- | --- |
 | `--redis` | Redis object cache | no |
 | `--memcached` | Memcached object cache | no |
 | `--docker` | Docker engine + userns-remap hardening | no |

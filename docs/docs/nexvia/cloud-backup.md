@@ -3,7 +3,6 @@ title: Cloud Backup (Restic)
 description: AES-256 encrypted sync of backups to Cloudflare R2, AWS S3 or Google Drive, plus incremental restic repositories with per-object restores.
 ---
 
-# Cloud Backup (Restic)
 
 NexviaCP layers two backup systems on top of Hestia's local backups. **Cloud sync** encrypts local backup archives with AES-256 and ships them to Cloudflare R2, AWS S3 or Google Drive (via rclone). **Restic repositories** provide deduplicated, incremental, end-to-end encrypted backups of whole users or individual objects (web domain, database, mail domain, DNS domain, cron job, single file), restorable with one command.
 

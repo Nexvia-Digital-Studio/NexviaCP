@@ -3,7 +3,6 @@ title: Secrets Vault
 description: Central root-only vault for global secrets such as API keys and tokens, with masked listing and clean deletion.
 ---
 
-# Secrets Vault
 
 The vault is NexviaCP's central store for global secrets — API keys (for example a Gemini key for AI features), provider tokens and similar credentials that scripts need but should not live world-readable in config files or command history. Secrets are stored in the root-owned vault config, exposed to internal scripts, and always masked when listed.
 

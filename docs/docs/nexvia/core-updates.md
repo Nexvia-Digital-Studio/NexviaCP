@@ -3,7 +3,6 @@ title: Core Updates
 description: Check and apply updates from the NexviaCP fork and upstream HestiaCP, manage package updates and autoupdate settings.
 ---
 
-# Core Updates
 
 NexviaCP tracks two upstreams: its own repository (`Nexvia-Digital-Studio/NexviaCP`) and the HestiaCP project it is forked from. The update tooling lets you preview pending updates from both, apply the fork's core files, update Hestia packages and schedule automatic updates.
 

@@ -3,14 +3,13 @@ title: NexviaCP Overview
 description: What NexviaCP is, a map of the modules added on top of HestiaCP, and how to get started.
 ---
 
-# NexviaCP Overview
 
 NexviaCP is a HestiaCP fork by [Nexvia Digital Studio](https://github.com/Nexvia-Digital-Studio), optimised for hosting many isolated websites (PHP, Node.js, .NET) on a single VPS. It keeps everything HestiaCP does and adds a layer of operational modules: per-site resource governance with cgroups, AI self-healing, anomaly detection, a WAF and malware scanner, Docker/Portainer integration, Git auto-deploy with rollbacks, cache governance, encrypted cloud backups, DB Studio, a secrets vault and a set of day-2 ops tools.
 
 ## Module map
 
 | Module | What it does | CLI entry points |
-|---|---|---|
+| --- | --- | --- |
 | Resource governance | Per-site RAM/CPU limits and adaptive tuning | `v-tune-sys-resources`, `v-change-web-domain-cgroup` |
 | AI healing | Detects 5xx bursts / stuck services and restarts them | `v-monitor-sys-healing` |
 | Anomaly detection | Z-score anomaly detection over nginx traffic metrics | `v-detect-domain-anomalies` |

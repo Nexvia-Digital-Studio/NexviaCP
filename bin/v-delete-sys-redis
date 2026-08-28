@@ -45,7 +45,10 @@ systemctl stop redis-server >/dev/null 2>&1 || systemctl stop redis >/dev/null 2
 systemctl disable redis-server >/dev/null 2>&1 || systemctl disable redis >/dev/null 2>&1 || true
 
 # Disable the PHP redis extension for every installed PHP version.
-for phpver in $(ls /etc/php/ 2>/dev/null); do
+for phpdir in /etc/php/*/; do
+	[ -d "$phpdir" ] || continue
+	phpver="${phpdir%/}"
+	phpver="${phpver##*/}"
 	if [ -d "/etc/php/$phpver/fpm" ]; then
 		phpdismod -v "$phpver" redis >/dev/null 2>&1 || true
 		systemctl reload "php$phpver-fpm" >/dev/null 2>&1 || true

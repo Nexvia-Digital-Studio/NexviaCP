@@ -3,7 +3,6 @@ title: Notifications & Ops Tooling
 description: Notification channels, heartbeats, certificate checks, maintenance runs, CVE scanning, log search, mail queue control, AIDE, metrics, API protection and remote server commands.
 ---
 
-# Notifications & Ops Tooling
 
 This page collects the day-2 operations commands added by NexviaCP: alert routing, health heartbeats and certificate checks, one-pass maintenance, CVE scanning, log search, exim queue control, AIDE file-integrity monitoring, Prometheus-style metrics, API protection and an SSH remote-server registry. Most of these also have dedicated panel pages.
 

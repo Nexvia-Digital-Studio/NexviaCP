@@ -3,7 +3,6 @@ title: App Runtimes (Node.js / .NET / Web Services)
 description: Run Node.js, .NET and WebSocket backends as isolated per-domain systemd services behind nginx, with kernel cgroup limits and zero-downtime reloads.
 ---
 
-# App Runtimes (Node.js / .NET / Web Services)
 
 Next to PHP-FPM sites, NexviaCP runs application backends — Node.js (Express, Next.js, NestJS, Fastify), .NET 8/9/10 ASP.NET Core (Kestrel) and WebSocket services — as dedicated systemd units, one per domain, reverse-proxied by nginx. Each unit gets its own kernel-level `MemoryHigh`, `MemoryMax` and `CPUQuota`, so a crashing or leaking backend can never take down its neighbours.
 

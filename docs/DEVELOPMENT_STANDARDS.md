@@ -14,6 +14,7 @@ NexviaCP, Zero-Knowledge güvenlik modeli kullanır. GitHub'dan bir proje kuruld
 ### 🔹 Teknolojilere Göre `.env` Okuma Şablonları
 
 #### 🐘 1. PHP / Laravel / Vanilla Projeler
+
 ```php
 // Yöntem A: Doğrudan getenv / $_ENV ile okuma
 $geminiKey = getenv('GEMINI_API_KEY') ?: ($_ENV['GEMINI_API_KEY'] ?? '');
@@ -28,6 +29,7 @@ $dotenv->safeLoad();
 ```
 
 #### 🟢 2. Node.js / Express / Next.js / Fastify
+
 ```javascript
 // dotenv ile ana dizindeki .env otomatik okunur
 require('dotenv').config();
@@ -43,6 +45,7 @@ const dbConfig = {
 ```
 
 #### 🟣 3. .NET 8 / 9 / 10 ASP.NET Core & Web API
+
 ```csharp
 // Program.cs — .NET Core varsayılan olarak Environment değişkenlerini otomatik okur
 var builder = WebApplication.CreateBuilder(args);
@@ -57,6 +60,7 @@ var connString = $"Server={builder.Configuration["DB_HOST"] ?? "127.0.0.1"};" +
 ```
 
 #### 🐍 4. Python / Django / FastAPI / Flask
+
 ```python
 import os
 from dotenv import load_dotenv
@@ -87,7 +91,8 @@ NexviaCP, reponuzda veritabanı şeması gördüğünde **sıfır dokunuşla**:
    DB_PASSWORD=otomatik_guclu_sifre
    ```
 
-### 📌 Yapmanız Gereken Tek Şey:
+### 📌 Yapmanız Gereken Tek Şey
+
 Reponuzun ana dizinine veya `build/` klasörüne şu dosyalardan birini koymaktır:
 * `schema.sql` veya `database.sql` veya `build/schema.sql`
 

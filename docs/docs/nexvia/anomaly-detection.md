@@ -3,7 +3,6 @@ title: Anomaly Detection
 description: Collect per-domain nginx metrics and flag traffic anomalies with Z-score analysis, with email alerts and a queryable event store.
 ---
 
-# Anomaly Detection
 
 This module turns nginx access logs into hourly per-domain metrics (request counts, error rates, bandwidth, unique IPs, response codes) kept in a rolling 30-day window, then compares current values against a rolling 7-day baseline using Z-score statistics. Statistically significant deviations are flagged as anomalies (WARNING / CRITICAL), stored with before/after context and emailed to the admin.
 

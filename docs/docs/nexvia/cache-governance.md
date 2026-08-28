@@ -3,7 +3,6 @@ title: Cache Governance
 description: Install Redis/Memcached, assign per-domain Redis databases, manage nginx FastCGI cache, purge caches and inspect hit ratios and slow SQL.
 ---
 
-# Cache Governance
 
 Object caching and full-page caching in NexviaCP are first-class citizens: Redis or Memcached can be installed with one command, each domain can get a dedicated Redis database (auto-injected into its `.env`), nginx FastCGI caching can be toggled per domain, and a governance view collects Redis memory stats, hit/miss ratios, domain cache mappings and slow SQL summaries in one place.
 

@@ -3,7 +3,6 @@ title: Docker & Portainer
 description: Hardened Docker (userns-remap) and an admin-only Portainer CE installation bound to 127.0.0.1 behind an nginx basic-auth vhost.
 ---
 
-# Docker & Portainer
 
 NexviaCP installs Portainer CE in a hardened, admin-only configuration. Containers run under Docker `userns-remap` (so a compromised container never runs as real root), the Portainer Agent talks to Docker over the `portainer-agent-net` network instead of a mounted `docker.sock`, and the Portainer ports are bound to `127.0.0.1` only — the single entry point is an nginx vhost (`docker-ui` template) protected by HTTP basic auth plus Portainer's own login.
 

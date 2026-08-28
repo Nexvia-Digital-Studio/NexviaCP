@@ -2305,6 +2305,7 @@ apt update && apt upgrade
 
 -
 
+[NexviaCP]: https://github.com/Nexvia-Digital-Studio/NexviaCP
 [1.0.4]: https://github.com/hestiacp/hestiacp/releases/tag/1.0.4
 [1.0.3]: https://github.com/hestiacp/hestiacp/releases/tag/1.0.3
 [1.0.1]: https://github.com/hestiacp/hestiacp/releases/tag/1.0.1

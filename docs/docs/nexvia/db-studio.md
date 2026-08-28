@@ -3,7 +3,6 @@ title: DB Studio
 description: Browse database schemas and table rows, run safe queries from the panel, adopt unmapped databases and use one-click phpMyAdmin/phpPgAdmin SSO.
 ---
 
-# DB Studio
 
 DB Studio is NexviaCP's in-panel database explorer. Instead of copying passwords into a separate tool, you browse schemas and table rows and run safe queries directly from the panel, with per-user database isolation enforced (users only ever see their own `prefix_` databases). It coexists with the one-click phpMyAdmin and phpPgAdmin SSO buttons, and a sync command adopts databases that exist on the SQL server but are not yet mapped to a panel user.
 

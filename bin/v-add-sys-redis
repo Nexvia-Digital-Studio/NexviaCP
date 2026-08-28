@@ -58,7 +58,10 @@ systemctl restart redis-server >/dev/null 2>&1 || systemctl restart redis >/dev/
 
 # Enable the PHP redis extension for every installed PHP version so apps can
 # use Redis for sessions/object-cache without manual configuration.
-for phpver in $(ls /etc/php/ 2>/dev/null); do
+for phpdir in /etc/php/*/; do
+	[ -d "$phpdir" ] || continue
+	phpver="${phpdir%/}"
+	phpver="${phpver##*/}"
 	# Skip CLI-only or non-FPM versions gracefully.
 	if [ -d "/etc/php/$phpver/fpm" ]; then
 		# Install the matching php-redis package if the Sury ondrej repo layout is in use.

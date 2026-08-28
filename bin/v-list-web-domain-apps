@@ -36,8 +36,9 @@ users=()
 if [ -n "$user_filter" ]; then
 	users+=("$user_filter")
 else
-	for u in $(ls "$HESTIA/data/users" 2>/dev/null); do
-		users+=("$u")
+	for udir in "$HESTIA/data/users"/*/; do
+		[ -d "$udir" ] || continue
+		users+=("$(basename "$udir")")
 	done
 fi
 

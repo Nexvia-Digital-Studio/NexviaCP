@@ -3,7 +3,6 @@ title: Git Deploy & PR Preview
 description: One-command GitHub deployments for PHP/Node/.NET apps, automatic webhook pulls, deploy snapshots with rollback, and disposable PR preview environments.
 ---
 
-# Git Deploy & PR Preview
 
 This module deploys PHP, Node.js, React, Django/Python and .NET sites and APIs straight from GitHub (private repos included), installs dependencies, wires the reverse proxy and creates a snapshot of the previous release before every deploy. Pushes are applied automatically through an HMAC-SHA256-verified webhook receiver, and every pull request can get its own disposable preview subdomain.
 
