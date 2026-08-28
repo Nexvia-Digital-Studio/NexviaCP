@@ -1,0 +1,95 @@
+#!/bin/bash
+# info: list last system maintenance report and recent history
+# options: [FORMAT]
+#
+# example: v-list-sys-maintenance
+# example: v-list-sys-maintenance json
+#
+# FORMAT: json (default) | shell
+#
+# Prints the content of $HESTIA/data/maintenance/last-report.json plus the
+# last 20 entries from $HESTIA/data/maintenance/history.log.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+format="${arg1:-json}"
+
+# Validate format argument
+if [ "$format" != "json" ] && [ "$format" != "shell" ]; then
+	echo "ERROR: Invalid format '$format' (expected json or shell)."
+	exit 1
+fi
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+MAINT_DIR="$HESTIA/data/maintenance"
+REPORT_FILE="$MAINT_DIR/last-report.json"
+HISTORY_FILE="$MAINT_DIR/history.log"
+HISTORY_LINES=20
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+case "$format" in
+	json)
+		python3 - "$REPORT_FILE" "$HISTORY_FILE" "$HISTORY_LINES" <<'PYEOF'
+import json
+import os
+import sys
+
+report_path, history_path, history_lines = sys.argv[1], sys.argv[2], int(sys.argv[3])
+
+report = None
+if os.path.isfile(report_path):
+    try:
+        with open(report_path, "r", encoding="utf-8", errors="ignore") as f:
+            report = json.load(f)
+    except (OSError, ValueError):
+        report = None
+
+history = []
+if os.path.isfile(history_path):
+    try:
+        with open(history_path, "r", encoding="utf-8", errors="ignore") as f:
+            history = [line.rstrip("\n") for line in f if line.strip()][-history_lines:]
+    except OSError:
+        history = []
+
+print(json.dumps({"report": report, "history": history}, ensure_ascii=False, indent=2))
+PYEOF
+		;;
+	shell)
+		if [ -f "$REPORT_FILE" ]; then
+			echo "=== Last maintenance report ($REPORT_FILE) ==="
+			cat "$REPORT_FILE"
+		else
+			echo "=== No maintenance report yet ($REPORT_FILE missing) ==="
+		fi
+		echo ""
+		if [ -f "$HISTORY_FILE" ]; then
+			echo "=== Last $HISTORY_LINES history entries ($HISTORY_FILE) ==="
+			tail -n "$HISTORY_LINES" "$HISTORY_FILE"
+		else
+			echo "=== No maintenance history yet ($HISTORY_FILE missing) ==="
+		fi
+		;;
+esac
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+exit 0

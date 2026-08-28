@@ -1,0 +1,409 @@
+#!/bin/bash
+# info: run system maintenance chores in one safe, reported pass
+# options: [--security-updates] [json|plain]
+#
+# example: v-run-sys-maintenance
+# example: v-run-sys-maintenance json
+# example: v-run-sys-maintenance --security-updates plain
+#
+# Steps (each guarded; skipped with a note when not applicable, never fatal):
+#   1. disk usage snapshot before (df of / and /home when separate)
+#   2. nginx fastcgi/proxy cache flush (only when cache dirs exist)
+#   3. restic backup prune (only for configured per-user repos)
+#   4. journald vacuum (only on systemd)
+#   5. logrotate force-run (only when logrotate is installed)
+#   6. orphan cleanup (/tmp/hestia-* and stale panel sessions, older than 10 days)
+#   7. security-only apt updates (ONLY with --security-updates, default OFF)
+#   8. disk usage snapshot after + delta
+#
+# Report is written to $HESTIA/data/maintenance/last-report.json and appended
+# (one line) to $HESTIA/data/maintenance/history.log (capped at 500 lines).
+# Exit code is 0 even when individual steps fail; 1 only on total failure
+# (not root, or unable to write the report).
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+arg2=$2
+arg3=$3
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+BIN="${BIN:-$HESTIA/bin}"
+
+# Parse arguments (flags and format can appear in any position)
+security_updates="no"
+format="json"
+for arg in "$arg1" "$arg2" "$arg3"; do
+	case "$arg" in
+		--security-updates) security_updates="yes" ;;
+		json) format="json" ;;
+		plain) format="plain" ;;
+		"") ;;
+		*)
+			echo "ERROR: unknown argument '$arg'."
+			echo "Usage: v-run-sys-maintenance [--security-updates] [json|plain]"
+			exit 1
+			;;
+	esac
+done
+
+# Only root may perform maintenance (panel invokes this via sudo)
+if [ "x$(id -u)" != "x0" ]; then
+	echo "ERROR: script can be executed only by root." >&2
+	exit 1
+fi
+
+# Perform verification if read-only mode is enabled
+if type check_hestia_demo_mode >/dev/null 2>&1; then
+	check_hestia_demo_mode
+fi
+
+MAINT_DIR="$HESTIA/data/maintenance"
+REPORT_FILE="$MAINT_DIR/last-report.json"
+HISTORY_FILE="$MAINT_DIR/history.log"
+HISTORY_MAX_LINES=500
+
+mkdir -p "$MAINT_DIR" 2>/dev/null
+RESULTS_FILE=$(mktemp /tmp/hestia-maintenance.XXXXXX) || exit 1
+DISK_BEFORE_FILE=$(mktemp /tmp/hestia-maintenance.XXXXXX) || exit 1
+DISK_AFTER_FILE=$(mktemp /tmp/hestia-maintenance.XXXXXX) || exit 1
+trap 'rm -f "$RESULTS_FILE" "$DISK_BEFORE_FILE" "$DISK_AFTER_FILE"' EXIT
+
+# record_step <name> <status> <seconds> <detail>
+record_step() {
+	local _name="$1" _status="$2" _seconds="$3" _detail="$4"
+	_detail=$(printf '%s' "$_detail" | tr '\t\n\r' '   ')
+	printf '%s\t%s\t%s\t%s\n' "$_name" "$_status" "$_seconds" "$_detail" >> "$RESULTS_FILE"
+}
+
+# disk_snapshot <output-file> — one line per mount: mount<TAB>size<TAB>used<TAB>use%
+disk_snapshot() {
+	local _out_file="$1" _home_mnt
+	df -h / 2>/dev/null | awk 'NR>1 {print $6 "\t" $2 "\t" $3 "\t" $5}' > "$_out_file"
+	_home_mnt=$(df -h /home 2>/dev/null | awk 'NR>1 {print $6}')
+	if [ "$_home_mnt" = "/home" ]; then
+		# /home is a separate filesystem — include it
+		df -h /home 2>/dev/null | awk 'NR>1 {print $6 "\t" $2 "\t" $3 "\t" $5}' >> "$_out_file"
+	fi
+}
+
+# int_or_default <value> <default> — positive integers pass through, rest -> default
+int_or_default() {
+	if [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -gt 0 ]; then
+		printf '%s' "$1"
+	else
+		printf '%s' "$2"
+	fi
+}
+
+started_epoch=$(date +%s)
+started=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+#---------- Step 1: disk snapshot before ----------
+disk_snapshot "$DISK_BEFORE_FILE"
+record_step "disk_snapshot_before" "ok" 0 "captured df for / and /home (when separate)"
+
+#---------- Step 2: nginx fastcgi/proxy cache flush ----------
+step_t0=$(date +%s)
+cache_dirs_flushed=0
+cache_bytes_kb=0
+if [ "$WEB_SYSTEM" != "nginx" ] && [ "$PROXY_SYSTEM" != "nginx" ]; then
+	record_step "nginx_cache_flush" "skipped" 0 "nginx is not the web/proxy server (WEB_SYSTEM='$WEB_SYSTEM' PROXY_SYSTEM='$PROXY_SYSTEM')"
+else
+	# Same cache locations v-purge-nginx-cache / v-purge-web-domain-cache operate on;
+	# per-domain subdirectories are wiped depth-first so the cache roots survive.
+	for cache_dir in /var/cache/nginx/micro /var/cache/nginx/fastcgi /var/cache/nginx/proxy; do
+		if [ -d "$cache_dir" ]; then
+			dir_kb=$(du -sk "$cache_dir" 2>/dev/null | awk '{print $1}')
+			find "$cache_dir" -mindepth 1 -delete 2>/dev/null
+			cache_dirs_flushed=$((cache_dirs_flushed + 1))
+			cache_bytes_kb=$((cache_bytes_kb + ${dir_kb:-0}))
+		fi
+	done
+	if [ "$cache_dirs_flushed" -eq 0 ]; then
+		record_step "nginx_cache_flush" "skipped" 0 "no nginx cache directories present under /var/cache/nginx"
+	else
+		step_s=$(( $(date +%s) - step_t0 ))
+		record_step "nginx_cache_flush" "ok" "$step_s" "flushed $cache_dirs_flushed cache dir(s), freed about ${cache_bytes_kb}KB (/var/cache/nginx/{micro,fastcgi,proxy})"
+	fi
+fi
+
+#---------- Step 3: restic backup prune ----------
+step_t0=$(date +%s)
+if [ ! -f "$HESTIA/conf/restic.conf" ]; then
+	record_step "restic_prune" "skipped" 0 "restic not configured ($HESTIA/conf/restic.conf missing; configure with v-add-backup-host-restic)"
+elif ! command -v restic >/dev/null 2>&1; then
+	record_step "restic_prune" "skipped" 0 "restic binary not found in PATH"
+else
+	# Detection mirrors v-list-backup-host-restic / v-backup-user-restic:
+	# host repo + retention in conf/restic.conf, per-user password in data/users/<user>/restic.conf
+	source_conf "$HESTIA/conf/restic.conf"
+	if [ -z "$REPO" ]; then
+		record_step "restic_prune" "skipped" 0 "restic.conf exists but REPO is empty"
+	else
+		keep_daily=$(int_or_default "$KEEP_DAILY" 7)
+		keep_weekly=$(int_or_default "$KEEP_WEEKLY" 4)
+		keep_monthly=$(int_or_default "$KEEP_MONTHLY" 6)
+		repos_ok=0
+		repos_fail=0
+		repos_unreachable=0
+		fail_names=""
+		sys_users=$("$BIN/v-list-sys-users" plain 2>/dev/null)
+		if [ -z "$sys_users" ] && [ -d "$HESTIA/data/users" ]; then
+			sys_users=$(ls "$HESTIA/data/users" 2>/dev/null)
+		fi
+		for m_user in $sys_users; do
+			pw_file="$HESTIA/data/users/$m_user/restic.conf"
+			[ -f "$pw_file" ] || continue
+			m_repo="${REPO%/}/$m_user"
+			# Skip on any doubt: repo must be reachable before we touch it
+			if ! timeout 30 restic --repo "$m_repo" --password-file "$pw_file" snapshots >/dev/null 2>&1; then
+				repos_unreachable=$((repos_unreachable + 1))
+				continue
+			fi
+			if timeout 60 restic --repo "$m_repo" --password-file "$pw_file" \
+				forget --prune --keep-daily "$keep_daily" --keep-weekly "$keep_weekly" \
+				--keep-monthly "$keep_monthly" >/dev/null 2>&1; then
+				repos_ok=$((repos_ok + 1))
+			else
+				repos_fail=$((repos_fail + 1))
+				fail_names="$fail_names $m_user"
+			fi
+		done
+		step_s=$(( $(date +%s) - step_t0 ))
+		if [ "$repos_ok" -eq 0 ] && [ "$repos_fail" -eq 0 ]; then
+			record_step "restic_prune" "skipped" "$step_s" "no accessible per-user restic repos under '$REPO' (unreachable: $repos_unreachable)"
+		elif [ "$repos_fail" -gt 0 ]; then
+			record_step "restic_prune" "failed" "$step_s" "pruned $repos_ok repo(s); failed:${fail_names}; unreachable: $repos_unreachable (keep-daily $keep_daily, weekly $keep_weekly, monthly $keep_monthly)"
+		else
+			record_step "restic_prune" "ok" "$step_s" "pruned $repos_ok repo(s) with forget --prune (keep-daily $keep_daily, weekly $keep_weekly, monthly $keep_monthly; unreachable: $repos_unreachable)"
+		fi
+	fi
+fi
+
+#---------- Step 4: journald vacuum ----------
+step_t0=$(date +%s)
+if [ ! -d /run/systemd/system ]; then
+	record_step "journal_vacuum" "skipped" 0 "systemd not active (/run/systemd/system missing)"
+elif ! command -v journalctl >/dev/null 2>&1; then
+	record_step "journal_vacuum" "skipped" 0 "journalctl not found in PATH"
+else
+	vacuum_out=$(journalctl --vacuum-time=7d --vacuum-size=200M 2>&1)
+	vacuum_rc=$?
+	vacuum_freed=$(printf '%s\n' "$vacuum_out" | grep -i 'freed' | tail -n 1)
+	step_s=$(( $(date +%s) - step_t0 ))
+	if [ "$vacuum_rc" -eq 0 ]; then
+		record_step "journal_vacuum" "ok" "$step_s" "journalctl --vacuum-time=7d --vacuum-size=200M — ${vacuum_freed:-completed}"
+	else
+		record_step "journal_vacuum" "failed" "$step_s" "journalctl exited with rc=$vacuum_rc — ${vacuum_freed:-no freed line reported}"
+	fi
+fi
+
+#---------- Step 5: logrotate force-run ----------
+step_t0=$(date +%s)
+if [ ! -x /usr/sbin/logrotate ]; then
+	record_step "logrotate_force" "skipped" 0 "/usr/sbin/logrotate not installed"
+elif [ ! -f /etc/logrotate.conf ]; then
+	record_step "logrotate_force" "skipped" 0 "/etc/logrotate.conf not found"
+else
+	logrotate_out=$(/usr/sbin/logrotate -f /etc/logrotate.conf 2>&1)
+	logrotate_rc=$?
+	step_s=$(( $(date +%s) - step_t0 ))
+	if [ "$logrotate_rc" -eq 0 ]; then
+		record_step "logrotate_force" "ok" "$step_s" "logrotate -f /etc/logrotate.conf completed"
+	else
+		record_step "logrotate_force" "failed" "$step_s" "logrotate exited with rc=$logrotate_rc — $(printf '%s' "$logrotate_out" | tail -n 1)"
+	fi
+fi
+
+#---------- Step 6: orphan tmp + stale session cleanup ----------
+step_t0=$(date +%s)
+tmp_removed=$(find /tmp -maxdepth 1 -name 'hestia-*' -type f -mtime +10 -print -delete 2>/dev/null | wc -l)
+session_removed=0
+session_note="session dir $HESTIA/data/sessions not present"
+if [ -d "$HESTIA/data/sessions" ]; then
+	session_removed=$(find "$HESTIA/data/sessions" -type f -mtime +10 -print -delete 2>/dev/null | wc -l)
+	session_note="sessions cleaned"
+fi
+step_s=$(( $(date +%s) - step_t0 ))
+record_step "orphan_cleanup" "ok" "$step_s" "removed $tmp_removed orphan file(s) from /tmp/hestia-* (>10d); removed $session_removed stale session file(s) ($session_note)"
+
+#---------- Step 7: security updates (ONLY with --security-updates) ----------
+step_t0=$(date +%s)
+if [ "$security_updates" != "yes" ]; then
+	record_step "security_updates" "skipped" 0 "not requested (pass --security-updates to enable)"
+elif ! command -v apt-get >/dev/null 2>&1; then
+	record_step "security_updates" "skipped" 0 "apt-get not available on this system"
+else
+	if ! apt-get update -qq >/dev/null 2>&1; then
+		step_s=$(( $(date +%s) - step_t0 ))
+		record_step "security_updates" "failed" "$step_s" "apt-get update failed"
+	else
+		# Simulated upgrade filtered to security-originating packages only —
+		# a blanket 'apt-get upgrade' is never run.
+		sec_pkgs=$(apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | awk '/^Inst/ && / security / {print $2}')
+		sec_count=$(printf '%s' "$sec_pkgs" | wc -w)
+		if [ "$sec_count" -eq 0 ]; then
+			step_s=$(( $(date +%s) - step_t0 ))
+			record_step "security_updates" "ok" "$step_s" "no pending security updates"
+		else
+			# shellcheck disable=SC2086 # $sec_pkgs is a word-split list of apt package names
+			apt_out=$(DEBIAN_FRONTEND=noninteractive apt-get -y install $sec_pkgs 2>&1)
+			apt_rc=$?
+			step_s=$(( $(date +%s) - step_t0 ))
+			sec_list=$(printf '%s' "$sec_pkgs" | tr '\n' ' ' | cut -c1-200)
+			if [ "$apt_rc" -eq 0 ]; then
+				record_step "security_updates" "ok" "$step_s" "installed $sec_count security update(s): $sec_list"
+			else
+				record_step "security_updates" "failed" "$step_s" "apt-get install exited with rc=$apt_rc for $sec_count package(s): $sec_list — $(printf '%s' "$apt_out" | tail -n 1)"
+			fi
+		fi
+	fi
+fi
+
+#---------- Step 8: disk snapshot after ----------
+disk_snapshot "$DISK_AFTER_FILE"
+record_step "disk_snapshot_after" "ok" 0 "captured df for / and /home (when separate)"
+
+finished_epoch=$(date +%s)
+finished=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+duration=$(( finished_epoch - started_epoch ))
+
+#----------------------------------------------------------#
+#                       Report                            #
+#----------------------------------------------------------#
+
+ok_count=$(awk -F'\t' '$2 == "ok"' "$RESULTS_FILE" | wc -l)
+failed_count=$(awk -F'\t' '$2 == "failed"' "$RESULTS_FILE" | wc -l)
+skipped_count=$(awk -F'\t' '$2 == "skipped"' "$RESULTS_FILE" | wc -l)
+
+report_json=$(python3 - "$RESULTS_FILE" "$DISK_BEFORE_FILE" "$DISK_AFTER_FILE" \
+	"$started" "$finished" "$duration" "$security_updates" <<'PYEOF'
+import json
+import sys
+
+results_path, disk_before_path, disk_after_path = sys.argv[1], sys.argv[2], sys.argv[3]
+started, finished, duration, security_updates = sys.argv[4], sys.argv[5], sys.argv[6], sys.argv[7]
+
+try:
+    duration = int(duration)
+except ValueError:
+    duration = 0
+
+steps = []
+try:
+    with open(results_path, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 4:
+                continue
+            try:
+                secs = int(parts[2].strip() or 0)
+            except ValueError:
+                secs = 0
+            steps.append({
+                "name": parts[0],
+                "status": parts[1],
+                "seconds": secs,
+                "detail": "\t".join(parts[3:]),
+            })
+except OSError:
+    pass
+
+def read_disk(path):
+    mounts = {}
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) >= 4:
+                    mounts[parts[0]] = {
+                        "size": parts[1],
+                        "used": parts[2],
+                        "use_pct": parts[3],
+                    }
+    except OSError:
+        pass
+    return mounts
+
+report = {
+    "started": started,
+    "finished": finished,
+    "duration_s": duration,
+    "security_updates": security_updates,
+    "steps": steps,
+    "disk_before": read_disk(disk_before_path),
+    "disk_after": read_disk(disk_after_path),
+}
+print(json.dumps(report, ensure_ascii=False, indent=2))
+PYEOF
+)
+
+if [ -z "$report_json" ]; then
+	echo "ERROR: unable to build maintenance report." >&2
+	exit 1
+fi
+
+report_tmp="$MAINT_DIR/.last-report.json.tmp"
+if ! printf '%s\n' "$report_json" > "$report_tmp" 2>/dev/null; then
+	echo "ERROR: unable to write $REPORT_FILE." >&2
+	exit 1
+fi
+mv -f "$report_tmp" "$REPORT_FILE"
+
+# One-line history entry, capped at HISTORY_MAX_LINES (drop oldest when over)
+hist_stamp=$(date '+%Y-%m-%dT%H:%M:%S%z')
+echo "$hist_stamp ok=$ok_count failed=$failed_count skipped=$skipped_count duration=${duration}s security_updates=$security_updates" >> "$HISTORY_FILE" 2>/dev/null
+hist_lines=$(wc -l < "$HISTORY_FILE" 2>/dev/null || echo 0)
+if [ "$hist_lines" -gt "$HISTORY_MAX_LINES" ]; then
+	hist_tmp=$(mktemp "$MAINT_DIR/.history.XXXXXX") && \
+		tail -n "$HISTORY_MAX_LINES" "$HISTORY_FILE" > "$hist_tmp" && mv -f "$hist_tmp" "$HISTORY_FILE"
+fi
+
+# Optional notification — absence or failure of the channel script must never error
+if [ -x "$HESTIA/bin/v-notify-sys-channel" ]; then
+	"$HESTIA/bin/v-notify-sys-channel" \
+		"System maintenance finished: ${ok_count} ok, ${failed_count} failed, ${skipped_count} skipped in ${duration}s" \
+		all "NexviaCP Maintenance" >/dev/null 2>&1 || true
+fi
+
+#----------------------------------------------------------#
+#                       Output                            #
+#----------------------------------------------------------#
+
+case "$format" in
+	json)
+		printf '%s\n' "$report_json"
+		;;
+	plain)
+		echo "Maintenance run: $started -> $finished (${duration}s)"
+		echo "Steps: ok=$ok_count failed=$failed_count skipped=$skipped_count"
+		echo ""
+		while IFS=$'\t' read -r s_name s_status s_seconds s_detail; do
+			[ -z "$s_name" ] && continue
+			printf '%-22s %-8s %3ss  %s\n' "$s_name" "$s_status" "$(printf '%s' "$s_seconds" | tr -d ' ')" "$s_detail"
+		done < "$RESULTS_FILE"
+		echo ""
+		echo "Disk before:"
+		awk -F'\t' '{printf "  %-8s %s used of %s (%s)\n", $1, $3, $2, $4}' "$DISK_BEFORE_FILE"
+		echo "Disk after:"
+		awk -F'\t' '{printf "  %-8s %s used of %s (%s)\n", $1, $3, $2, $4}' "$DISK_AFTER_FILE"
+		;;
+esac
+
+exit 0
