@@ -200,6 +200,16 @@
 								<?php } ?>
 							<?php } ?>
 
+							<!-- Log Search (all users; non-admin scope is limited to own domains) -->
+							<li class="top-bar-menu-item">
+								<a title="<?= function_exists('__tr') ? __tr("Log Search", "Log Arama") : _("Log Search") ?>" class="top-bar-menu-link <?php if ($TAB == "LOG_SEARCH") {
+									echo "active";
+								} ?>" href="/list/log-search/">
+									<i class="fas fa-magnifying-glass"></i>
+									<span class="top-bar-menu-link-label u-hide-desktop"><?= function_exists('__tr') ? __tr("Log Search", "Log Arama") : _("Log Search") ?></span>
+								</a>
+							</li>
+
 							<!-- Docker Manager (Portainer) — admin only -->
 							<?php if (($_SESSION["userContext"] ?? "") === "admin") { ?>
 							<li class="top-bar-menu-item">
@@ -224,6 +234,76 @@
 								} ?>" href="/list/anomalies/">
 									<i class="fas fa-satellite-dish icon-purple"></i>
 									<span class="top-bar-menu-link-label u-hide-desktop"><?= function_exists('__tr') ? __tr("Domain Anomaly Monitor", "Domain Anomali İzleme") : _("Domain Anomaly Monitor") ?></span>
+								</a>
+							</li>
+
+							<!-- Health Monitor & Certificates — admin only -->
+							<li class="top-bar-menu-item">
+								<a title="<?= function_exists('__tr') ? __tr("Health & Certificates", "Sağlık ve Sertifikalar") : _("Health & Certificates") ?>" class="top-bar-menu-link <?php if ($TAB == "HEALTH") {
+									echo "active";
+								} ?>" href="/list/health/">
+									<i class="fas fa-tower-broadcast icon-lightblue"></i>
+									<span class="top-bar-menu-link-label u-hide-desktop"><?= function_exists('__tr') ? __tr("Health & Certificates", "Sağlık ve Sertifikalar") : _("Health & Certificates") ?></span>
+								</a>
+							</li>
+
+							<!-- Notification Channels — admin only -->
+							<li class="top-bar-menu-item">
+								<a title="<?= function_exists('__tr') ? __tr("Notification Channels", "Bildirim Kanalları") : _("Notification Channels") ?>" class="top-bar-menu-link <?php if ($TAB == "NOTIFY") {
+									echo "active";
+								} ?>" href="/list/notify/">
+									<i class="fas fa-bell icon-orange"></i>
+									<span class="top-bar-menu-link-label u-hide-desktop"><?= function_exists('__tr') ? __tr("Notification Channels", "Bildirim Kanalları") : _("Notification Channels") ?></span>
+								</a>
+							</li>
+
+							<!-- Security & CVE Scan — admin only -->
+							<li class="top-bar-menu-item">
+								<a title="<?= function_exists('__tr') ? __tr("Security & CVE Scan", "Güvenlik ve CVE Taraması") : _("Security & CVE Scan") ?>" class="top-bar-menu-link <?php if ($TAB == "CVES") {
+									echo "active";
+								} ?>" href="/list/cves/">
+									<i class="fas fa-shield-halved icon-red"></i>
+									<span class="top-bar-menu-link-label u-hide-desktop"><?= function_exists('__tr') ? __tr("Security & CVE Scan", "Güvenlik ve CVE Taraması") : _("Security & CVE Scan") ?></span>
+								</a>
+							</li>
+
+							<!-- System Maintenance — admin only -->
+							<li class="top-bar-menu-item">
+								<a title="<?= function_exists('__tr') ? __tr("System Maintenance", "Sistem Bakımı") : _("System Maintenance") ?>" class="top-bar-menu-link <?php if ($TAB == "MAINTENANCE") {
+									echo "active";
+								} ?>" href="/list/maintenance/">
+									<i class="fas fa-screwdriver-wrench icon-maroon"></i>
+									<span class="top-bar-menu-link-label u-hide-desktop"><?= function_exists('__tr') ? __tr("System Maintenance", "Sistem Bakımı") : _("System Maintenance") ?></span>
+								</a>
+							</li>
+
+							<!-- Mail Queue — admin only -->
+							<li class="top-bar-menu-item">
+								<a title="<?= function_exists('__tr') ? __tr("Mail Queue", "Mail Kuyruğu") : _("Mail Queue") ?>" class="top-bar-menu-link <?php if ($TAB == "MAIL_QUEUE") {
+									echo "active";
+								} ?>" href="/list/mail_queue/">
+									<i class="fas fa-envelope icon-blue"></i>
+									<span class="top-bar-menu-link-label u-hide-desktop"><?= function_exists('__tr') ? __tr("Mail Queue", "Mail Kuyruğu") : _("Mail Queue") ?></span>
+								</a>
+							</li>
+
+							<!-- API Audit & Rate Limiting — admin only -->
+							<li class="top-bar-menu-item">
+								<a title="<?= function_exists('__tr') ? __tr("API Audit", "API Denetimi") : _("API Audit") ?>" class="top-bar-menu-link <?php if ($TAB == "API_AUDIT") {
+									echo "active";
+								} ?>" href="/list/api-audit/">
+									<i class="fas fa-key icon-purple"></i>
+									<span class="top-bar-menu-link-label u-hide-desktop"><?= function_exists('__tr') ? __tr("API Audit", "API Denetimi") : _("API Audit") ?></span>
+								</a>
+							</li>
+
+							<!-- Remote Servers — admin only -->
+							<li class="top-bar-menu-item">
+								<a title="<?= function_exists('__tr') ? __tr("Remote Servers", "Uzak Sunucular") : _("Remote Servers") ?>" class="top-bar-menu-link <?php if ($TAB == "SERVERS") {
+									echo "active";
+								} ?>" href="/list/servers/">
+									<i class="fas fa-server icon-teal"></i>
+									<span class="top-bar-menu-link-label u-hide-desktop"><?= function_exists('__tr') ? __tr("Remote Servers", "Uzak Sunucular") : _("Remote Servers") ?></span>
 								</a>
 							</li>
 							<?php } ?>
