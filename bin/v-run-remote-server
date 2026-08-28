@@ -1,0 +1,179 @@
+#!/bin/bash
+# info: run a shell command on a registered remote server over SSH (key-only)
+# options: NAME 'COMMAND'
+#
+# example: v-run-remote-server web1 'uptime'
+# example: v-run-remote-server db1 'df -h /'
+#
+# COMMAND restrictions (enforced locally before any connection is made):
+#   - must not contain newline characters (single command line only)
+#   - must not exceed 2000 characters
+# COMMAND is handed to ssh as one argument; quoting inside COMMAND is
+# interpreted by the REMOTE shell (intentional design). Remote output
+# (stdout+stderr) is capped at 100KB; anything beyond is truncated with
+# an explicit notice. Every call is logged as a single line to
+# $HESTIA/log/remote-servers.log:
+# ISO-date  user  server  command(<=500 chars)  exit-code
+
+# Use a stable locale so regex character ranges behave identically
+# regardless of the server language (e.g. tr_TR.UTF-8 collation).
+# Keep this before every include and any argument handling.
+export LC_ALL=C
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+arg2=$2
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+name="$arg1"
+rcmd="$arg2"
+SERVER_DIR="$HESTIA/data/remote-servers"
+LOG_FILE="$HESTIA/log/remote-servers.log"
+OUTPUT_CAP=102400 # 100KB
+
+# Validate a remote command (pure function, no side effects: safe to unit
+# test in isolation). Rejects newline-containing and >2000 character
+# commands (empty commands are rejected as well).
+# Returns 0 when valid; otherwise returns 1 and sets REJECT_REASON.
+validate_remote_command() {
+	local cmd="$1"
+	if [[ "$cmd" == *$'\n'* ]] || [[ "$cmd" == *$'\r'* ]]; then
+		REJECT_REASON="command contains newline characters"
+		return 1
+	fi
+	if [ "${#cmd}" -gt 2000 ]; then
+		REJECT_REASON="command is longer than 2000 characters"
+		return 1
+	fi
+	if [ -z "$cmd" ]; then
+		REJECT_REASON="command is empty"
+		return 1
+	fi
+	REJECT_REASON=""
+	return 0
+}
+
+# Fixed SSH invocation. "--" ends ssh option parsing BEFORE the
+# destination, so the destination string can never be mistaken for an ssh
+# option (e.g. -oProxyCommand=...). The remote command is still passed as
+# a single separate argument ("$@") so no local shell metacharacter
+# injection is possible; quoting of the remote command line is left to the
+# remote shell.
+ssh_exec() {
+	local rkey="$1" rport="$2" ruser="$3" rhost="$4"
+	shift 4
+	ssh -i "$rkey" -p "$rport" \
+		-o BatchMode=yes \
+		-o ConnectTimeout=8 \
+		-o StrictHostKeyChecking=accept-new \
+		-o LogLevel=ERROR \
+		-- "$ruser@$rhost" "$@"
+}
+
+# Append a single-line audit record: ISO date, acting user ($SUDO_USER or
+# root), server name, command (cut at 500 chars, tabs/newlines stripped)
+# and the exit code.
+log_remote_action() {
+	local server="$1" logged_cmd="$2" ecode="$3"
+	local log_dir
+	log_dir="$(dirname "$LOG_FILE")"
+	[ -d "$log_dir" ] || mkdir -p "$log_dir" 2>/dev/null
+	local actor="${SUDO_USER:-root}"
+	[ -n "$actor" ] || actor="root"
+	# Keep the actor a single clean field even if a caller exported a
+	# polluted SUDO_USER (tab-stripped like the command below)
+	actor=$(printf '%s' "$actor" | tr -d '\t\r\n')
+	local ts trimmed
+	ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+	trimmed="${logged_cmd:0:500}"
+	trimmed=$(printf '%s' "$trimmed" | tr -d '\t\r\n')
+	printf '%s\t%s\t%s\t%s\t%s\n' "$ts" "$actor" "$server" "$trimmed" "$ecode" >>"$LOG_FILE"
+}
+
+# Read a key='value' pair from a server conf without sourcing it
+get_conf_value() {
+	local file="$1"
+	local key="$2"
+	if [ -f "$file" ]; then
+		grep "^${key}=" "$file" | head -n1 | cut -d"'" -f2
+	fi
+}
+
+#----------------------------------------------------------#
+#                       Verifications                      #
+#----------------------------------------------------------#
+
+# Ensure root user
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: v-run-remote-server can be executed only by root user"
+	exit 10
+fi
+
+# Validate NAME (strict charset, rejects path traversal via crafted names)
+if [ -z "$name" ] || ! [[ "$name" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ "$name" == *..* ]]; then
+	echo "ERROR: Invalid server name. Use letters, digits, '-' and '_' only."
+	exit 1
+fi
+
+conf_file="$SERVER_DIR/$name.conf"
+if [ ! -f "$conf_file" ]; then
+	echo "ERROR: Remote server '$name' does not exist."
+	exit 1
+fi
+
+# Validate COMMAND before anything else happens (newline / length / empty)
+if ! validate_remote_command "$rcmd"; then
+	echo "ERROR: Command rejected: $REJECT_REASON."
+	exit 1
+fi
+
+host=$(get_conf_value "$conf_file" HOST)
+port=$(get_conf_value "$conf_file" PORT)
+ruser=$(get_conf_value "$conf_file" USER)
+key=$(get_conf_value "$conf_file" KEY)
+
+# The only place key existence is ever probed: a readability test (-r).
+# The key content is never read, printed or copied.
+if [ -z "$key" ] || [ ! -r "$key" ]; then
+	echo "ERROR: Cannot run on '$name': key '$key' is not readable (missing or wrong permissions)."
+	log_remote_action "$name" "$rcmd" 1
+	exit 1
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+tmp_out=$(mktemp) || {
+	echo "ERROR: Unable to create temp file."
+	exit 1
+}
+
+ssh_exec "$key" "$port" "$ruser" "$host" "$rcmd" >"$tmp_out" 2>&1
+rc=$?
+
+log_remote_action "$name" "$rcmd" "$rc"
+
+out_size=$(wc -c <"$tmp_out" | tr -d ' ')
+if [ "$out_size" -gt "$OUTPUT_CAP" ]; then
+	head -c "$OUTPUT_CAP" "$tmp_out"
+	printf '\n[... output truncated: %s bytes total, showing first %s bytes (100KB cap) ...]\n' "$out_size" "$OUTPUT_CAP"
+else
+	cat "$tmp_out"
+fi
+
+rm -f "$tmp_out"
+exit "$rc"

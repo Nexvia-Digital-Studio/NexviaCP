@@ -1,0 +1,173 @@
+#!/bin/bash
+# info: test SSH connectivity to a registered remote server
+# options: NAME
+#
+# example: v-check-remote-server web1
+#
+# Runs a harmless 'echo REMOTE_OK' over SSH using the fixed option set
+# (BatchMode=key-only, ConnectTimeout=8, StrictHostKeyChecking=accept-new)
+# and prints the result together with the elapsed time.
+# Every attempt is logged as a single line to $HESTIA/log/remote-servers.log:
+# ISO-date  user  server  command(<=500 chars)  exit-code
+
+# Use a stable locale so regex character ranges behave identically
+# regardless of the server language (e.g. tr_TR.UTF-8 collation).
+# Keep this before every include and any argument handling.
+export LC_ALL=C
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+name="$arg1"
+SERVER_DIR="$HESTIA/data/remote-servers"
+LOG_FILE="$HESTIA/log/remote-servers.log"
+
+# Fixed SSH invocation. "--" ends ssh option parsing BEFORE the
+# destination, so the destination string can never be mistaken for an ssh
+# option (e.g. -oProxyCommand=...). The remote command is still passed as
+# separate arguments ("$@") so no local shell metacharacter injection is
+# possible; quoting of the remote command line is left to the remote shell.
+ssh_exec() {
+	local rkey="$1" rport="$2" ruser="$3" rhost="$4"
+	shift 4
+	ssh -i "$rkey" -p "$rport" \
+		-o BatchMode=yes \
+		-o ConnectTimeout=8 \
+		-o StrictHostKeyChecking=accept-new \
+		-o LogLevel=ERROR \
+		-- "$ruser@$rhost" "$@"
+}
+
+# Append a single-line audit record: ISO date, acting user ($SUDO_USER or
+# root), server name, command (cut at 500 chars, tabs/newlines stripped)
+# and the exit code.
+log_remote_action() {
+	local server="$1" logged_cmd="$2" ecode="$3"
+	local log_dir
+	log_dir="$(dirname "$LOG_FILE")"
+	[ -d "$log_dir" ] || mkdir -p "$log_dir" 2>/dev/null
+	local actor="${SUDO_USER:-root}"
+	[ -n "$actor" ] || actor="root"
+	# Keep the actor a single clean field even if a caller exported a
+	# polluted SUDO_USER (tab-stripped like the command below)
+	actor=$(printf '%s' "$actor" | tr -d '\t\r\n')
+	local ts trimmed
+	ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+	trimmed="${logged_cmd:0:500}"
+	trimmed=$(printf '%s' "$trimmed" | tr -d '\t\r\n')
+	printf '%s\t%s\t%s\t%s\t%s\n' "$ts" "$actor" "$server" "$trimmed" "$ecode" >>"$LOG_FILE"
+}
+
+# Read a key='value' pair from a server conf without sourcing it
+get_conf_value() {
+	local file="$1"
+	local key="$2"
+	if [ -f "$file" ]; then
+		grep "^${key}=" "$file" | head -n1 | cut -d"'" -f2
+	fi
+}
+
+# Set (or add) a key='value' field in a server conf. Only ever called with
+# script-generated values (ISO timestamp / ok|fail), so the sed replacement
+# is safe.
+upsert_conf_field() {
+	local file="$1" key="$2" value="$3"
+	if grep -q "^${key}=" "$file" 2>/dev/null; then
+		sed -i "s|^${key}=.*|${key}='${value}'|" "$file"
+	else
+		printf "%s='%s'\n" "$key" "$value" >>"$file"
+	fi
+}
+
+#----------------------------------------------------------#
+#                       Verifications                      #
+#----------------------------------------------------------#
+
+# Ensure root user
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: v-check-remote-server can be executed only by root user"
+	exit 10
+fi
+
+# Validate NAME (strict charset, rejects path traversal via crafted names)
+if [ -z "$name" ] || ! [[ "$name" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ "$name" == *..* ]]; then
+	echo "ERROR: Invalid server name. Use letters, digits, '-' and '_' only."
+	exit 1
+fi
+
+conf_file="$SERVER_DIR/$name.conf"
+if [ ! -f "$conf_file" ]; then
+	echo "ERROR: Remote server '$name' does not exist."
+	exit 1
+fi
+
+host=$(get_conf_value "$conf_file" HOST)
+port=$(get_conf_value "$conf_file" PORT)
+ruser=$(get_conf_value "$conf_file" USER)
+key=$(get_conf_value "$conf_file" KEY)
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# The only place key existence is ever probed: a readability test (-r).
+# The key content is never read, printed or copied.
+if [ -z "$key" ] || [ ! -r "$key" ]; then
+	echo "ERROR: Connection to '$name' failed: key '$key' is not readable (missing or wrong permissions)."
+	upsert_conf_field "$conf_file" LAST_CHECK "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+	upsert_conf_field "$conf_file" LAST_CHECK_STATUS fail
+	chmod 600 "$conf_file"
+	log_remote_action "$name" "echo REMOTE_OK" 1
+	exit 1
+fi
+
+tmp_out=$(mktemp) || {
+	echo "ERROR: Unable to create temp file."
+	exit 1
+}
+
+start_ns=$(date +%s%N)
+ssh_exec "$key" "$port" "$ruser" "$host" echo REMOTE_OK >"$tmp_out" 2>&1
+rc=$?
+end_ns=$(date +%s%N)
+elapsed_ms=$(( (end_ns - start_ns) / 1000000 ))
+
+log_remote_action "$name" "echo REMOTE_OK" "$rc"
+
+# Persist the last check outcome so the panel can display it later
+if [ "$rc" -eq 0 ]; then
+	upsert_conf_field "$conf_file" LAST_CHECK "$(date -u +%Y-%m-%dT%H:%M:%SZ) ${elapsed_ms}ms"
+	upsert_conf_field "$conf_file" LAST_CHECK_STATUS ok
+else
+	upsert_conf_field "$conf_file" LAST_CHECK "$(date -u +%Y-%m-%dT%H:%M:%SZ) ${elapsed_ms}ms"
+	upsert_conf_field "$conf_file" LAST_CHECK_STATUS fail
+fi
+chmod 600 "$conf_file"
+
+if [ "$rc" -eq 0 ]; then
+	# Printable ASCII only: remote output must never be able to inject
+	# terminal escape sequences into the admin's terminal
+	remote_out=$(head -c 200 "$tmp_out" | tr -cd '\40-\176')
+	echo "[+] OK: '$name' ($ruser@$host:$port) answered in ${elapsed_ms} ms (received: ${remote_out:-<empty>})."
+	rm -f "$tmp_out"
+	exit 0
+fi
+
+echo "ERROR: Connection to '$name' ($ruser@$host:$port) failed (exit $rc, ${elapsed_ms} ms):"
+	head -c 2000 "$tmp_out" | tr -d '\r'
+rm -f "$tmp_out"
+exit "$rc"

@@ -1,0 +1,153 @@
+#!/bin/bash
+# info: list registered remote servers
+# options: [FORMAT]
+#
+# example: v-list-remote-servers json
+# example: v-list-remote-servers shell
+#
+# Shows name, host, port, user, key presence, note and added date for each
+# registered server. The key PATH is displayed (it is not a secret), the
+# key CONTENT is never read or printed; KEY_EXISTS is simply the result of
+# a '[ -r key ]' readability test performed by this script.
+
+# Use a stable locale so regex character ranges behave identically
+# regardless of the server language (e.g. tr_TR.UTF-8 collation).
+# Keep this before every include and any argument handling.
+export LC_ALL=C
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+format="${arg1:-shell}"
+
+SERVER_DIR="$HESTIA/data/remote-servers"
+
+if ! [[ "$format" =~ ^(json|shell)$ ]]; then
+	echo "ERROR: Invalid format. Use json or shell."
+	exit 1
+fi
+
+# Read a key='value' pair from a server conf without sourcing it
+get_conf_value() {
+	local file="$1"
+	local key="$2"
+	if [ -f "$file" ]; then
+		grep "^${key}=" "$file" | head -n1 | cut -d"'" -f2
+	fi
+}
+
+# JSON-safe value (strip control characters; all stored values are
+# strictly charset-validated/sanitized at add time, this is a second guard)
+json_escape() {
+	local s="$1"
+	s=$(printf '%s' "$s" | tr -d '\000-\037\177' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+	printf '%s' "$s"
+}
+
+# JSON list function
+json_list() {
+	echo "{"
+	local i=0
+	local total=0
+	local conf
+	for conf in "$SERVER_DIR"/*.conf; do
+		[ -f "$conf" ] && total=$((total + 1))
+	done
+	for conf in "$SERVER_DIR"/*.conf; do
+		[ -f "$conf" ] || continue
+		local name chost cport cuser ckey ckey_exists cnote cdate ctime clast_check clast_status
+		name=$(basename "$conf" .conf)
+		chost=$(get_conf_value "$conf" HOST)
+		cport=$(get_conf_value "$conf" PORT)
+		cuser=$(get_conf_value "$conf" USER)
+		ckey=$(get_conf_value "$conf" KEY)
+		if [ -r "$ckey" ]; then
+			ckey_exists="yes"
+		else
+			ckey_exists="no"
+		fi
+		cnote=$(get_conf_value "$conf" NOTE)
+		cdate=$(get_conf_value "$conf" DATE)
+		ctime=$(get_conf_value "$conf" TIME)
+		clast_check=$(get_conf_value "$conf" LAST_CHECK)
+		clast_status=$(get_conf_value "$conf" LAST_CHECK_STATUS)
+		echo "    \"$(json_escape "$name")\": {"
+		echo "        \"HOST\": \"$(json_escape "$chost")\","
+		echo "        \"PORT\": \"$(json_escape "$cport")\","
+		echo "        \"USER\": \"$(json_escape "$cuser")\","
+		echo "        \"KEY\": \"$(json_escape "$ckey")\","
+		echo "        \"KEY_EXISTS\": \"$(json_escape "$ckey_exists")\","
+		echo "        \"NOTE\": \"$(json_escape "$cnote")\","
+		echo "        \"TIME\": \"$(json_escape "$ctime")\","
+		echo "        \"DATE\": \"$(json_escape "$cdate")\","
+		echo "        \"LAST_CHECK\": \"$(json_escape "$clast_check")\","
+		echo "        \"LAST_CHECK_STATUS\": \"$(json_escape "$clast_status")\""
+		echo -n "    }"
+		i=$((i + 1))
+		if [ "$i" -lt "$total" ]; then
+			echo ","
+		else
+			echo
+		fi
+	done
+	echo "}"
+}
+
+# SHELL list function
+shell_list() {
+	local conf
+	for conf in "$SERVER_DIR"/*.conf; do
+		[ -f "$conf" ] || continue
+		local name chost cport cuser ckey ckey_exists cnote cdate clast_check clast_status
+		name=$(basename "$conf" .conf)
+		chost=$(get_conf_value "$conf" HOST)
+		cport=$(get_conf_value "$conf" PORT)
+		cuser=$(get_conf_value "$conf" USER)
+		ckey=$(get_conf_value "$conf" KEY)
+		if [ -r "$ckey" ]; then
+			ckey_exists="yes"
+		else
+			ckey_exists="no"
+		fi
+		cnote=$(get_conf_value "$conf" NOTE)
+		cdate=$(get_conf_value "$conf" DATE)
+		clast_check=$(get_conf_value "$conf" LAST_CHECK)
+		clast_status=$(get_conf_value "$conf" LAST_CHECK_STATUS)
+		echo "----------"
+		echo "NAME:    $name"
+		echo "HOST:    $chost"
+		echo "PORT:    $cport"
+		echo "USER:    $cuser"
+		echo "KEY:     $ckey"
+		echo "KEY_EXISTS: $ckey_exists"
+		echo "NOTE:    $cnote"
+		echo "DATE:    $cdate"
+		echo "LAST_CHECK: $clast_check"
+		echo "LAST_CHECK_STATUS: $clast_status"
+	done
+}
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+case "$format" in
+	json) json_list ;;
+	shell) shell_list ;;
+esac
+
+exit 0

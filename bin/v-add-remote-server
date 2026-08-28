@@ -1,0 +1,201 @@
+#!/bin/bash
+# info: add or update a remote server registry entry (SSH, key-only)
+# options: NAME HOST [PORT] [USER] [KEY] [NOTE]
+#
+# example: v-add-remote-server web1 203.0.113.10
+# example: v-add-remote-server web1 203.0.113.10 22 root /root/.ssh/id_ed25519 "primary web node"
+# example: v-add-remote-server db1 db1.example.com 2222 deployer /home/deployer/.ssh/id_ed25519
+#
+# NAME:  letters, digits, '-' and '_' only
+# HOST:  hostname or IPv4/IPv6 address (no path characters)
+# PORT:  1-65535 (default: 22)
+# USER:  remote ssh user (default: root)
+# KEY:   private key path, only under /root/.ssh/ or /home/*/
+#        (default: /root/.ssh/id_ed25519); existence is only ever tested
+#        with [ -r ], the key content is never read, printed or copied
+# NOTE:  free-form remark (sanitized, max 256 chars)
+#
+# Config is stored as $HESTIA/data/remote-servers/NAME.conf (chmod 600,
+# directory chmod 700). Existing entries with the same NAME are updated
+# (upsert). No connection is made by this script.
+
+# Use a stable locale so regex character ranges behave identically
+# regardless of the server language (e.g. tr_TR.UTF-8 collation).
+# Keep this before every include and any argument handling.
+export LC_ALL=C
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+arg2=$2
+arg3=$3
+arg4=$4
+arg5=$5
+arg6=$6
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+name="$arg1"
+host="$arg2"
+port="${arg3:-22}"
+ruser="${arg4:-root}"
+key="${arg5:-/root/.ssh/id_ed25519}"
+note="$arg6"
+
+SERVER_DIR="$HESTIA/data/remote-servers"
+
+# Validate HOST: hostname, IPv4 (strict octets) or IPv6 (reasonable check).
+# Anything path-like ('/', '..') or containing whitespace/quotes is rejected.
+is_valid_host() {
+	local h="$1"
+	[ -n "$h" ] || return 1
+	[ "${#h}" -le 253 ] || return 1
+	case "$h" in
+		*/* | *..* | *" "* | *'$'* | *'"'* | *"'"*) return 1 ;;
+	esac
+	# IPv4: four decimal octets, each 0-255
+	if [[ "$h" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+		local octet
+		for octet in ${h//./ }; do
+			[ "$octet" -le 255 ] || return 1
+		done
+		return 0
+	fi
+	# IPv6: hex digits and colons only, at least two colons, '::' at most once,
+	# every explicit group at most 4 hex digits
+	if [[ "$h" =~ ^[0-9A-Fa-f:]+$ ]] && [[ "$h" == *:*:* ]]; then
+		local collapsed="${h#*::}"
+		[[ "$collapsed" == *::* ]] && return 1
+		local group
+		local IFS=':'
+		for group in ${h//::/:}; do
+			[ "${#group}" -le 4 ] || return 1
+		done
+		unset IFS
+		return 0
+	fi
+	# Hostname: labels of letters/digits/hyphens, no leading/trailing hyphen
+	[[ "$h" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$ ]]
+}
+
+# Validate KEY: must live under /root/.ssh/ or /home/<user>/ (this covers
+# /home/<user>/.ssh/...). No '..' anywhere, no whitespace, no quotes.
+# Existence is NOT checked here (only 'v-check-remote-server' probes with -r).
+is_valid_key_path() {
+	local k="$1"
+	[ -n "$k" ] || return 1
+	[ "${#k}" -le 512 ] || return 1
+	case "$k" in
+		*..* | *" "* | *'$'* | *'"'* | *"'"*) return 1 ;;
+	esac
+	if [[ "$k" == /root/.ssh/* ]]; then
+		[ -n "${k#/root/.ssh/}" ] || return 1
+		return 0
+	fi
+	if [[ "$k" == /home/* ]]; then
+		local rest="${k#/home/}"
+		local userpart="${rest%%/*}"
+		[ -n "$userpart" ] || return 1
+		[[ "$userpart" =~ ^[a-zA-Z0-9._-]+$ ]] || return 1
+		# there must be at least one path element below /home/<user>/
+		[ "$rest" != "$userpart" ] || return 1
+		return 0
+	fi
+	return 1
+}
+
+#----------------------------------------------------------#
+#                       Verifications                      #
+#----------------------------------------------------------#
+
+# Ensure root user
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: v-add-remote-server can be executed only by root user"
+	exit 10
+fi
+
+# Validate NAME (strict charset, rejects path traversal via crafted names)
+if [ -z "$name" ] || ! [[ "$name" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ "$name" == *..* ]]; then
+	echo "ERROR: Invalid server name. Use letters, digits, '-' and '_' only."
+	exit 1
+fi
+
+# Validate HOST
+if ! is_valid_host "$host"; then
+	echo "ERROR: Invalid HOST. Use a hostname or an IPv4/IPv6 address (no path characters)."
+	exit 1
+fi
+
+# Validate PORT (integer 1-65535)
+if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+	echo "ERROR: Invalid PORT. Use an integer between 1 and 65535."
+	exit 1
+fi
+
+# Validate USER (root or any system user; must not start with '-' so the
+# 'user@host' token can never be mistaken for an ssh option)
+if [ -z "$ruser" ] || ! [[ "$ruser" =~ ^[a-zA-Z0-9._-]+$ ]] || [[ "$ruser" == -* ]] || [ "${#ruser}" -gt 64 ]; then
+	echo "ERROR: Invalid USER. Use letters, digits, '.', '_' and '-' (may not start with '-')."
+	exit 1
+fi
+
+# Validate KEY path prefix (existence is only probed by v-check-remote-server)
+if ! is_valid_key_path "$key"; then
+	echo "ERROR: Invalid KEY path. Allowed only under /root/.ssh/ or /home/<user>/."
+	exit 1
+fi
+
+# Sanitize NOTE: strip control characters and single quotes so the
+# key='value' config format stays intact; cap at 256 characters.
+note=$(printf '%s' "$note" | tr -d '\000-\037\177' | tr -d "'")
+note="${note:0:256}"
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Create server data directory with restrictive permissions
+if [ ! -d "$SERVER_DIR" ]; then
+	mkdir -p "$SERVER_DIR" || {
+		echo "ERROR: Unable to create $SERVER_DIR"
+		exit 1
+	}
+	chmod 700 "$SERVER_DIR"
+fi
+
+conf_file="$SERVER_DIR/$name.conf"
+existed="no"
+[ -f "$conf_file" ] && existed="yes"
+
+# Upsert server config (values are sanitized above; no single quotes
+# remain). umask 077 so a freshly created conf is never briefly
+# world-readable between creation and the chmod below.
+umask 077
+cat > "$conf_file" <<EOF
+HOST='$host'
+PORT='$port'
+USER='$ruser'
+KEY='$key'
+NOTE='$note'
+TIME='$(date +%T)'
+DATE='$(date +%F)'
+EOF
+chmod 600 "$conf_file"
+
+if [ -x "$HESTIA/bin/v-log-action" ]; then
+	$HESTIA/bin/v-log-action "system" "Info" "System" "Remote server '$name' ($host) ${existed}updated."
+fi
+
+echo "[+] Remote server '$name' ($ruser@$host:$port) saved."
+exit 0
