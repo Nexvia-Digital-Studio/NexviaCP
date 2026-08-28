@@ -1,0 +1,66 @@
+#!/bin/bash
+# info: delete a notification channel
+# options: NAME
+#
+# example: v-delete-sys-notify-channel ops-telegram
+#
+# Removes the channel config file $HESTIA/data/notify-channels/NAME.conf.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+name="$arg1"
+NOTIFY_DIR="$HESTIA/data/notify-channels"
+
+# Use a stable locale so regex character ranges behave identically
+# regardless of the server language (e.g. tr_TR.UTF-8 collation)
+export LC_ALL=C
+
+#----------------------------------------------------------#
+#                       Verifications                      #
+#----------------------------------------------------------#
+
+# Ensure root user
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: v-delete-sys-notify-channel can be executed only by root user"
+	exit 10
+fi
+
+# Validate NAME (strict charset, rejects path traversal via crafted names)
+if [ -z "$name" ] || ! [[ "$name" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ "$name" == *..* ]]; then
+	echo "ERROR: Invalid channel name. Use letters, digits, '-' and '_' only."
+	exit 1
+fi
+
+conf_file="$NOTIFY_DIR/$name.conf"
+if [ ! -f "$conf_file" ]; then
+	echo "ERROR: Notification channel '$name' does not exist."
+	exit 1
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+rm -f "$conf_file"
+
+if [ -x "$HESTIA/bin/v-log-action" ]; then
+	$HESTIA/bin/v-log-action "system" "Info" "System" "Notification channel '$name' deleted."
+fi
+
+echo "[+] Notification channel '$name' deleted."
+exit 0

@@ -1,0 +1,219 @@
+#!/bin/bash
+# info: send an alert message to configured notification channels
+# options: 'MESSAGE' [CHANNEL|all] [TITLE]
+#
+# example: v-notify-sys-channel "Disk usage critical" all "NexviaCP Alert"
+# example: v-notify-sys-channel "NexviaCP test notification" ops-telegram
+#
+# Delivers MESSAGE to channels created with v-set-sys-notify-channel:
+#   telegram -> api.telegram.org sendMessage (chat_id + text)
+#   discord  -> webhook POST {"content": ...} (truncated to 2000 chars)
+#   slack    -> webhook POST {"text": ...}
+#   webhook  -> POST {"title","message","host","date"}
+# MESSAGE may be multi-line and is truncated to 3500 characters.
+# Each attempt is capped at 10 seconds and logged to $HESTIA/log/notify.log
+# as one line: date, channel, ok/fail, title. Per-channel failures are
+# silent (log only). Exits 0 if at least one channel succeeded; exits 0
+# quietly when no channels are configured.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+arg2=$2
+arg3=$3
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+message="$arg1"
+channel="${arg2:-all}"
+title="${arg3:-NexviaCP}"
+
+NOTIFY_DIR="$HESTIA/data/notify-channels"
+LOG_FILE="$HESTIA/log/notify.log"
+
+# Use a stable locale so regex character ranges behave identically
+# regardless of the server language (e.g. tr_TR.UTF-8 collation)
+export LC_ALL=C
+
+#----------------------------------------------------------#
+#                       Verifications                      #
+#----------------------------------------------------------#
+
+# Ensure root user
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: v-notify-sys-channel can be executed only by root user"
+	exit 10
+fi
+
+# Validate MESSAGE
+if [ -z "$message" ]; then
+	echo "ERROR: MESSAGE is required."
+	exit 1
+fi
+# Truncate to 3500 characters
+if [ "${#message}" -gt 3500 ]; then
+	message="${message:0:3500}"
+fi
+
+# Validate CHANNEL selector
+if [ "$channel" != "all" ]; then
+	if ! [[ "$channel" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ "$channel" == *..* ]]; then
+		echo "ERROR: Invalid channel name '$channel'."
+		exit 1
+	fi
+fi
+
+# Sanitize TITLE: single line, no control chars, max 120 chars
+title=$(printf '%s' "$title" | tr -d '\000-\037\177' | head -c 120)
+[ -z "$title" ] && title="NexviaCP"
+
+#----------------------------------------------------------#
+#                       Functions                          #
+#----------------------------------------------------------#
+
+# Read a key='value' pair from a channel conf without sourcing it
+get_conf_value() {
+	local file="$1"
+	local key="$2"
+	if [ -f "$file" ]; then
+		grep "^${key}=" "$file" | head -n1 | cut -d"'" -f2
+	fi
+}
+
+# Minimal JSON string escaper (removes unsafe control chars but keeps
+# newline/tab, then escapes backslash, double quote, newline and tab)
+json_escape() {
+	local s="$1"
+	s=$(printf '%s' "$s" | tr -d '\000-\010\013-\037\177')
+	s="${s//\\/\\\\}"
+	s="${s//\"/\\\"}"
+	s="${s//$'\n'/\\n}"
+	s="${s//$'\t'/\\t}"
+	printf '%s' "$s"
+}
+
+# POST helper: prints the HTTP status code (000 on transport failure).
+# curl runs silently; secrets in URLs are never printed.
+http_post() {
+	local url="$1"
+	shift
+	local code
+	code=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' "$@" "$url" 2>/dev/null)
+	printf '%s' "${code:-000}"
+}
+
+# Dispatch to one channel; returns 0 on success
+send_to_channel() {
+	local conf="$1"
+	local ctype ctarget
+	ctype=$(get_conf_value "$conf" TYPE)
+	ctarget=$(get_conf_value "$conf" TARGET)
+
+	local state
+	state=$(get_conf_value "$conf" STATE)
+	[ "$state" = "disabled" ] && return 1
+
+	local code
+	case "$ctype" in
+		telegram)
+			local token="${ctarget%@*}"
+			local chat="${ctarget#*@}"
+			code=$(http_post "https://api.telegram.org/bot${token}/sendMessage" \
+				--data-urlencode "chat_id=${chat}" \
+				--data-urlencode "text=${message}")
+			;;
+		discord)
+			local payload
+			payload='{"content":"'$(json_escape "${message:0:2000}")'"}'
+			code=$(http_post "$ctarget" \
+				-H 'Content-Type: application/json' \
+				--data "$payload")
+			;;
+		slack)
+			local payload
+			payload='{"text":"'$(json_escape "$message")'"}'
+			code=$(http_post "$ctarget" \
+				-H 'Content-Type: application/json' \
+				--data "$payload")
+			;;
+		webhook)
+			local payload host iso_date
+			host=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "unknown")
+			iso_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+			payload='{"title":"'$(json_escape "$title")'","message":"'$(json_escape "$message")'","host":"'$(json_escape "$host")'","date":"'$(json_escape "$iso_date")'"}'
+			code=$(http_post "$ctarget" \
+				-H 'Content-Type: application/json' \
+				--data "$payload")
+			;;
+		*)
+			return 1
+			;;
+	esac
+
+	if [[ "$code" =~ ^2 ]]; then
+		return 0
+	fi
+	return 1
+}
+
+# Append one result line to the notify log
+log_result() {
+	local status="$1"
+	local ch_name="$2"
+	mkdir -p "$HESTIA/log" 2>/dev/null || true
+	echo "$(date '+%Y-%m-%d %H:%M:%S') $status $ch_name $title" >> "$LOG_FILE" 2>/dev/null || true
+	chmod 600 "$LOG_FILE" 2>/dev/null || true
+}
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Build the list of channel conf files to use
+declare -a conf_files=()
+if [ "$channel" = "all" ]; then
+	for conf in "$NOTIFY_DIR"/*.conf; do
+		[ -f "$conf" ] && conf_files+=("$conf")
+	done
+else
+	conf_file="$NOTIFY_DIR/$channel.conf"
+	if [ ! -f "$conf_file" ]; then
+		echo "ERROR: Notification channel '$channel' does not exist."
+		exit 1
+	fi
+	conf_files+=("$conf_file")
+fi
+
+# No channels configured: exit quietly with success
+total=${#conf_files[@]}
+if [ "$total" -eq 0 ]; then
+	exit 0
+fi
+
+ok_count=0
+for conf in "${conf_files[@]}"; do
+	ch_name=$(basename "$conf" .conf)
+	if send_to_channel "$conf"; then
+		ok_count=$((ok_count + 1))
+		log_result "ok" "$ch_name"
+	else
+		log_result "fail" "$ch_name"
+	fi
+done
+
+echo "[i] notify: $ok_count/$total channel(s) accepted the message."
+if [ "$ok_count" -gt 0 ]; then
+	exit 0
+fi
+exit 1

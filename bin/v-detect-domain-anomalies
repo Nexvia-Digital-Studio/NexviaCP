@@ -313,6 +313,13 @@ process_domain() {
 	if [ -n "$anomaly_output" ]; then
 		echo "$anomaly_output"
 		send_anomaly_email "$domain" "$anomaly_output"
+
+		# Mirror the alert to configured notify channels (Telegram/Discord/Slack/webhook)
+		if [ -x "$HESTIA/bin/v-notify-sys-channel" ] && ls "$HESTIA/data/notify-channels/"*.conf >/dev/null 2>&1; then
+			notify_msg="Anomaly detected on $domain ($(hostname -f 2>/dev/null || hostname))
+$(printf '%s' "$anomaly_output" | sed 's/ANOMALY|//g' | sed 's/|/ | /g' | head -5)"
+			$HESTIA/bin/v-notify-sys-channel "$notify_msg" "all" "Anomaly: $domain" >/dev/null 2>&1 || true
+		fi
 	fi
 }
 

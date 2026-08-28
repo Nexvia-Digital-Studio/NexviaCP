@@ -168,6 +168,16 @@ log_healing_event() {
 		$BIN/v-send-sys-notification "$email_subject" "$email_body" "$level" "" "healing" "$extra_json" >/dev/null 2>&1 || true
 	fi
 
+	# Mirror the alert to configured notify channels (Telegram/Discord/Slack/webhook)
+	if [ -x "$HESTIA/bin/v-notify-sys-channel" ] && ls "$HESTIA/data/notify-channels/"*.conf >/dev/null 2>&1; then
+		notify_msg="Self-Healing event on $(hostname -f 2>/dev/null || hostname)
+Service: $service ($event_type)
+Root cause: $diagnosis
+Action: $action_taken
+Status: $status"
+		$HESTIA/bin/v-notify-sys-channel "$notify_msg" "all" "AI Ops $level: $service" >/dev/null 2>&1 || true
+	fi
+
 	if [ -x "$BIN/v-log-action" ]; then
 		$BIN/v-log-action "system" "$level" "System" "AI Self-Healing triggered for $service: $diagnosis -> $action_taken ($status)"
 	fi

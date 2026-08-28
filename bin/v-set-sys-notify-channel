@@ -1,0 +1,135 @@
+#!/bin/bash
+# info: add or update a notification channel (telegram/discord/slack/webhook)
+# options: NAME TYPE TARGET [EVENTS]
+#
+# example: v-set-sys-notify-channel ops-telegram telegram "123456789:AAH4g9...x@987654321"
+# example: v-set-sys-notify-channel ops-discord discord "https://discord.com/api/webhooks/1234/abcd"
+# example: v-set-sys-notify-channel ops-slack slack "https://hooks.slack.com/services/T000/B000/XXXX"
+# example: v-set-sys-notify-channel ops-hook webhook "https://example.com/hook" "healing,anomaly"
+#
+# TYPE: telegram | discord | slack | webhook
+# TARGET: telegram => "bot_token@chat_id"; others => https:// webhook URL
+# EVENTS: comma-separated event tags (default: all)
+# Channel config is stored under $HESTIA/data/notify-channels/NAME.conf (chmod 600).
+# Existing channels with the same NAME are overwritten (upsert).
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+arg2=$2
+arg3=$3
+arg4=$4
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+name="$arg1"
+type="$arg2"
+target="$arg3"
+events="${arg4:-all}"
+
+NOTIFY_DIR="$HESTIA/data/notify-channels"
+
+# Use a stable locale so regex character ranges behave identically
+# regardless of the server language (e.g. tr_TR.UTF-8 collation)
+export LC_ALL=C
+
+#----------------------------------------------------------#
+#                       Verifications                      #
+#----------------------------------------------------------#
+
+# Ensure root user
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: v-set-sys-notify-channel can be executed only by root user"
+	exit 10
+fi
+
+# Validate NAME (strict charset, rejects path traversal via crafted names)
+if [ -z "$name" ] || ! [[ "$name" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ "$name" == *..* ]]; then
+	echo "ERROR: Invalid channel name. Use letters, digits, '-' and '_' only."
+	exit 1
+fi
+
+# Validate TYPE against whitelist
+case "$type" in
+	telegram|discord|slack|webhook) ;;
+	*)
+		echo "ERROR: Invalid TYPE '$type'. Allowed: telegram, discord, slack, webhook."
+		exit 1
+		;;
+esac
+
+# Validate TARGET per type
+if [ "$type" = "telegram" ]; then
+	# Format: bot_token@chat_id (chat_id may be negative or an @channel name)
+	token_part="${target%@*}"
+	chat_part="${target#*@}"
+	if [ -z "$target" ] || [ "$token_part" = "$target" ] \
+		|| ! [[ "$token_part" =~ ^[0-9A-Za-z:_-]+$ ]]; then
+		echo "ERROR: Invalid telegram TARGET. Expected format: bot_token@chat_id"
+		exit 1
+	fi
+	if ! [[ "$chat_part" =~ ^-?[0-9]+$ ]] && ! [[ "$chat_part" =~ ^@[A-Za-z0-9_]+$ ]]; then
+		echo "ERROR: Invalid telegram chat_id in TARGET. Use numeric id or @channelname."
+		exit 1
+	fi
+else
+	# Webhook providers: strict https:// URL, no whitespace/quotes/backslash
+	url_re='^https://[a-zA-Z0-9:/%._~?&=+,#-]+$'
+	if ! [[ "$target" =~ $url_re ]] || [[ "$target" == *..* ]] \
+		|| [ "${#target}" -gt 2048 ]; then
+		echo "ERROR: Invalid TARGET. Expected a https:// webhook URL."
+		exit 1
+	fi
+fi
+
+# Validate EVENTS (comma-separated tag list)
+if ! [[ "$events" =~ ^[a-zA-Z0-9,_-]+$ ]] || [[ "$events" == *..* ]]; then
+	echo "ERROR: Invalid EVENTS. Use comma-separated tags (letters, digits, '-', '_')."
+	exit 1
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Create channel data directory with restrictive permissions
+if [ ! -d "$NOTIFY_DIR" ]; then
+	mkdir -p "$NOTIFY_DIR" || {
+		echo "ERROR: Unable to create $NOTIFY_DIR"
+		exit 1
+	}
+	chmod 700 "$NOTIFY_DIR"
+fi
+
+conf_file="$NOTIFY_DIR/$name.conf"
+existed="no"
+[ -f "$conf_file" ] && existed="yes"
+
+# Upsert channel config (values contain no single quotes by validation above)
+cat > "$conf_file" <<EOF
+TYPE='$type'
+TARGET='$target'
+EVENTS='$events'
+STATE='enabled'
+TIME='$(date +%T)'
+DATE='$(date +%F)'
+EOF
+chmod 600 "$conf_file"
+
+if [ -x "$HESTIA/bin/v-log-action" ]; then
+	$HESTIA/bin/v-log-action "system" "Info" "System" "Notification channel '$name' ($type) ${existed}updated."
+fi
+
+echo "[+] Notification channel '$name' ($type) saved. Events: $events"
+exit 0

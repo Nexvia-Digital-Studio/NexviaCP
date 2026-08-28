@@ -1,0 +1,172 @@
+#!/bin/bash
+# info: list configured notification channels
+# options: [FORMAT]
+#
+# example: v-list-sys-notify-channels json
+# example: v-list-sys-notify-channels shell
+# example: v-list-sys-notify-channels plain
+#
+# Shows name, type, events and added date for each channel.
+# Targets (bot tokens / webhook URLs) are always masked: only the
+# first 4 and last 4 characters of each secret part are shown.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+format="${arg1:-shell}"
+
+# Use a stable locale so regex character ranges behave identically
+# regardless of the server language (e.g. tr_TR.UTF-8 collation)
+export LC_ALL=C
+
+if ! [[ "$format" =~ ^(json|shell|plain)$ ]]; then
+	echo "ERROR: Invalid format. Use json, shell or plain."
+	exit 1
+fi
+
+NOTIFY_DIR="$HESTIA/data/notify-channels"
+
+# Read a key='value' pair from a channel conf without sourcing it
+get_conf_value() {
+	local file="$1"
+	local key="$2"
+	if [ -f "$file" ]; then
+		grep "^${key}=" "$file" | head -n1 | cut -d"'" -f2
+	fi
+}
+
+# Mask a secret: keep first 4 + last 4 chars, hide the middle
+mask_secret() {
+	local s="$1"
+	if [ "${#s}" -le 12 ]; then
+		if [ -z "$s" ]; then
+			printf ''
+		else
+			printf '%s****' "${s:0:4}"
+		fi
+	else
+		printf '%s****%s' "${s:0:4}" "${s: -4}"
+	fi
+}
+
+# Mask a full TARGET per type (never print the whole secret)
+mask_target() {
+	local t="$1"
+	local ttype="$2"
+	if [ "$ttype" = "telegram" ]; then
+		local token="${t%@*}"
+		local chat="${t#*@}"
+		printf '%s@%s' "$(mask_secret "$token")" "$chat"
+	else
+		mask_secret "$t"
+	fi
+}
+
+# JSON-safe value (strip quotes/backslashes; all stored values are
+# strictly charset-validated at set time, this is a second guard)
+json_escape() {
+	local s="$1"
+	s=$(printf '%s' "$s" | tr -d '\000-\037\177' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+	printf '%s' "$s"
+}
+
+# JSON list function
+json_list() {
+	echo "{"
+	local i=0
+	local total=0
+	local conf
+	for conf in "$NOTIFY_DIR"/*.conf; do
+		[ -f "$conf" ] && total=$((total + 1))
+	done
+	for conf in "$NOTIFY_DIR"/*.conf; do
+		[ -f "$conf" ] || continue
+		local name
+		name=$(basename "$conf" .conf)
+		local ctype cevents cstate cdate ctime ctarget
+		ctype=$(get_conf_value "$conf" TYPE)
+		cevents=$(get_conf_value "$conf" EVENTS)
+		cstate=$(get_conf_value "$conf" STATE)
+		cdate=$(get_conf_value "$conf" DATE)
+		ctime=$(get_conf_value "$conf" TIME)
+		ctarget=$(mask_target "$(get_conf_value "$conf" TARGET)" "$ctype")
+		echo "    \"$(json_escape "$name")\": {"
+		echo "        \"TYPE\": \"$(json_escape "$ctype")\","
+		echo "        \"TARGET\": \"$(json_escape "$ctarget")\","
+		echo "        \"EVENTS\": \"$(json_escape "$cevents")\","
+		echo "        \"STATE\": \"$(json_escape "$cstate")\","
+		echo "        \"TIME\": \"$(json_escape "$ctime")\","
+		echo "        \"DATE\": \"$(json_escape "$cdate")\""
+		echo -n "    }"
+		i=$((i + 1))
+		if [ "$i" -lt "$total" ]; then
+			echo ","
+		else
+			echo
+		fi
+	done
+	echo "}"
+}
+
+# SHELL list function
+shell_list() {
+	local conf
+	for conf in "$NOTIFY_DIR"/*.conf; do
+		[ -f "$conf" ] || continue
+		local name ctype cevents cstate cdate ctarget
+		name=$(basename "$conf" .conf)
+		ctype=$(get_conf_value "$conf" TYPE)
+		cevents=$(get_conf_value "$conf" EVENTS)
+		cstate=$(get_conf_value "$conf" STATE)
+		cdate=$(get_conf_value "$conf" DATE)
+		ctarget=$(mask_target "$(get_conf_value "$conf" TARGET)" "$ctype")
+		echo "----------"
+		echo "NAME:   $name"
+		echo "TYPE:   $ctype"
+		echo "TARGET: $ctarget"
+		echo "EVENTS: $cevents"
+		echo "STATE:  $cstate"
+		echo "DATE:   $cdate"
+	done
+}
+
+# PLAIN list function
+plain_list() {
+	local conf
+	for conf in "$NOTIFY_DIR"/*.conf; do
+		[ -f "$conf" ] || continue
+		local name ctype cevents cdate ctarget
+		name=$(basename "$conf" .conf)
+		ctype=$(get_conf_value "$conf" TYPE)
+		cevents=$(get_conf_value "$conf" EVENTS)
+		cdate=$(get_conf_value "$conf" DATE)
+		ctarget=$(mask_target "$(get_conf_value "$conf" TARGET)" "$ctype")
+		printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$ctype" "$ctarget" "$cevents" "$cdate"
+	done
+}
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+case "$format" in
+	json) json_list ;;
+	plain) plain_list ;;
+	shell) shell_list ;;
+esac
+
+exit 0
