@@ -1,0 +1,234 @@
+#!/bin/bash
+# info: search web domain access/error logs for a fixed-string pattern
+# options: PATTERN [USER] [DOMAIN] [TYPE] [LIMIT] [FORMAT]
+#
+# example: v-search-sys-logs 'GET /wp-login.php'
+# example: v-search-sys-logs '403' all all error 50 plain
+# example: v-search-sys-logs 'upstream timed out' admin example.com access 100 json
+#
+# PATTERN is matched as a fixed string (grep -F -e), never as a regex.
+# USER 'all' searches every user's domains, a username restricts the
+# search to that user's own domains (ownership is derived from
+# $HESTIA/data/users/USER/web.conf). DOMAIN narrows to a single domain.
+# TYPE is access, error or all. LIMIT defaults to 100 and is capped at
+# 1000. FORMAT is json or plain. Rotated .gz archives are skipped in
+# this version; only the active log files are searched.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+arg2=$2
+arg3=$3
+arg4=$4
+arg5=$5
+arg6=$6
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+# Use a stable locale so character ranges and byte handling behave
+# identically regardless of the server language (e.g. tr_TR.UTF-8)
+export LC_ALL=C
+
+pattern="$arg1"
+user="${arg2:-all}"
+domain="${arg3:-all}"
+log_type="${arg4:-all}"
+limit="${arg5:-100}"
+format="${arg6:-json}"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+if [ -z "$pattern" ]; then
+	echo "ERROR: Empty search pattern."
+	exit 1
+fi
+if [ "${#pattern}" -gt 256 ]; then
+	echo "ERROR: Pattern too long (max 256 characters)."
+	exit 1
+fi
+if [ "$user" != "all" ]; then
+	if ! [[ "$user" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]] || [[ "$user" == *..* ]] || [ ! -d "$HESTIA/data/users/$user" ]; then
+		echo "ERROR: Invalid or unknown user."
+		exit 1
+	fi
+fi
+if [ "$domain" != "all" ]; then
+	if ! [[ "$domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$ ]] || [[ "$domain" == *..* ]]; then
+		echo "ERROR: Invalid domain name."
+		exit 1
+	fi
+fi
+if ! [[ "$log_type" =~ ^(access|error|all)$ ]]; then
+	echo "ERROR: Invalid log type. Use access, error or all."
+	exit 1
+fi
+if ! [[ "$limit" =~ ^[0-9]+$ ]] || [ "$limit" -lt 1 ]; then
+	echo "ERROR: Invalid limit."
+	exit 1
+fi
+if [ "$limit" -gt 1000 ]; then
+	limit=1000
+fi
+if ! [[ "$format" =~ ^(json|plain)$ ]]; then
+	echo "ERROR: Invalid format. Use json or plain."
+	exit 1
+fi
+if [ -z "$WEB_SYSTEM" ]; then
+	WEB_SYSTEM="nginx"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+python3 - "$HESTIA" "$pattern" "$user" "$domain" "$log_type" "$limit" "$format" "$WEB_SYSTEM" "$PROXY_SYSTEM" <<'PYEOF'
+import json
+import os
+import re
+import subprocess
+import sys
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+hestia = sys.argv[1]
+pattern = sys.argv[2]
+user_filter = sys.argv[3]
+domain_filter = sys.argv[4]
+log_type = sys.argv[5]
+limit = int(sys.argv[6])
+out_format = sys.argv[7]
+web_system = sys.argv[8]
+proxy_system = sys.argv[9]
+
+# Active per-domain logs live in /var/log/<system>/domains/<domain>.log
+# and <domain>.error.log. When a front proxy sits in front of the web
+# server (e.g. nginx + apache) it keeps its own copy of the logs, so
+# both directories are searched when configured.
+log_dirs = []
+for system in (web_system, proxy_system):
+    if system and system not in log_dirs:
+        log_dirs.append(os.path.join("/var/log", system, "domains"))
+if not log_dirs:
+    log_dirs = ["/var/log/nginx/domains"]
+
+# Enumerate user -> domains using the per-user web.conf ownership files
+# (the same source of truth as is_object_valid 'web' 'DOMAIN').
+if user_filter == "all":
+    try:
+        users = sorted(os.listdir(os.path.join(hestia, "data", "users")))
+    except OSError:
+        users = []
+else:
+    users = [user_filter]
+
+domain_re = re.compile(r"^DOMAIN='([^']+)'", re.M)
+access_ts_re = re.compile(r"\[(\d{1,2}/[A-Za-z]{3}/\d{4}:\d{2}:\d{2}:\d{2}[^\]]*)\]")
+error_ts_re = re.compile(r"^(\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2})")
+
+
+def grep_matches(path):
+    """Return (line_number, text) pairs matched with fixed-string grep."""
+    try:
+        proc = subprocess.run(
+            ["grep", "-F", "-n", "-a", "-e", pattern, "--", path],
+            capture_output=True,
+        )
+    except OSError:
+        return []
+    if proc.returncode not in (0, 1):
+        return []
+    matches = []
+    for raw in proc.stdout.decode("utf-8", "replace").splitlines():
+        number, sep, text = raw.partition(":")
+        if sep and number.isdigit():
+            matches.append((int(number), text))
+    return matches
+
+
+def collect():
+    results = []
+    stop_at = limit + 1  # fetch one extra match to detect truncation
+    for user in users:
+        web_conf = os.path.join(hestia, "data", "users", user, "web.conf")
+        try:
+            with open(web_conf, "r", encoding="utf-8", errors="replace") as fh:
+                domains = domain_re.findall(fh.read())
+        except OSError:
+            continue
+        for domain in domains:
+            if domain_filter != "all" and domain != domain_filter:
+                continue
+            wanted = []
+            if log_type in ("access", "all"):
+                wanted.append(("access", domain + ".log"))
+            if log_type in ("error", "all"):
+                wanted.append(("error", domain + ".error.log"))
+            for log_kind, filename in wanted:
+                for base_dir in log_dirs:
+                    path = os.path.join(base_dir, filename)
+                    if not os.path.isfile(path):
+                        continue
+                    for line_no, text in grep_matches(path):
+                        if log_kind == "access":
+                            m = access_ts_re.search(text)
+                        else:
+                            m = error_ts_re.match(text)
+                        timestamp = m.group(1).strip() if m else ""
+                        results.append({
+                            "domain": domain,
+                            "type": log_kind,
+                            "file": path,
+                            "line": text[:500],
+                            "timestamp_raw": timestamp[:64],
+                            "lineno": line_no,
+                        })
+                        if len(results) >= stop_at:
+                            return results, True
+    return results, False
+
+
+results, overflowed = collect()
+if overflowed:
+    results = results[:limit]
+truncated = bool(overflowed)
+
+if out_format == "json":
+    payload = [
+        {key: value for key, value in row.items() if key != "lineno"}
+        for row in results
+    ]
+    print(json.dumps(
+        {"results": payload, "total": len(payload), "truncated": truncated},
+        ensure_ascii=False,
+    ))
+else:
+    for row in results:
+        print("[%s] %s %s:%d" % (
+            row["type"], row["domain"], row["file"], row["lineno"],
+        ))
+        print("    " + row["line"].replace("\t", " "))
+    print("--")
+    print("Total: %d" % len(results))
+    if truncated:
+        print("Output truncated at %d matches (more matches exist)." % limit)
+
+sys.exit(0)
+PYEOF
+
+exit 0
