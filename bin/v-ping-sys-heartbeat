@@ -1,0 +1,172 @@
+#!/bin/bash
+# info: send a heartbeat ping to the configured health-check URL
+# options: [status]
+#
+# example: v-ping-sys-heartbeat
+# example: v-ping-sys-heartbeat status
+#
+# Pings the URL stored by v-set-sys-heartbeat (curl --max-time 10 -fsS).
+# Exits silently with 0 when no heartbeat is configured. Always exits 0 so
+# the cron job never spams. Consecutive failures are counted in
+# $HESTIA/data/health/heartbeat.state; after 12 consecutive failures
+# v-notify-sys-channel is called exactly once (until a success resets the
+# counter). 'status' prints the current configuration and state as JSON
+# without sending a ping (used by the /list/health/ panel page).
+
+# Use a stable locale so regex character ranges behave identically
+# regardless of the server language (e.g. tr_TR.UTF-8 collation)
+export LC_ALL=C
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+HEALTH_DIR="$HESTIA/data/health"
+CONF_FILE="$HEALTH_DIR/heartbeat.conf"
+STATE_FILE="$HEALTH_DIR/heartbeat.state"
+CRON_FILE="/etc/cron.d/nexvia-heartbeat"
+FAIL_THRESHOLD=12
+
+# Read a key='value' pair from a conf file without sourcing it
+get_conf_value() {
+	local file="$1"
+	local key="$2"
+	if [ -f "$file" ] && [ -r "$file" ]; then
+		grep "^${key}=" "$file" 2>/dev/null | head -n1 | cut -d"'" -f2
+	fi
+}
+
+#----------------------------------------------------------#
+#                       Verifications                      #
+#----------------------------------------------------------#
+
+# Read-only status mode for the panel page (no ping is sent)
+if [ "$arg1" = "status" ]; then
+	python3 - "$CONF_FILE" "$STATE_FILE" "$CRON_FILE" <<'PYEOF'
+import json, os, sys
+
+conf_file, state_file, cron_file = sys.argv[1:4]
+
+def read_kv(path):
+	data = {}
+	if os.path.isfile(path) and os.access(path, os.R_OK):
+		try:
+			with open(path, "r", errors="replace") as f:
+				for line in f:
+					line = line.strip()
+					if "=" in line and "'" in line:
+						key, _, val = line.partition("=")
+						data[key.strip()] = val.strip().strip("'")
+		except Exception:
+			pass
+	return data
+
+conf = read_kv(conf_file)
+state = read_kv(state_file)
+configured = bool(conf.get("URL"))
+try:
+	interval = int(conf.get("INTERVAL", "0")) if configured else 0
+except ValueError:
+	interval = 0
+try:
+	fail_count = int(state.get("FAIL_COUNT", "0"))
+except ValueError:
+	fail_count = 0
+
+result = {
+	"configured": configured,
+	"url": conf.get("URL", "") if configured else "",
+	"interval": interval,
+	"cron_present": os.path.isfile(cron_file),
+	"cron_file": cron_file,
+	"state": {
+		"last_ping": state.get("LAST_PING", ""),
+		"last_status": state.get("LAST_STATUS", ""),
+		"fail_count": fail_count,
+		"notified": state.get("NOTIFIED", "no") == "yes",
+	},
+}
+print(json.dumps(result, ensure_ascii=False, indent=2))
+PYEOF
+	exit 0
+fi
+
+# No configuration: exit silently (never fail the cron job)
+url=$(get_conf_value "$CONF_FILE" URL)
+[ -z "$url" ] && exit 0
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+now=$(date '+%Y-%m-%d %H:%M:%S')
+fail_count=0
+notified="no"
+
+# Load current counter
+if [ -f "$STATE_FILE" ]; then
+	prev_count=$(get_conf_value "$STATE_FILE" FAIL_COUNT)
+	[[ "$prev_count" =~ ^[0-9]+$ ]] && fail_count="$prev_count"
+	prev_notified=$(get_conf_value "$STATE_FILE" NOTIFIED)
+	[ "$prev_notified" = "yes" ] && notified="yes"
+fi
+
+# Send the ping (10s cap, fail on HTTP errors, no output)
+if curl --max-time 10 -fsS -o /dev/null "$url" 2>/dev/null; then
+	fail_count=0
+	notified="no"
+	last_status="ok"
+else
+	fail_count=$((fail_count + 1))
+	last_status="fail"
+fi
+
+# Persist state atomically
+write_state() {
+	mkdir -p "$HEALTH_DIR" 2>/dev/null || return 1
+	chmod 700 "$HEALTH_DIR" 2>/dev/null
+	local tmp
+	tmp="${STATE_FILE}.tmp.$$"
+	cat > "$tmp" <<EOF
+LAST_PING='$now'
+LAST_STATUS='$last_status'
+FAIL_COUNT='$fail_count'
+NOTIFIED='$notified'
+EOF
+	chmod 600 "$tmp"
+	mv -f "$tmp" "$STATE_FILE"
+}
+write_state 2>/dev/null || true
+
+# Alert once after 12 consecutive failures (until a success resets)
+if [ "$last_status" = "fail" ] && [ "$fail_count" -ge "$FAIL_THRESHOLD" ] \
+	&& [ "$notified" != "yes" ]; then
+	hostname_str=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "unknown")
+	notify_msg="Heartbeat watchdog: ${fail_count} consecutive ping failures.
+Host: ${hostname_str}
+URL: ${url}
+The health-check service has not heard from this server; it may be down or unable to reach the network."
+	if [ -x "$HESTIA/bin/v-notify-sys-channel" ]; then
+		$HESTIA/bin/v-notify-sys-channel "$notify_msg" all "NexviaCP Heartbeat Alert" >/dev/null 2>&1
+	fi
+	# Mark notified even if the notify script is missing or fails, so a
+	# broken channel does not cause an alert storm on every cron tick
+	notified="yes"
+	sed -i "s/^NOTIFIED=.*/NOTIFIED='$notified'/" "$STATE_FILE" 2>/dev/null || true
+fi
+
+# Always exit 0 so cron never reports failures for this job
+exit 0

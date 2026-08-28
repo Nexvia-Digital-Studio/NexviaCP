@@ -1,0 +1,229 @@
+#!/bin/bash
+# info: check SSL certificate expiry for all web domains and the panel
+# options: [FORMAT]
+#
+# example: v-check-sys-certs json
+# example: v-check-sys-certs shell
+#
+# Reports the expiry date and remaining days for every web domain
+# certificate ($HOMEDIR/USER/conf/web/DOMAIN/ssl/DOMAIN.crt with fallback
+# to $HESTIA/data/users/USER/ssl/DOMAIN.crt) plus the panel certificate
+# ($HESTIA/ssl/certificate.crt). Severity: >30 days ok, <=30 warn,
+# <=7 critical, <0 expired. Domains without a certificate are listed
+# with the no-cert status (never an error). The report is also written to
+# $HESTIA/data/health/certs-report.json.
+
+# Use a stable locale so regex character ranges behave identically
+# regardless of the server language (e.g. tr_TR.UTF-8 collation)
+export LC_ALL=C
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+# Parse arguments
+if [[ "$arg1" =~ ^(json|shell)$ ]]; then
+	format="$arg1"
+else
+	format="json"
+fi
+
+[ -z "$HOMEDIR" ] && HOMEDIR="/home"
+DATA_DIR="$HESTIA/data/health"
+REPORT_JSON="$DATA_DIR/certs-report.json"
+PANEL_CERT="$HESTIA/ssl/certificate.crt"
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+python3 - "$HESTIA" "$HOMEDIR" "$DATA_DIR" "$REPORT_JSON" "$PANEL_CERT" "$format" <<'PYEOF'
+import glob
+import json
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+hestia, homedir, data_dir, report_file, panel_cert, out_format = sys.argv[1:7]
+
+domain_re = re.compile(r"DOMAIN='([^']+)'")
+
+def find_web_cert(user, domain):
+	"""Live certificate first, then the copy under $HESTIA/data/users."""
+	candidates = [
+		os.path.join(homedir, user, "conf", "web", domain, "ssl", domain + ".crt"),
+		os.path.join(hestia, "data", "users", user, "ssl", domain + ".crt"),
+	]
+	for path in candidates:
+		if os.path.isfile(path):
+			return path
+	return ""
+
+def cert_expiry(path):
+	"""Return (iso_date, aware_datetime) or (None, None) when unparsable."""
+	try:
+		proc = subprocess.run(
+			["openssl", "x509", "-noout", "-enddate", "-in", path],
+			capture_output=True, text=True, timeout=10,
+		)
+	except Exception:
+		return None, None
+	if proc.returncode != 0:
+		return None, None
+	# notAfter line format (always C-locale English): Jun  1 12:00:00 2027 GMT
+	for line in proc.stdout.splitlines():
+		if line.startswith("notAfter="):
+			raw = line.split("=", 1)[1].strip()
+			try:
+				dt = datetime.strptime(raw, "%b %d %H:%M:%S %Y %Z") \
+					.replace(tzinfo=timezone.utc)
+			except ValueError:
+				return None, None
+			return dt.strftime("%Y-%m-%d"), dt
+	return None, None
+
+def severity_for(days):
+	if days is None:
+		return "no-cert"
+	if days < 0:
+		return "expired"
+	if days <= 7:
+		return "critical"
+	if days <= 30:
+		return "warn"
+	return "ok"
+
+now = datetime.now(timezone.utc)
+entries = []
+
+# Panel certificate (domain = hostname)
+try:
+	hostname = subprocess.run(
+		["hostname", "-f"], capture_output=True, text=True, timeout=5
+	).stdout.strip()
+except Exception:
+	hostname = ""
+if not hostname:
+	hostname = os.uname().nodename
+panel_path = panel_cert if os.path.isfile(panel_cert) else ""
+entries.append({
+	"domain": hostname,
+	"user": "root",
+	"type": "panel",
+	"cert_path": panel_path,
+	"ssl": "yes" if panel_path else "no",
+})
+
+# Web domains from every user's web.conf
+for web_conf in sorted(glob.glob(os.path.join(hestia, "data", "users", "*", "web.conf"))):
+	user = os.path.basename(os.path.dirname(web_conf))
+	try:
+		with open(web_conf, "r", errors="replace") as f:
+			content = f.read()
+	except Exception:
+		continue
+	ssl_re = re.compile(r"SSL='(yes|no)'")
+	for chunk in content.splitlines():
+		m = domain_re.search(chunk)
+		if not m:
+			continue
+		domain = m.group(1)
+		ssl_flag = "no"
+		s = ssl_re.search(chunk)
+		if s:
+			ssl_flag = s.group(1)
+		entries.append({
+			"domain": domain,
+			"user": user,
+			"type": "web",
+			"cert_path": find_web_cert(user, domain),
+			"ssl": ssl_flag,
+		})
+
+# Resolve expiry + severity for every entry
+certs = []
+for entry in entries:
+	iso_date, expiry_dt = (None, None)
+	if entry["cert_path"]:
+		iso_date, expiry_dt = cert_expiry(entry["cert_path"])
+	days_left = None
+	if expiry_dt is not None:
+		delta = expiry_dt - now
+		days_left = delta.days  # floor: negative once the due date has passed
+	certs.append({
+		"domain": entry["domain"],
+		"user": entry["user"],
+		"type": entry["type"],
+		"ssl": entry["ssl"],
+		"cert_path": entry["cert_path"],
+		"not_after": iso_date if iso_date else "",
+		"days_left": days_left,
+		"severity": severity_for(days_left if expiry_dt is not None else None),
+	})
+
+summary = {
+	"total": len(certs),
+	"ok": sum(1 for c in certs if c["severity"] == "ok"),
+	"warn": sum(1 for c in certs if c["severity"] == "warn"),
+	"critical": sum(1 for c in certs if c["severity"] == "critical"),
+	"expired": sum(1 for c in certs if c["severity"] == "expired"),
+	"no_cert": sum(1 for c in certs if c["severity"] == "no-cert"),
+}
+
+report = {
+	"generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+	"summary": summary,
+	"certs": certs,
+}
+
+# Persist the report (create the data directory when missing)
+try:
+	os.makedirs(data_dir, mode=0o700, exist_ok=True)
+	os.chmod(data_dir, 0o700)
+	tmp_file = report_file + ".tmp"
+	with open(tmp_file, "w") as f:
+		json.dump(report, f, ensure_ascii=False, indent=2)
+	os.chmod(tmp_file, 0o600)
+	os.replace(tmp_file, report_file)
+except Exception:
+	pass  # report persistence is best-effort; stdout output is the source of truth
+
+if out_format == "shell":
+	line = "-" * 78
+	print(line)
+	print("NEXVIACP CERTIFICATE EXPIRY REPORT  (%s)" % report["generated"])
+	print(line)
+	print("%-32s %-6s %-12s %6s  %-8s" % ("DOMAIN", "TYPE", "EXPIRES", "DAYS", "STATUS"))
+	print(line)
+	for c in certs:
+		days = str(c["days_left"]) if c["days_left"] is not None else "-"
+		print("%-32s %-6s %-12s %6s  %-8s" % (
+			c["domain"][:32], c["type"], c["not_after"] or "-", days, c["severity"],
+		))
+	print(line)
+	print("total:%(total)d  ok:%(ok)d  warn:%(warn)d  critical:%(critical)d"
+		"  expired:%(expired)d  no-cert:%(no_cert)d" % summary)
+else:
+	print(json.dumps(report, ensure_ascii=False, indent=2))
+PYEOF
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+exit 0

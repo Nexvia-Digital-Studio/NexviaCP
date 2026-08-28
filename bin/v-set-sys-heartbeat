@@ -1,0 +1,151 @@
+#!/bin/bash
+# info: configure or remove the healthchecks.io style heartbeat watchdog
+# options: URL [DAKIKA] | delete
+#
+# example: v-set-sys-heartbeat "https://hc-ping.com/0f9f5b7e-5b0d-4c2a-9a1b-7d0e6c9f2a3d"
+# example: v-set-sys-heartbeat "https://hc-ping.com/0f9f5b7e-5b0d-4c2a-9a1b-7d0e6c9f2a3d" 10
+# example: v-set-sys-heartbeat delete
+#
+# Stores the ping URL and interval in $HESTIA/data/health/heartbeat.conf
+# (chmod 600, directory chmod 700) and installs / updates / removes the
+# /etc/cron.d/nexvia-heartbeat cron entry at runtime. URL must be https://
+# with a strict path-only form (no query string, no fragment, no userinfo).
+# DAKIKA (interval in minutes) must be an integer between 1 and 1440.
+
+# Use a stable locale so regex character ranges behave identically
+# regardless of the server language (e.g. tr_TR.UTF-8 collation)
+export LC_ALL=C
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+arg2=$2
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+HEALTH_DIR="$HESTIA/data/health"
+CONF_FILE="$HEALTH_DIR/heartbeat.conf"
+STATE_FILE="$HEALTH_DIR/heartbeat.state"
+CRON_FILE="/etc/cron.d/nexvia-heartbeat"
+
+#----------------------------------------------------------#
+#                       Verifications                      #
+#----------------------------------------------------------#
+
+# Ensure root user
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: v-set-sys-heartbeat can be executed only by root user"
+	exit 10
+fi
+
+# Delete mode: tear down config, cron entry and state
+if [ "$arg1" = "delete" ]; then
+	removed_conf="no"
+	removed_cron="no"
+	[ -f "$CONF_FILE" ] && rm -f "$CONF_FILE" && removed_conf="yes"
+	[ -f "$STATE_FILE" ] && rm -f "$STATE_FILE"
+	[ -f "$CRON_FILE" ] && rm -f "$CRON_FILE" && removed_cron="yes"
+	if [ -x "$HESTIA/bin/v-log-action" ]; then
+		$HESTIA/bin/v-log-action "system" "Info" "System" "Heartbeat watchdog removed (config: $removed_conf, cron: $removed_cron)."
+	fi
+	echo "[+] Heartbeat watchdog removed (config: $removed_conf, cron: $removed_cron)."
+	exit 0
+fi
+
+url="$arg1"
+minutes="${arg2:-5}"
+
+# Validate URL: strict https:// with host and optional port/path only.
+# No query string, no fragment, no userinfo, no whitespace, no quotes.
+if [ -z "$url" ]; then
+	echo "ERROR: URL is required (or use 'delete')."
+	echo "Usage: v-set-sys-heartbeat URL [DAKIKA] | v-set-sys-heartbeat delete"
+	exit 1
+fi
+url_re='^https://[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*(:[0-9]{1,5})?(/[a-zA-Z0-9._~-]+)*/?$'
+if ! [[ "$url" =~ $url_re ]] || [[ "$url" == *..* ]] || [ "${#url}" -gt 2048 ]; then
+	echo "ERROR: Invalid URL. Expected strict https://host[:port]/path form (no query string or fragment)."
+	exit 1
+fi
+# Reject out-of-range ports (regex allows 1-5 digits; the strict regex
+# already rules out IPv6 literals, so at most one colon may appear)
+host_part="${url#https://}"
+host_part="${host_part%%/*}"
+if [[ "$host_part" == *:* ]]; then
+	port_part="${host_part##*:}"
+	if [ "$port_part" -lt 1 ] || [ "$port_part" -gt 65535 ]; then
+		echo "ERROR: Invalid port in URL."
+		exit 1
+	fi
+fi
+
+# Validate interval: integer 1-1440 minutes
+if ! [[ "$minutes" =~ ^[0-9]+$ ]] || [ "$minutes" -lt 1 ] || [ "$minutes" -gt 1440 ]; then
+	echo "ERROR: Invalid DAKIKA '$minutes'. Use an integer between 1 and 1440."
+	exit 1
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Create health data directory with restrictive permissions
+if [ ! -d "$HEALTH_DIR" ]; then
+	mkdir -p "$HEALTH_DIR" || {
+		echo "ERROR: Unable to create $HEALTH_DIR"
+		exit 1
+	}
+	chmod 700 "$HEALTH_DIR"
+fi
+
+existed="no"
+[ -f "$CONF_FILE" ] && existed="yes"
+if [ "$existed" = "yes" ]; then
+	action_word="updated"
+else
+	action_word="configured"
+fi
+
+# Save config (URL contains no single quotes by validation above)
+cat > "$CONF_FILE" <<EOF
+URL='$url'
+INTERVAL='$minutes'
+TIME='$(date +%T)'
+DATE='$(date +%F)'
+EOF
+chmod 600 "$CONF_FILE"
+
+# Install / update the cron entry (pattern: v-add-sys-aide +
+# install/hst-install-ubuntu.sh hestia-memory-monitor cron setup)
+cat > "$CRON_FILE" <<EOF
+# NexviaCP heartbeat watchdog (managed by v-set-sys-heartbeat, do not edit)
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+*/$minutes * * * * root $HESTIA/bin/v-ping-sys-heartbeat >/dev/null 2>&1
+EOF
+chown root:root "$CRON_FILE"
+chmod 644 "$CRON_FILE"
+
+# Reset the failure counter so a reconfigured watchdog starts clean
+[ -f "$STATE_FILE" ] && rm -f "$STATE_FILE"
+
+if [ -x "$HESTIA/bin/v-log-action" ]; then
+	$HESTIA/bin/v-log-action "system" "Info" "System" "Heartbeat watchdog $action_word (every ${minutes} min)."
+fi
+
+echo "[+] Heartbeat watchdog $action_word."
+echo "    URL:      $url"
+echo "    Interval: every $minutes minute(s)"
+echo "    Cron:     $CRON_FILE"
+exit 0
