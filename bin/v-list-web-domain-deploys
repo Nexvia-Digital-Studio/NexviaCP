@@ -1,0 +1,150 @@
+#!/bin/bash
+# info: list deploy snapshots (releases) available for a web domain
+# options: USER DOMAIN [FORMAT]
+#
+# example: v-list-web-domain-deploys admin example.com
+#          v-list-web-domain-deploys admin example.com json
+#          v-list-web-domain-deploys admin example.com plain
+#
+# Snapshots are created by v-deploy-github-repo (release-<ts>.tar.gz) and by
+# v-rollback-web-domain-deploy (release-<ts>-pre-rollback.tar.gz) under
+# $HESTIA/data/users/USER/web/DOMAIN/releases/. The newest snapshot is marked
+# as the "latest snapshot"; it represents the state right before the most
+# recent deploy (or rollback) and is what 'previous' restores.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+user=$1
+domain=$2
+domain_idn=$2
+format=${3:-shell}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+# load config file
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER DOMAIN [FORMAT]'
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
+
+# FORMAT must be one of the supported output types (prevents injection)
+if ! [[ "$format" =~ ^(json|shell|plain)$ ]]; then
+	check_result "$E_INVALID" "invalid FORMAT :: $format (expected json, shell or plain)"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+releases_dir="$HESTIA/data/users/$user/web/$domain/releases"
+
+# Collect matching snapshots, newest first. Fixed-width timestamps make a
+# lexical name sort identical to a chronological sort.
+release_names=()
+if [ -d "$releases_dir" ]; then
+	while IFS= read -r name; do
+		release_names+=("$name")
+	done < <(ls -1 "$releases_dir" 2>/dev/null | grep -E '^release-[0-9]{14}(-pre-rollback)?\.tar\.gz$' | sort -r)
+fi
+
+total=${#release_names[@]}
+
+if [ "$format" = "plain" ]; then
+	# One release name per line (script-friendly)
+	for name in "${release_names[@]}"; do
+		echo "$name"
+	done
+	exit 0
+fi
+
+if [ "$format" = "json" ]; then
+	echo "{"
+	echo "    \"USER\": \"$user\","
+	echo "    \"DOMAIN\": \"$domain\","
+	echo "    \"RELEASES_DIR\": \"$releases_dir\","
+	echo "    \"COUNT\": $total,"
+	echo "    \"releases\": ["
+	i=0
+	for name in "${release_names[@]}"; do
+		# Prefer the snapshot timestamp embedded in the name; fall back to
+		# file mtime for unexpected names.
+		epoch=$(echo "$name" | grep -oE '[0-9]{14}' | head -n 1)
+		if [ -n "$epoch" ]; then
+			epoch=$(date -d "${epoch:0:4}-${epoch:4:2}-${epoch:6:2} ${epoch:8:2}:${epoch:10:2}:${epoch:12:2}" +%s 2>/dev/null || stat -c %Y "$releases_dir/$name" 2>/dev/null || echo 0)
+		else
+			epoch=$(stat -c %Y "$releases_dir/$name" 2>/dev/null || echo 0)
+		fi
+		mtime=$(date +'%Y-%m-%d %H:%M:%S' -d "@$epoch" 2>/dev/null || echo "-")
+		bytes=$(stat -c %s "$releases_dir/$name" 2>/dev/null || echo 0)
+		size=$(awk -v b="$bytes" 'BEGIN{
+			u="B"; v=b;
+			if (v >= 1073741824) { v = v / 1073741824; u = "G" }
+			else if (v >= 1048576) { v = v / 1048576; u = "M" }
+			else if (v >= 1024) { v = v / 1024; u = "K" }
+			printf (u == "B") ? "%d%s" : "%.1f%s", v, u
+		}')
+		latest="no"
+		[ "$i" -eq 0 ] && latest="yes"
+		echo "        {"
+		echo "            \"RELEASE\": \"$name\","
+		echo "            \"SIZE\": \"$size\","
+		echo "            \"BYTES\": $bytes,"
+		echo "            \"MTIME\": \"$mtime\","
+		echo "            \"EPOCH\": $epoch,"
+		echo "            \"LATEST\": \"$latest\""
+		if [ $((i + 1)) -lt "$total" ]; then
+			echo "        },"
+		else
+			echo "        }"
+		fi
+		i=$((i + 1))
+	done
+	echo "    ]"
+	echo "}"
+	exit 0
+fi
+
+# shell format (default)
+echo "RELEASE                        SIZE       MTIME               EPOCH       NOTE"
+echo "-----------------------------  ---------  ------------------  ----------  ------------------"
+i=0
+for name in "${release_names[@]}"; do
+	epoch=$(echo "$name" | grep -oE '[0-9]{14}' | head -n 1)
+	if [ -n "$epoch" ]; then
+		epoch=$(date -d "${epoch:0:4}-${epoch:4:2}-${epoch:6:2} ${epoch:8:2}:${epoch:10:2}:${epoch:12:2}" +%s 2>/dev/null || stat -c %Y "$releases_dir/$name" 2>/dev/null || echo 0)
+	else
+		epoch=$(stat -c %Y "$releases_dir/$name" 2>/dev/null || echo 0)
+	fi
+	mtime=$(date +'%Y-%m-%d %H:%M:%S' -d "@$epoch" 2>/dev/null || echo "-")
+	bytes=$(stat -c %s "$releases_dir/$name" 2>/dev/null || echo 0)
+	size=$(awk -v b="$bytes" 'BEGIN{
+		u="B"; v=b;
+		if (v >= 1073741824) { v = v / 1073741824; u = "G" }
+		else if (v >= 1048576) { v = v / 1048576; u = "M" }
+		else if (v >= 1024) { v = v / 1024; u = "K" }
+		printf (u == "B") ? "%d%s" : "%.1f%s", v, u
+	}')
+	note=""
+	[ "$i" -eq 0 ] && note="latest snapshot"
+	printf "%-29s  %-9s  %-18s  %-10s  %s\n" "$name" "$size" "$mtime" "$epoch" "$note"
+	i=$((i + 1))
+done
+[ "$total" -eq 0 ] && echo "(no deploy snapshots found for $domain)"
+
+exit 0

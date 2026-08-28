@@ -1,0 +1,188 @@
+#!/bin/bash
+# info: rollback a web domain docroot to a previous deploy snapshot
+# options: USER DOMAIN [RELEASE|previous]
+#
+# example: v-rollback-web-domain-deploy admin example.com
+#          v-rollback-web-domain-deploy admin example.com previous
+#          v-rollback-web-domain-deploy admin example.com release-20260131235959
+#
+# Snapshots are created automatically by v-deploy-github-repo before every
+# deploy and are stored at $HESTIA/data/users/USER/web/DOMAIN/releases/ (mode
+# 700, outside the docroot). Before restoring, the current live state is
+# snapshotted as release-<ts>-pre-rollback.tar.gz so a rollback itself can be
+# undone. Use v-list-web-domain-deploys to see available snapshots.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+user=$1
+domain=$2
+domain_idn=$2
+release_arg=${3:-previous}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+# load config file
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER DOMAIN [RELEASE|previous]'
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+# RELEASE must be a plain snapshot name (with or without .tar.gz) or 'previous'
+if [ "$release_arg" != "previous" ]; then
+	if ! [[ "$release_arg" =~ ^release-[0-9]{14}(\.tar\.gz)?$ ]]; then
+		check_result "$E_INVALID" "invalid RELEASE format :: $release_arg (expected release-YYYYmmddHHMMSS[.tar.gz] or 'previous')"
+	fi
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+docroot="$HOMEDIR/$user/web/$domain/public_html"
+domain_dir="$HOMEDIR/$user/web/$domain"
+releases_dir="$HESTIA/data/users/$user/web/$domain/releases"
+rollback_log="$HESTIA/log/deploy-rollback.log"
+
+# Dedicated audit log: date, user, domain, from->to release, result
+log_rollback() {
+	mkdir -p "$HESTIA/log"
+	echo "$(date +'%F %T') user='$user' domain='$domain' from='${1:-none}' to='${2:-none}' result='$3'" >> "$rollback_log"
+}
+
+# Resolve target snapshot
+if [ "$release_arg" = "previous" ]; then
+	# Newest snapshot = state right before the most recent deploy/rollback.
+	# Fixed-width timestamps make lexical sort == chronological sort.
+	target_release=$(ls -1 "$releases_dir" 2>/dev/null | grep -E '^release-[0-9]{14}(-pre-rollback)?\.tar\.gz$' | sort -r | head -n 1)
+	if [ -z "$target_release" ]; then
+		check_result "$E_NOTEXIST" "no deploy snapshots found for $domain"
+	fi
+else
+	target_release="$release_arg"
+	[[ "$target_release" != *.tar.gz ]] && target_release="${target_release}.tar.gz"
+	if [ ! -f "$releases_dir/$target_release" ]; then
+		check_result "$E_NOTEXIST" "snapshot $target_release not found for $domain"
+	fi
+fi
+
+echo "[*] Rolling back $domain to $target_release..."
+
+# SAFETY: snapshot the current live state first so the rollback itself can be
+# undone. This file does NOT count toward the keep-5 rotation.
+safety_ts=$(date +%Y%m%d%H%M%S)
+[ -e "$releases_dir/release-${safety_ts}-pre-rollback.tar.gz" ] && sleep 1 && safety_ts=$(date +%Y%m%d%H%M%S)
+safety_release="release-${safety_ts}-pre-rollback.tar.gz"
+safety_made="none"
+if [ -d "$docroot" ] && [ -n "$(ls -A "$docroot" 2>/dev/null)" ]; then
+	echo "[*] Safety snapshot of current state: $safety_release"
+	mkdir -p "$releases_dir"
+	chmod 700 "$releases_dir"
+	safety_rc=0
+	tar --warning=no-file-changed -C "$docroot" -czf "$releases_dir/$safety_release" . >/dev/null 2>&1 || safety_rc=$?
+	# rc=1 ("files changed while being archived") is tolerated; rc>=2 is fatal.
+	if [ "$safety_rc" -le 1 ] && [ -s "$releases_dir/$safety_release" ]; then
+		safety_made="$safety_release"
+	else
+		rm -f "$releases_dir/$safety_release"
+		# Refuse to destroy the live docroot without a safety net.
+		log_rollback "$safety_made" "$target_release" "aborted: safety snapshot failed (tar rc=$safety_rc)"
+		check_result "$E_PARSING" "safety snapshot of current docroot failed — rollback aborted"
+	fi
+fi
+
+# Stage current content aside (same filesystem as docroot -> mv is atomic per
+# file; staging lives OUTSIDE the docroot so it is never part of a snapshot).
+staging_dir="$domain_dir/.rollback-staging"
+rm -rf "$staging_dir"
+mkdir -p "$staging_dir"
+chmod 700 "$staging_dir"
+mkdir -p "$docroot"
+
+move_failed=0
+shopt -s dotglob nullglob
+for item in "$docroot"/*; do
+	mv -- "$item" "$staging_dir/" || {
+		move_failed=1
+		break
+	}
+done
+shopt -u dotglob nullglob
+
+if [ "$move_failed" = 1 ]; then
+	# Put everything back before bailing out.
+	shopt -s dotglob nullglob
+	for item in "$staging_dir"/*; do
+		mv -- "$item" "$docroot/" || true
+	done
+	shopt -u dotglob nullglob
+	rm -rf "$staging_dir"
+	log_rollback "$safety_made" "$target_release" "aborted: staging current docroot failed"
+	check_result "$E_PARSING" "failed to stage current docroot — rollback aborted"
+fi
+
+# Extract the chosen snapshot into the now-empty docroot.
+if ! tar -C "$docroot" -xzf "$releases_dir/$target_release" >/dev/null 2>&1; then
+	echo "[!] Extraction of $target_release failed — restoring previous content..."
+	# Drop any partially extracted files, then put the staged content back.
+	shopt -s dotglob nullglob
+	for item in "$docroot"/*; do
+		rm -rf -- "$item"
+	done
+	for item in "$staging_dir"/*; do
+		mv -- "$item" "$docroot/" || true
+	done
+	shopt -u dotglob nullglob
+	rm -rf "$staging_dir"
+	chown -R "$user:$user" "$docroot" 2>/dev/null || true
+	log_rollback "$safety_made" "$target_release" "failed: extraction error, previous content restored"
+	check_result "$E_PARSING" "extraction of $target_release failed — previous content restored"
+fi
+
+# Success: staged content is obsolete, snapshot content is now live.
+rm -rf "$staging_dir"
+
+# Restore ownership exactly like the deploy script does (v-deploy-github-repo).
+chown -R "$user:$user" "$docroot"
+
+# Reload the app backend if one exists for this domain (safe no-op otherwise).
+if [ -x "$BIN/v-restart-web-domain-app" ]; then
+	echo "[*] Restarting application backend for $domain..."
+	$BIN/v-restart-web-domain-app "$user" "$domain" >/dev/null 2>&1 || true
+fi
+
+log_rollback "$safety_made" "$target_release" "success"
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+if [ -x "$BIN/v-log-action" ]; then
+	$BIN/v-log-action "system" "Info" "Web" "Deploy rollback completed (Domain: $domain, User: $user, Release: $target_release)." || true
+fi
+log_event "$OK" "$ARGUMENTS"
+
+echo "[+] SUCCESS: $domain rolled back to $target_release"
+[ "$safety_made" != "none" ] && echo "    Current state was saved as: $safety_release"
+exit 0

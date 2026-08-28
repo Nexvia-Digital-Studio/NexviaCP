@@ -93,6 +93,42 @@ else
 	fi
 fi
 
+# Step 2.1: Snapshot current docroot before overwriting (rollback support).
+# Snapshots are stored OUTSIDE the docroot ($HESTIA/data/users/...), which is a
+# completely separate tree from $HOMEDIR, so the archive never recurses into
+# previous snapshots. Everything in the docroot is included (.git, .env,
+# vendor/, node_modules/) so a rollback restores a faithful, deployable state.
+# A snapshot failure must NEVER block the deploy itself: log & continue.
+releases_dir="$HESTIA/data/users/$user/web/$domain/releases"
+if [ -d "$docroot" ] && [ -n "$(ls -A "$docroot" 2>/dev/null)" ]; then
+	release_ts=$(date +%Y%m%d%H%M%S)
+	release_file="$releases_dir/release-${release_ts}.tar.gz"
+	echo "[*] Snapshotting current docroot to $release_file..."
+	mkdir -p "$releases_dir"
+	chmod 700 "$releases_dir"
+	snap_rc=0
+	tar --warning=no-file-changed -C "$docroot" -czf "$release_file" . >/dev/null 2>&1 || snap_rc=$?
+	# rc=1 means "some files changed while being archived" (live site) and is
+	# tolerated; rc>=2 is a fatal archive error.
+	if [ "$snap_rc" -le 1 ] && [ -s "$release_file" ]; then
+		echo "[+] Snapshot created: release-${release_ts}.tar.gz"
+		# Retention: keep the 5 newest plain snapshots (fixed-width timestamps
+		# sort chronologically). Safety snapshots (*-pre-rollback.tar.gz) are
+		# never pruned here — they are owned by v-rollback-web-domain-deploy.
+		snap_count=$(ls -1 "$releases_dir" 2>/dev/null | grep -c '^release-[0-9]\{14\}\.tar\.gz$')
+		if [ "${snap_count:-0}" -gt 5 ]; then
+			ls -1 "$releases_dir" | grep '^release-[0-9]\{14\}\.tar\.gz$' | sort | head -n $((snap_count - 5)) \
+				| while read -r old_snapshot; do
+					rm -f "$releases_dir/$old_snapshot"
+				done
+		fi
+	else
+		rm -f "$release_file"
+		echo "[!] WARNING: pre-deploy snapshot failed (tar rc=$snap_rc) — continuing deploy without snapshot."
+		log_event "$E_PARSING" "pre-deploy snapshot failed for $domain (tar rc=$snap_rc), deploy continued"
+	fi
+fi
+
 # Backup existing .env if present
 env_backup="$tmp_dir/env_backup"
 [ -f "$docroot/.env" ] && cp "$docroot/.env" "$env_backup"
