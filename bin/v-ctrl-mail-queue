@@ -1,0 +1,183 @@
+#!/bin/bash
+# info: manage exim mail queue messages (retry/freeze/unfreeze/remove/flush)
+# options: ACTION ID|all
+#
+# example: v-ctrl-mail-queue retry 19tVDi-0006gA-Ne
+# example: v-ctrl-mail-queue freeze 19tVDi-0006gA-Ne
+# example: v-ctrl-mail-queue unfreeze 19tVDi-0006gA-Ne
+# example: v-ctrl-mail-queue remove 19tVDi-0006gA-Ne
+# example: v-ctrl-mail-queue remove all
+# example: v-ctrl-mail-queue flush
+#
+# Actions:
+#   retry     exim -Mc ID   (force one delivery attempt)
+#   freeze    exim -Mf ID   (freeze message)
+#   unfreeze  exim -Mtr ID  (thaw frozen message)
+#   remove    exim -Mrm ID | all (remove message(s) without delivery)
+#   flush     exim -q       (start queue run, no ID allowed, 120s timeout)
+# Actions are logged to $HESTIA/log/mail-queue.log.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+arg2=$2
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+LOG_FILE="$HESTIA/log/mail-queue.log"
+
+# Invoker user: panel/cli runs via sudo, SUDO_USER holds the real user
+invoker="${SUDO_USER:-${USER:-root}}"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+# Validate action against a strict whitelist
+if ! [[ "$arg1" =~ ^(retry|freeze|unfreeze|remove|flush)$ ]]; then
+	echo "Usage: v-ctrl-mail-queue ACTION ID|all"
+	echo "       ACTION: retry | freeze | unfreeze | remove | flush"
+	exit "$E_INVALID"
+fi
+action="$arg1"
+message_id="$arg2"
+
+# Validate message id: strict exim id format or the literal 'all'
+if [ -n "$message_id" ]; then
+	if ! [[ "$message_id" =~ ^[a-zA-Z0-9]{6}-[a-zA-Z0-9]{6}-[a-zA-Z0-9]{2}$ ]] &&
+		[ "$message_id" != "all" ]; then
+		echo "ERROR: Invalid exim message id '$message_id'."
+		exit "$E_INVALID"
+	fi
+fi
+
+# Per-action argument rules
+case "$action" in
+	retry | freeze | unfreeze)
+		if [ -z "$message_id" ] || [ "$message_id" = "all" ]; then
+			echo "ERROR: Action '$action' requires a single exim message id."
+			exit "$E_INVALID"
+		fi
+		;;
+	remove)
+		if [ -z "$message_id" ]; then
+			echo "ERROR: Action 'remove' requires a message id or 'all'."
+			exit "$E_INVALID"
+		fi
+		;;
+	flush)
+		if [ -n "$message_id" ]; then
+			echo "ERROR: Action 'flush' does not accept a message id."
+			exit "$E_INVALID"
+		fi
+		;;
+esac
+
+# Mail system must be enabled (same gate as other mail scripts)
+is_system_enabled "$MAIL_SYSTEM" 'MAIL_SYSTEM'
+if ! [[ "$MAIL_SYSTEM" =~ exim ]]; then
+	echo "ERROR: Exim mail system is not in use ($MAIL_SYSTEM)."
+	exit "$E_DISABLED"
+fi
+
+# Locate exim binary
+if [ -x /usr/sbin/exim ]; then
+	EXIM_BIN="/usr/sbin/exim"
+elif command -v exim >/dev/null 2>&1; then
+	EXIM_BIN="$(command -v exim)"
+elif [ -x /usr/sbin/exim4 ]; then
+	EXIM_BIN="/usr/sbin/exim4"
+else
+	echo "ERROR: Exim binary not found."
+	exit "$E_NOTEXIST"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+queue_log() {
+	echo "$(date '+%F %T') action='$action' id='${message_id:-none}' user='$invoker'" >> "$LOG_FILE"
+}
+
+removed_count=0
+
+case "$action" in
+	retry)
+		"$EXIM_BIN" -Mc "$message_id" >/dev/null 2>&1
+		rc=$?
+		;;
+	freeze)
+		"$EXIM_BIN" -Mf "$message_id" >/dev/null 2>&1
+		rc=$?
+		;;
+	unfreeze)
+		"$EXIM_BIN" -Mtr "$message_id" >/dev/null 2>&1
+		rc=$?
+		;;
+	remove)
+		if [ "$message_id" = "all" ]; then
+			# Collect ids from exim -bp, validate each, remove in batches
+			ids_tmp="$(mktemp)"
+			trap 'rm -f "$ids_tmp"' EXIT
+			"$EXIM_BIN" -bp 2>/dev/null | awk '{print $3}' | grep -E '^[a-zA-Z0-9]{6}-[a-zA-Z0-9]{6}-[a-zA-Z0-9]{2}$' > "$ids_tmp"
+			removed_count=0
+			rc=0
+			while IFS= read -r batch_id; do
+				[ -z "$batch_id" ] && continue
+				"$EXIM_BIN" -Mrm "$batch_id" >/dev/null 2>&1
+				brc=$?
+				if [ $brc -eq 0 ]; then
+					removed_count=$((removed_count + 1))
+				else
+					rc=$brc
+				fi
+			done < "$ids_tmp"
+		else
+			"$EXIM_BIN" -Mrm "$message_id" >/dev/null 2>&1
+			rc=$?
+			[ $rc -eq 0 ] && removed_count=1
+		fi
+		;;
+	flush)
+		timeout 120 "$EXIM_BIN" -q >/dev/null 2>&1
+		rc=$?
+		;;
+esac
+
+# Log the action (date, action, id, invoker)
+queue_log
+
+if [ $rc -ne 0 ]; then
+	check_result "$rc" "exim $action failed (id: ${message_id:-none})"
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+if [ "$action" = "remove" ] && [ "$message_id" = "all" ]; then
+	$BIN/v-log-action "system" "Info" "Mail" "Mail queue flushed: $removed_count message(s) removed (by: $invoker)."
+elif [ "$action" = "flush" ]; then
+	$BIN/v-log-action "system" "Info" "Mail" "Mail queue run started (by: $invoker)."
+else
+	$BIN/v-log-action "system" "Info" "Mail" "Mail queue action '$action' performed on '$message_id' (by: $invoker)."
+fi
+
+log_event "$OK" "$ARGUMENTS"
+
+exit

@@ -1,0 +1,187 @@
+#!/bin/bash
+# info: install and configure AIDE file-integrity monitoring
+# options: [--remove]
+#
+# example: v-add-sys-aide
+# example: v-add-sys-aide --remove
+#
+# Installs aide + aide-common via apt (Debian/Ubuntu only), deploys watch
+# rules for NexviaCP critical paths (/usr/local/hestia/bin, func,
+# /etc/nginx, /etc/hestiacp), builds the initial database with aideinit
+# (NOTE: this takes several minutes) and installs /etc/cron.d/nexvia-aide
+# for a daily 03:40 integrity check (v-run-sys-aide-check).
+# --remove deletes the cron job and managed config (aide stays installed).
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+AIDE_CONFD_DIR="/etc/aide/aide.conf.d"
+# Debian's /etc/aide/aide.conf includes the conf.d dir with the regex
+# "@@x_include /etc/aide/aide.conf.d ^[a-zA-Z0-9_-]+$" -> NO dots allowed
+# in the file name (95_nexvia.conf would be silently ignored).
+AIDE_CONFD_FILE="$AIDE_CONFD_DIR/95_nexvia"
+AIDE_MAIN_CONF="/etc/aide/aide.conf"
+AIDE_BLOCK_BEGIN="# BEGIN NexviaCP AIDE (managed block, do not edit)"
+AIDE_BLOCK_END="# END NexviaCP AIDE"
+CRON_FILE="/etc/cron.d/nexvia-aide"
+DATA_DIR="$HESTIA/data/aide"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+# Validate argument
+if [ -n "$arg1" ] && [ "$arg1" != "--remove" ]; then
+	echo "Usage: v-add-sys-aide [--remove]"
+	exit "$E_INVALID"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+if [ "$arg1" = "--remove" ]; then
+	# Remove cron job
+	if [ -f "$CRON_FILE" ]; then
+		rm -f "$CRON_FILE"
+		echo "Removed $CRON_FILE"
+	fi
+	# Remove managed conf.d file (both supported name variants)
+	if [ -f "$AIDE_CONFD_DIR/95_nexvia" ] || [ -f "$AIDE_CONFD_DIR/95_nexvia.conf" ]; then
+		rm -f "$AIDE_CONFD_DIR/95_nexvia" "$AIDE_CONFD_DIR/95_nexvia.conf"
+		echo "Removed $AIDE_CONFD_DIR/95_nexvia(.conf)"
+	fi
+	# Remove managed block from main config (idempotent, exact match)
+	if [ -f "$AIDE_MAIN_CONF" ] && grep -qF "$AIDE_BLOCK_BEGIN" "$AIDE_MAIN_CONF"; then
+		awk -v begin="$AIDE_BLOCK_BEGIN" -v end="$AIDE_BLOCK_END" '
+			$0 == begin { skip = 1 }
+			!skip { print }
+			$0 == end { skip = 0 }
+		' "$AIDE_MAIN_CONF" > "$AIDE_MAIN_CONF.tmp" && mv "$AIDE_MAIN_CONF.tmp" "$AIDE_MAIN_CONF"
+		echo "Removed managed block from $AIDE_MAIN_CONF"
+	fi
+	#----------------------------------------------------------#
+	#                       Hestia                             #
+	#----------------------------------------------------------#
+	$BIN/v-log-action "system" "Info" "Security" "AIDE integrity monitoring disabled (package left installed)."
+	log_event "$OK" "$ARGUMENTS"
+	exit
+fi
+
+# Debian/Ubuntu only (apt based install)
+if [ ! -f /etc/debian_version ]; then
+	echo "ERROR: AIDE setup is only supported on Debian/Ubuntu."
+	exit "$E_INVALID"
+fi
+
+# Install aide packages if missing
+if ! dpkg -s aide >/dev/null 2>&1 || ! dpkg -s aide-common >/dev/null 2>&1; then
+	echo "Installing aide and aide-common via apt..."
+	apt-get update -qq
+	DEBIAN_FRONTEND=noninteractive apt-get -y install aide aide-common
+	check_result $? "aide package installation failed"
+fi
+
+# Prepare report dir
+mkdir -p "$DATA_DIR"
+
+# Watch rules for NexviaCP critical paths (content hashes, not perms-only)
+AIDE_RULES='
+# BEGIN NexviaCP AIDE (managed block, do not edit)
+# NexviaCP file-integrity watch rules (managed by v-add-sys-aide)
+NEXVIACP_CONTENT = p+i+n+u+g+sha256
+
+/usr/local/hestia/bin  NEXVIACP_CONTENT
+/usr/local/hestia/func NEXVIACP_CONTENT
+/etc/nginx             NEXVIACP_CONTENT
+/etc/hestiacp          NEXVIACP_CONTENT
+# END NexviaCP AIDE'
+
+deployed="none"
+
+# Preferred: conf.d snippet. The file name must satisfy the include
+# pattern of the main config. Debian ships:
+#   @@x_include /etc/aide/aide.conf.d ^[a-zA-Z0-9_-]+$   (NO dots allowed)
+# so we default to a dotless name; if the include glob expects "*.conf"
+# we use a dotted name instead. No include line at all -> managed block.
+include_line="$(grep -E '@@(x_)?include.*aide\.conf\.d' "$AIDE_MAIN_CONF" 2>/dev/null | head -1)"
+if [ -d "$AIDE_CONFD_DIR" ] && [ -n "$include_line" ]; then
+	if echo "$include_line" | grep -q '\*\.conf'; then
+		AIDE_CONFD_FILE="$AIDE_CONFD_DIR/95_nexvia.conf"
+	fi
+	printf '%s\n' "$AIDE_RULES" > "$AIDE_CONFD_FILE"
+	chmod 644 "$AIDE_CONFD_FILE"
+	deployed="confd:$AIDE_CONFD_FILE"
+else
+	# Fallback: append a managed block to the main config (idempotent guard)
+	if [ -f "$AIDE_MAIN_CONF" ] && ! grep -qF "$AIDE_BLOCK_BEGIN" "$AIDE_MAIN_CONF"; then
+		printf '%s\n' "$AIDE_RULES" >> "$AIDE_MAIN_CONF"
+	elif [ ! -f "$AIDE_MAIN_CONF" ]; then
+		printf '%s\n' "$AIDE_RULES" > "$AIDE_MAIN_CONF"
+	fi
+	deployed="block:$AIDE_MAIN_CONF"
+fi
+
+# Install cron job (daily 03:40, root)
+cat > "$CRON_FILE" <<EOF
+# NexviaCP AIDE daily integrity check (managed by v-add-sys-aide)
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+40 3 * * * root $HESTIA/bin/v-run-sys-aide-check
+EOF
+chmod 644 "$CRON_FILE"
+
+# Build the initial AIDE database.
+# NOTE: this reads and hashes every watched file and can take minutes.
+echo "Building initial AIDE database (this can take several minutes)..."
+AIDEINIT_BIN="$(command -v aideinit 2>/dev/null || echo /usr/sbin/aideinit)"
+if [ -x "$AIDEINIT_BIN" ]; then
+	timeout 1800 "$AIDEINIT_BIN" -y -f
+	aideinit_rc=$?
+else
+	# Fallback: manual init with plain aide
+	AIDE_BIN="$(command -v aide 2>/dev/null || echo /usr/sbin/aide)"
+	timeout 1800 "$AIDE_BIN" --init
+	aideinit_rc=$?
+	[ -f /var/lib/aide/aide.db.new ] && mv -f /var/lib/aide/aide.db.new /var/lib/aide/aide.db
+fi
+
+if [ ${aideinit_rc:-1} -ne 0 ]; then
+	echo "WARNING: aideinit failed or timed out (rc=$aideinit_rc)."
+	echo "Run '$AIDEINIT_BIN -y -f' manually and then run v-run-sys-aide-check."
+fi
+
+echo
+echo "AIDE setup completed (config deployed via $deployed)."
+echo "Daily check cron installed: $CRON_FILE (03:40)."
+if [ ${aideinit_rc:-1} -eq 0 ]; then
+	echo "Initial baseline database created."
+else
+	echo "Baseline database NOT ready - see warning above."
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-log-action "system" "Info" "Security" "AIDE integrity monitoring enabled ($deployed, daily check at 03:40)."
+log_event "$OK" "$ARGUMENTS"
+
+exit

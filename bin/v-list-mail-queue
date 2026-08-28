@@ -1,0 +1,184 @@
+#!/bin/bash
+# info: list exim mail queue messages with summary
+# options: [FORMAT]
+#
+# example: v-list-mail-queue json
+# example: v-list-mail-queue shell
+#
+# Returns the exim queue total count (exim -bpc) and the parsed message
+# list (exim -bp): per-message id, size, sender, recipient(s), queue age
+# and frozen state. The JSON message list is capped at 1000 entries
+# ("truncated": true is set when more messages exist).
+# Requires the exim mail system to be enabled.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+# Parse arguments
+if [[ "$arg1" =~ ^(json|shell|plain)$ ]]; then
+	format="$arg1"
+else
+	format="json"
+fi
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+# Mail system must be enabled (same gate as other mail scripts)
+is_system_enabled "$MAIL_SYSTEM" 'MAIL_SYSTEM'
+if ! [[ "$MAIL_SYSTEM" =~ exim ]]; then
+	echo "ERROR: Exim mail system is not in use ($MAIL_SYSTEM)."
+	exit "$E_DISABLED"
+fi
+
+# Locate exim binary
+if [ -x /usr/sbin/exim ]; then
+	EXIM_BIN="/usr/sbin/exim"
+elif command -v exim >/dev/null 2>&1; then
+	EXIM_BIN="$(command -v exim)"
+elif [ -x /usr/sbin/exim4 ]; then
+	EXIM_BIN="/usr/sbin/exim4"
+else
+	echo "ERROR: Exim binary not found."
+	exit "$E_NOTEXIST"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Total message count (cheap single number)
+total=$("$EXIM_BIN" -bpc 2>/dev/null)
+[ -z "$total" ] && total="0"
+
+# Full queue listing goes to a private temp file, parsed defensively
+queue_tmp="$(mktemp)"
+if [ -z "$queue_tmp" ]; then
+	echo "ERROR: Unable to create temporary file."
+	exit 1
+fi
+trap 'rm -f "$queue_tmp"' EXIT
+chmod 600 "$queue_tmp" 2>/dev/null
+"$EXIM_BIN" -bp > "$queue_tmp" 2>/dev/null
+
+python3 - "$queue_tmp" "$total" "$format" <<'PYEOF'
+import json, sys, re
+
+queue_file = sys.argv[1]
+total = int(str(sys.argv[2]).strip() or 0)
+fmt = sys.argv[3]
+CAP = 1000
+
+# exim -bp line: "  4d  1.9K 19tVDi-0006gA-Ne <sender@example.com> *** frozen ***"
+msg_re = re.compile(
+    r'^\s*(\d+)([smhdw]?)\s+([0-9]+(?:\.[0-9]+)?)([KMG]?)\s+'
+    r'([A-Za-z0-9]{6}-[A-Za-z0-9]{6}-[A-Za-z0-9]{2})([A-Za-z*]*)\s+(.*)$'
+)
+sender_re = re.compile(r'<([^>]*)>')
+
+unit_secs = {'': 1, 's': 1, 'm': 60, 'h': 3600, 'd': 86400, 'w': 604800}
+unit_bytes = {'': 1, 'K': 1024, 'M': 1024**2, 'G': 1024**3}
+
+messages = []
+current = None
+
+try:
+    with open(queue_file, 'r', errors='replace') as f:
+        lines = f.readlines()
+except Exception:
+    lines = []
+
+for raw in lines:
+    line = raw.rstrip('\n')
+    m = msg_re.match(line)
+    if m:
+        age_n, age_u, size_n, size_u, mid, flags, rest = m.groups()
+        age_seconds = int(age_n) * unit_secs.get(age_u, 1)
+        size_bytes = int(float(size_n) * unit_bytes.get(size_u, 1))
+        frozen = '*** frozen ***' in line
+        sm = sender_re.search(rest)
+        if sm:
+            sender = sm.group(1)
+        else:
+            # Defensive fallback: first whitespace token of the remainder
+            tokens = rest.replace('*** frozen ***', '').split()
+            sender = tokens[0] if tokens else ''
+        current = {
+            'id': mid,
+            'age': age_n + age_u,
+            'age_seconds': age_seconds,
+            'size': size_n + size_u,
+            'size_bytes': size_bytes,
+            'sender': sender[:320],
+            'recipients': [],
+            'frozen': frozen,
+            'state': 'frozen' if frozen else 'normal',
+        }
+        messages.append(current)
+        continue
+    # Continuation lines belong to the last seen message (recipients)
+    stripped = line.strip()
+    if not stripped or current is None:
+        continue
+    # Strip exim annotations (frozen markers, trailing commas) defensively
+    stripped = stripped.split('*** frozen ***')[0].strip().rstrip(',').strip()
+    if not stripped or stripped.startswith('***'):
+        continue
+    current['recipients'].append(stripped[:320])
+
+# Oldest first (most urgent ops view)
+messages.sort(key=lambda x: x['age_seconds'], reverse=True)
+
+frozen_count = sum(1 for m in messages if m['frozen'])
+oldest_age = messages[0]['age_seconds'] if messages else 0
+truncated = len(messages) > CAP
+
+summary = {
+    'total': total,
+    'frozen': frozen_count,
+    'oldest_age_seconds': oldest_age,
+    'count_listed': min(len(messages), CAP),
+    'truncated': truncated,
+    'cap': CAP,
+}
+
+if fmt == 'json':
+    print(json.dumps({
+        'summary': summary,
+        'messages': messages[:CAP],
+    }, ensure_ascii=False, indent=2))
+else:
+    print("total: %s  frozen: %s  oldest: %ss  listed: %s%s" % (
+        total, frozen_count, oldest_age, summary['count_listed'],
+        '  (TRUNCATED)' if truncated else ''))
+    print("ID                   AGE   SIZE    STATE    SENDER")
+    print("------------------   ----  ------  -------  ------------------------------")
+    for m in messages[:CAP]:
+        recips = ','.join(m['recipients'])
+        line_out = "%-19s %-5s %-7s %-8s %s" % (
+            m['id'], m['age'], m['size'], m['state'], m['sender'])
+        if recips:
+            line_out += ' -> ' + recips
+        print(line_out)
+PYEOF
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+exit 0

@@ -1,0 +1,167 @@
+#!/bin/bash
+# info: list AIDE file-integrity monitoring status
+# options: [FORMAT]
+#
+# example: v-list-sys-aide json
+# example: v-list-sys-aide shell
+#
+# Reports whether aide/aide-common are installed, whether the daily check
+# cron (/etc/cron.d/nexvia-aide) is present, the last check report
+# ($HESTIA/data/aide/last-check.json), the config deployment mode and the
+# watched paths.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+# Parse arguments
+if [[ "$arg1" =~ ^(json|shell|plain)$ ]]; then
+	format="$arg1"
+else
+	format="json"
+fi
+
+DATA_DIR="$HESTIA/data/aide"
+REPORT_JSON="$DATA_DIR/last-check.json"
+AIDE_CONFD_FILE="/etc/aide/aide.conf.d/95_nexvia"
+AIDE_MAIN_CONF="/etc/aide/aide.conf"
+AIDE_BLOCK_BEGIN="# BEGIN NexviaCP AIDE"
+CRON_FILE="/etc/cron.d/nexvia-aide"
+
+# Gather facts
+if dpkg -s aide >/dev/null 2>&1; then
+	aide_installed="yes"
+else
+	aide_installed="no"
+fi
+if dpkg -s aide-common >/dev/null 2>&1; then
+	aide_common_installed="yes"
+else
+	aide_common_installed="no"
+fi
+if [ -f "$CRON_FILE" ]; then
+	cron_present="yes"
+else
+	cron_present="no"
+fi
+if [ -f "$AIDE_CONFD_FILE" ]; then
+	config_mode="confd"
+	config_file="$AIDE_CONFD_FILE"
+elif [ -f "$AIDE_CONFD_FILE.conf" ]; then
+	config_mode="confd"
+	config_file="$AIDE_CONFD_FILE.conf"
+elif [ -f "$AIDE_MAIN_CONF" ] && grep -qF "$AIDE_BLOCK_BEGIN" "$AIDE_MAIN_CONF"; then
+	config_mode="block"
+	config_file="$AIDE_MAIN_CONF"
+else
+	config_mode="none"
+	config_file=""
+fi
+if [ -f /var/lib/aide/aide.db ]; then
+	baseline_present="yes"
+elif [ -f /var/lib/aide/aide.db.new ]; then
+	baseline_present="pending"
+else
+	baseline_present="no"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+if [ "$format" = "json" ]; then
+	python3 - "$REPORT_JSON" "$aide_installed" "$aide_common_installed" "$cron_present" \
+		"$config_mode" "$config_file" "$baseline_present" <<'PYEOF'
+import json, sys, os, re
+
+(report_file, aide_installed, aide_common_installed, cron_present,
+ config_mode, config_file, baseline_present) = sys.argv[1:8]
+
+# Last check report
+last_check = None
+if os.path.isfile(report_file):
+	try:
+		with open(report_file, 'r', errors='replace') as f:
+			last_check = json.load(f)
+	except Exception:
+		last_check = None
+
+# Watched paths from the managed config
+watched = []
+if config_file and os.path.isfile(config_file):
+	rule_re = re.compile(r'^(/\S+)')
+	try:
+		with open(config_file, 'r', errors='replace') as f:
+			for line in f:
+				line = line.strip()
+				if not line or line.startswith('#'):
+					continue
+				if '=' in line and not line.startswith('/'):
+					continue
+				m = rule_re.match(line)
+				if m:
+					watched.append(m.group(1))
+	except Exception:
+		pass
+
+result = {
+	"installed": {
+		"aide": aide_installed == "yes",
+		"aide_common": aide_common_installed == "yes",
+		"baseline_db": baseline_present,
+	},
+	"cron": {
+		"present": cron_present == "yes",
+		"path": "/etc/cron.d/nexvia-aide",
+		"schedule": "daily 03:40" if cron_present == "yes" else "",
+	},
+	"config": {
+		"mode": config_mode,
+		"file": config_file,
+		"watched_paths": watched,
+	},
+	"last_check": last_check,
+}
+print(json.dumps(result, ensure_ascii=False, indent=2))
+PYEOF
+else
+	echo "================================================================"
+	echo "                 NEXVIACP AIDE INTEGRITY STATUS"
+	echo "================================================================"
+	echo "aide installed:      $aide_installed"
+	echo "aide-common:         $aide_common_installed"
+	echo "baseline db:         $baseline_present"
+	echo "daily cron:          $cron_present ($CRON_FILE, 03:40)"
+	echo "config mode:         $config_mode${config_file:+ ($config_file)}"
+	echo "----------------------------------------------------------------"
+	if [ "$config_mode" != "none" ]; then
+		echo "watched paths:"
+		sed -e 's/#.*//' "$config_file" 2>/dev/null | grep -E '^/' | awk '{print "  " $1}'
+	fi
+	echo "----------------------------------------------------------------"
+	if [ -f "$REPORT_JSON" ]; then
+		echo "last check report ($REPORT_JSON):"
+		cat "$REPORT_JSON"
+	else
+		echo "last check report: none (run v-run-sys-aide-check)"
+	fi
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+exit 0

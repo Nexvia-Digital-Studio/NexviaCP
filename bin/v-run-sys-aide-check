@@ -1,0 +1,156 @@
+#!/bin/bash
+# info: run AIDE file-integrity check and store the report
+# options: NONE
+#
+# example: v-run-sys-aide-check
+#
+# Runs "aide.wrapper --check" (Debian, from aide-common) or falls back to
+# "aide --check" with a 3600s timeout, parses the added/removed/changed
+# summary, writes $HESTIA/data/aide/last-check.json, sends an alert via
+# v-notify-sys-channel (if present) when changes are detected and logs to
+# $HESTIA/log/aide.log. Designed to run from /etc/cron.d/nexvia-aide.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+DATA_DIR="$HESTIA/data/aide"
+REPORT_JSON="$DATA_DIR/last-check.json"
+LOG_FILE="$HESTIA/log/aide.log"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+if ! dpkg -s aide >/dev/null 2>&1; then
+	echo "ERROR: aide is not installed. Run v-add-sys-aide first."
+	exit "$E_NOTEXIST"
+fi
+
+# Prefer Debian wrapper, fall back to plain aide
+AIDE_WRAPPER="$(command -v aide.wrapper 2>/dev/null || echo /usr/sbin/aide.wrapper)"
+AIDE_BIN="$(command -v aide 2>/dev/null || echo /usr/sbin/aide)"
+if [ -x "$AIDE_WRAPPER" ]; then
+	check_cmd=("$AIDE_WRAPPER" --check)
+elif [ -x "$AIDE_BIN" ]; then
+	check_cmd=("$AIDE_BIN" --check)
+else
+	echo "ERROR: aide binary not found."
+	exit "$E_NOTEXIST"
+fi
+
+mkdir -p "$DATA_DIR"
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+out_tmp="$(mktemp)"
+trap 'rm -f "$out_tmp"' EXIT
+chmod 600 "$out_tmp" 2>/dev/null
+
+timeout 3600 "${check_cmd[@]}" > "$out_tmp" 2>&1
+check_rc=$?
+
+# Parse summary lines (e.g. "added entries: 3")
+added=$(grep -iE '^[[:space:]]*added[[:space:]]+entries:' "$out_tmp" | tail -1 | grep -oE '[0-9]+' | tail -1)
+removed=$(grep -iE '^[[:space:]]*removed[[:space:]]+entries:' "$out_tmp" | tail -1 | grep -oE '[0-9]+' | tail -1)
+changed=$(grep -iE '^[[:space:]]*changed[[:space:]]+entries:' "$out_tmp" | tail -1 | grep -oE '[0-9]+' | tail -1)
+[ -z "$added" ] && added=0
+[ -z "$removed" ] && removed=0
+[ -z "$changed" ] && changed=0
+added=$((added + 0))
+removed=$((removed + 0))
+changed=$((changed + 0))
+total_changes=$((added + removed + changed))
+
+# timeout(1) returns 124 on timeout; aide returns a bitmask 1..7 when
+# differences were found, which is not an error for this check.
+if [ "$check_rc" -eq 124 ]; then
+	ok="false"
+	status="timeout"
+elif [ "$check_rc" -gt 7 ]; then
+	ok="false"
+	status="error"
+else
+	if [ "$total_changes" -eq 0 ]; then
+		ok="true"
+		status="clean"
+	else
+		ok="false"
+		status="changes"
+	fi
+fi
+
+check_date="$(date '+%F %T')"
+
+# Store machine-readable report (details trimmed to the output tail)
+python3 - "$REPORT_JSON" "$out_tmp" "$check_date" "$ok" "$status" "$added" "$removed" "$changed" <<'PYEOF'
+import json, sys
+
+report_file, out_file, date, ok, status, added, removed, changed = (
+    sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5],
+    int(sys.argv[6]), int(sys.argv[7]), int(sys.argv[8]),
+)
+
+# Trimmed details: last 4096 bytes / 100 lines (summary + recent findings)
+details = ""
+try:
+    with open(out_file, 'r', errors='replace') as f:
+        details = ''.join(f.readlines()[-100:])[-4096:]
+except Exception:
+    details = ""
+
+report = {
+    "date": date,
+    "ok": ok == "true",
+    "status": status,
+    "added": added,
+    "removed": removed,
+    "changed": changed,
+    "details_trimmed": details,
+}
+with open(report_file, "w") as f:
+    json.dump(report, f, indent=2)
+PYEOF
+
+# Log summary line
+echo "$check_date status=$status ok=$ok added=$added removed=$removed changed=$changed rc=$check_rc" >> "$LOG_FILE"
+
+# Guarded alert when changes were detected
+# (v-notify-sys-channel 'MESSAGE' [CHANNEL|all] [TITLE] — exits 0 if no
+# channels are configured, so failures stay silent by design)
+if [ "$total_changes" -gt 0 ] && [ -x "$HESTIA/bin/v-notify-sys-channel" ]; then
+	"$HESTIA/bin/v-notify-sys-channel" \
+		"AIDE integrity check detected changes: added=$added removed=$removed changed=$changed (host: $(hostname))." \
+		"all" "AIDE Integrity Alert" \
+		>> "$LOG_FILE" 2>&1
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+if [ "$status" = "clean" ]; then
+	$BIN/v-log-action "system" "Info" "Security" "AIDE check completed: no integrity changes detected."
+else
+	$BIN/v-log-action "system" "Warning" "Security" "AIDE check reported: $status (added=$added removed=$removed changed=$changed)."
+fi
+
+echo "$check_date status=$status added=$added removed=$removed changed=$changed"
+
+exit 0
