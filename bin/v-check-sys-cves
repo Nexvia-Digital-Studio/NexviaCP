@@ -1,0 +1,358 @@
+#!/bin/bash
+# info: check pending OS security updates (CVE exposure) and save a report
+# options: [--update] [FORMAT]
+#
+# example: v-check-sys-cves
+# example: v-check-sys-cves json
+# example: v-check-sys-cves --update shell
+#
+# Counts pending security/total updates on Debian/Ubuntu, records installed
+# daemon versions (informational) and stores the result in
+# $HESTIA/data/cves/last-report.json.
+#   --update  run "apt-get update" first (root only, 120s timeout)
+# Formats: json (default), shell, plain
+# Notes: update counts prefer /usr/lib/update-notifier/apt-check; the
+# per-package security list uses the "-security" suite heuristic from an
+# "apt-get -s upgrade" simulation (Debian suite strings vary:
+# "-security", "bullseye-security", "Ubuntu:24.04/noble-security", ...).
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+arg2=$2
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+CVE_DIR="$HESTIA/data/cves"
+REPORT_FILE="$CVE_DIR/last-report.json"
+
+# Parse arguments
+do_update=false
+format=""
+for a in "$arg1" "$arg2"; do
+	case "$a" in
+		--update) do_update=true ;;
+		json | shell | plain) format="$a" ;;
+		"") ;;
+		*)
+			echo "ERROR: Invalid argument '$a'."
+			exit 1
+			;;
+	esac
+done
+[ -n "$format" ] || format="json"
+
+# Force English locale so apt/apt-check output is parseable everywhere
+export LC_ALL=C
+export LANG=C
+
+work_dir="$(mktemp -d 2>/dev/null)"
+if [ -z "$work_dir" ] || [ ! -d "$work_dir" ]; then
+	echo "ERROR: Unable to create temporary directory."
+	exit 1
+fi
+notes_file="$work_dir/notes"
+aptcheck_file="$work_dir/aptcheck"
+sim_file="$work_dir/sim"
+upgradable_file="$work_dir/upgradable"
+services_file="$work_dir/services"
+: > "$notes_file"
+: > "$aptcheck_file"
+: > "$sim_file"
+: > "$upgradable_file"
+: > "$services_file"
+
+cleanup() {
+	rm -rf "$work_dir"
+}
+trap cleanup EXIT HUP INT TERM
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+apt_update_ran="false"
+
+# a) Refresh the package cache when requested (root only, never fatal)
+if ! command -v apt-get >/dev/null 2>&1; then
+	echo "apt-get not found; unable to query pending updates" >> "$notes_file"
+elif [ "$do_update" != "true" ]; then
+	: # cache refresh not requested
+elif [ "$(id -u)" != "0" ]; then
+	echo "apt-get update skipped (not running as root); using existing package cache" >> "$notes_file"
+else
+	timeout 120 apt-get -qq -o Acquire::Retries=2 update >/dev/null 2>&1
+	update_rc=$?
+	if [ "$update_rc" -eq 0 ]; then
+		apt_update_ran="true"
+	else
+		echo "apt-get update failed (exit $update_rc); continuing with existing package cache" >> "$notes_file"
+	fi
+fi
+
+# b) Authoritative counts from update-notifier when available
+if [ -x /usr/lib/update-notifier/apt-check ]; then
+	timeout 60 /usr/lib/update-notifier/apt-check --human-readable > "$aptcheck_file" 2>/dev/null
+	aptcheck_rc=$?
+	if [ "$aptcheck_rc" -ne 0 ]; then
+		: > "$aptcheck_file"
+		echo "apt-check failed (exit $aptcheck_rc); using apt-get simulation heuristic" >> "$notes_file"
+	fi
+else
+	echo "update-notifier apt-check not available; using apt-get simulation heuristic" >> "$notes_file"
+fi
+
+# Simulated upgrade: "Inst" lines are the pending updates; the parenthesised
+# group holds the new version followed by the suites it comes from.
+if command -v apt-get >/dev/null 2>&1; then
+	apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | awk '/^Inst/' > "$sim_file" || true
+fi
+
+# c) Full upgradable list (skip the "Listing..." header line)
+if command -v apt >/dev/null 2>&1; then
+	apt list --upgradable 2>/dev/null | tail -n +2 > "$upgradable_file" || true
+fi
+
+# d) Installed daemon versions (informational, first line only)
+if command -v nginx >/dev/null 2>&1; then
+	version="$(nginx -v 2>&1 | head -n1)"
+	[ -n "$version" ] && printf 'nginx\t%s\n' "$version" >> "$services_file"
+fi
+
+exim_bin=""
+if command -v exim4 >/dev/null 2>&1; then
+	exim_bin="exim4"
+elif command -v exim >/dev/null 2>&1; then
+	exim_bin="exim"
+fi
+if [ -n "$exim_bin" ]; then
+	# "-bV" is the safe version flag for exim (writes to stderr)
+	version="$("$exim_bin" -bV 2>&1 | head -n1)"
+	[ -n "$version" ] && printf 'exim\t%s\n' "$version" >> "$services_file"
+fi
+
+db_bin=""
+db_name=""
+for candidate in mariadbd mysqld mariadb mysql; do
+	if command -v "$candidate" >/dev/null 2>&1; then
+		db_bin="$candidate"
+		case "$candidate" in
+			maria*) db_name="mariadb" ;;
+			*) db_name="mysql" ;;
+		esac
+		break
+	fi
+done
+if [ -n "$db_bin" ]; then
+	version="$("$db_bin" --version 2>&1 | head -n1)"
+	[ -n "$version" ] && printf '%s\t%s\n' "$db_name" "$version" >> "$services_file"
+fi
+
+php_bin=""
+for candidate in php php8.4 php8.3 php8.2 php8.1 php8.0 php7.4; do
+	if command -v "$candidate" >/dev/null 2>&1; then
+		php_bin="$candidate"
+		break
+	fi
+done
+if [ -n "$php_bin" ]; then
+	version="$("$php_bin" -v 2>&1 | head -n1)"
+	[ -n "$version" ] && printf 'php\t%s\n' "$version" >> "$services_file"
+fi
+
+if command -v docker >/dev/null 2>&1; then
+	version="$(docker --version 2>&1 | head -n1)"
+	[ -n "$version" ] && printf 'docker\t%s\n' "$version" >> "$services_file"
+fi
+
+# e) Build, save and print the report
+if ! command -v python3 >/dev/null 2>&1; then
+	echo "ERROR: python3 is required to build the CVE report."
+	exit 1
+fi
+
+mkdir -p "$CVE_DIR" >/dev/null 2>&1 || echo "unable to create $CVE_DIR" >> "$notes_file"
+
+# Exit codes of the python step: 0 = ok, 2 = report file could not be written
+python3 - "$notes_file" "$aptcheck_file" "$sim_file" "$upgradable_file" \
+	"$services_file" "$REPORT_FILE" "$format" "$apt_update_ran" <<'PYEOF'
+import json
+import os
+import re
+import sys
+from datetime import datetime
+
+notes_f, aptcheck_f, sim_f, upgradable_f, services_f, report_f, out_format, apt_update_ran = sys.argv[1:9]
+
+UPGRADABLE_CAP = 500
+
+def read_lines(path):
+    try:
+        with open(path, "r", errors="replace") as f:
+            return [l.rstrip("\n") for l in f if l.strip()]
+    except OSError:
+        return []
+
+notes = []
+
+# --- counts: prefer apt-check, fall back to simulation heuristic -----------
+total = None
+security = None
+aptcheck_text = ""
+try:
+    with open(aptcheck_f, "r", errors="replace") as f:
+        aptcheck_text = f.read()
+except OSError:
+    pass
+
+m = re.search(r"(\d+)\s+packages?\s+can\s+be\s+updated", aptcheck_text)
+if m is None:
+    m = re.search(r"(\d+)\s+updates?\s+can\s+be\s+applied(?:\s+immediately)?", aptcheck_text)
+if m is not None:
+    total = int(m.group(1))
+
+m = re.search(r"(\d+)\s+updates?\s+are\s+security\s+updates", aptcheck_text)
+if m is None:
+    m = re.search(r"(\d+)\s+of\s+these\s+updates\s+are\s+(?:standard\s+)?security\s+updates", aptcheck_text)
+if m is not None:
+    security = int(m.group(1))
+
+# --- simulation: total + concrete security package list --------------------
+sim_total = 0
+security_packages = []
+for line in read_lines(sim_f):
+    fields = line.split()
+    if len(fields) < 2 or fields[0] != "Inst":
+        continue
+    sim_total += 1
+    name = fields[1]
+    version = ""
+    g = re.search(r"\(([^)]*)\)", line)
+    if g is not None:
+        inner = g.group(1).split()
+        if inner:
+            version = inner[0]
+        # Debian/Ubuntu suite strings vary: "-security", "bullseye-security",
+        # "Ubuntu:24.04/noble-security" ... any "-security" hit is the heuristic
+        if "-security" in g.group(1):
+            security_packages.append({"name": name, "version": version})
+
+used_heuristic = False
+if total is None and security is None:
+    used_heuristic = True
+    total = sim_total
+    security = len(security_packages)
+elif total is not None and security is None:
+    security = len(security_packages)
+if not used_heuristic and security != len(security_packages):
+    notes.append(
+        "counts come from apt-check; the security package list below uses the "
+        "-security suite heuristic and may differ (%d vs %d)"
+        % (security, len(security_packages))
+    )
+
+# --- full upgradable list ---------------------------------------------------
+upgradable = []
+for line in read_lines(upgradable_f):
+    fields = line.split()
+    if len(fields) < 2 or "/" not in fields[0]:
+        continue
+    package, suite = fields[0].split("/", 1)
+    upgradable.append({"package": package, "version": fields[1], "suite": suite})
+if len(upgradable) > UPGRADABLE_CAP:
+    notes.append("upgradable list capped at %d entries (%d total)" % (UPGRADABLE_CAP, len(upgradable)))
+upgradable = upgradable[:UPGRADABLE_CAP]
+
+# --- installed service versions --------------------------------------------
+services = []
+for line in read_lines(services_f):
+    parts = line.split("\t", 1)
+    if len(parts) == 2 and parts[0] and parts[1]:
+        services.append({"name": parts[0], "version": parts[1][:200]})
+
+notes.extend(read_lines(notes_f))
+
+report = {
+    "generated_at": datetime.now().astimezone().strftime("%Y-%m-%dT%H:%M:%S%z"),
+    "apt_update_ran": apt_update_ran == "true",
+    "security_updates": security,
+    "total_updates": total,
+    "security_packages": security_packages,
+    "upgradable": upgradable,
+    "services": services,
+    "error_notes": notes,
+}
+
+write_failed = False
+try:
+    with open(report_f, "w") as f:
+        f.write(json.dumps(report, ensure_ascii=False, indent=2))
+    os.chmod(report_f, 0o640)
+except OSError as e:
+    write_failed = True
+    report["error_notes"].append("failed to write report file %s: %s" % (report_f, e.strerror or e))
+
+if out_format == "json":
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+else:
+    print("GENERATED_AT='%s'" % report["generated_at"])
+    print("APT_UPDATE_RAN='%s'" % ("true" if report["apt_update_ran"] else "false"))
+    print("SECURITY_UPDATES='%d'" % security)
+    print("TOTAL_UPDATES='%d'" % total)
+    print("SECURITY_PACKAGES_COUNT='%d'" % len(security_packages))
+    print("UPGRADABLE_COUNT='%d'" % len(upgradable))
+    print("SERVICES='%s'" % ",".join(s["name"] for s in services))
+    print("")
+    print("# security packages")
+    for p in security_packages:
+        print("%s\t%s" % (p["name"], p["version"]))
+    print("")
+    print("# upgradable packages")
+    for p in upgradable:
+        print("%s\t%s\t%s" % (p["package"], p["version"], p["suite"]))
+    print("")
+    print("# services")
+    for s in services:
+        print("%s\t%s" % (s["name"], s["version"]))
+    print("")
+    print("# notes")
+    for n in report["error_notes"]:
+        print("- %s" % n)
+
+sys.exit(2 if write_failed else 0)
+PYEOF
+
+py_rc=$?
+if [ "$py_rc" -ne 0 ] && [ "$py_rc" -ne 2 ]; then
+	echo "ERROR: Failed to build the CVE report."
+	exit 1
+fi
+
+# f) Optional alert through the system notification channel (never fatal)
+if [ "$py_rc" -eq 0 ] && [ -f "$REPORT_FILE" ] && [ -x "$HESTIA/bin/v-notify-sys-channel" ]; then
+	security_updates="$(sed -n 's/.*"security_updates": \([0-9]\+\).*/\1/p' "$REPORT_FILE" | head -n1)"
+	total_updates="$(sed -n 's/.*"total_updates": \([0-9]\+\).*/\1/p' "$REPORT_FILE" | head -n1)"
+	if [ -n "$security_updates" ] && [ "$security_updates" -gt 0 ] 2>/dev/null; then
+		"$HESTIA/bin/v-notify-sys-channel" \
+			"$(hostname): ${security_updates} security updates pending (of ${total_updates:-unknown} total packages). See v-check-sys-cves." \
+			"all" \
+			"Security Updates" \
+			>/dev/null 2>&1 || true
+	fi
+fi
+
+if [ "$py_rc" -eq 2 ]; then
+	exit 1
+fi
+exit 0
