@@ -83,6 +83,26 @@ function nav() {
 function sidebarDocs() {
 	return [
 		{
+			text: 'NexviaCP',
+			collapsed: false,
+			items: [
+				{ text: 'Overview', link: '/docs/nexvia/overview' },
+				{ text: 'Resource governance & cgroups', link: '/docs/nexvia/resource-governance' },
+				{ text: 'AI healing', link: '/docs/nexvia/ai-healing' },
+				{ text: 'Anomaly detection', link: '/docs/nexvia/anomaly-detection' },
+				{ text: 'WAF & malware', link: '/docs/nexvia/waf-malware' },
+				{ text: 'Docker & Portainer', link: '/docs/nexvia/docker-portainer' },
+				{ text: 'Git deploy & PR preview', link: '/docs/nexvia/git-deploy' },
+				{ text: 'Cache governance', link: '/docs/nexvia/cache-governance' },
+				{ text: 'Cloud backup (Restic)', link: '/docs/nexvia/cloud-backup' },
+				{ text: 'DB Studio', link: '/docs/nexvia/db-studio' },
+				{ text: 'Secrets vault', link: '/docs/nexvia/secrets-vault' },
+				{ text: 'Core updates', link: '/docs/nexvia/core-updates' },
+				{ text: 'App runtimes (Node / .NET)', link: '/docs/nexvia/app-runtimes' },
+				{ text: 'Notifications & ops tooling', link: '/docs/nexvia/notifications-tooling' },
+			],
+		},
+		{
 			text: 'Introduction',
 			collapsed: false,
 			items: [
