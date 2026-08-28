@@ -1,0 +1,129 @@
+#!/bin/bash
+# info: list REST API rate limit status and usage counters
+# options: [json|shell]
+#
+# example: v-list-sys-api-stats json
+# example: v-list-sys-api-stats shell
+#
+# Reports the active per-key rate limit (from $HESTIA/data/api-rate-limit,
+# default 120 when missing/invalid), the 60 second rate limit window and a
+# summary of the per-key counter files the web API keeps in the temp
+# directory (hestia-api-rl/*.cnt, mode 0700): how many keys are active in
+# the current window and the total number of requests counted in it.
+
+# Use a stable locale so regex character ranges behave identically
+# regardless of the server language (e.g. tr_TR.UTF-8 collation)
+export LC_ALL=C
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+format="${arg1:-json}"
+LIMIT_FILE="$HESTIA/data/api-rate-limit"
+WINDOW=60
+DEFAULT_LIMIT=120
+# PHP's sys_get_temp_dir() honours TMPDIR and falls back to /tmp; the
+# counters live in the dedicated hestia-api-rl subdirectory (mode 0700)
+COUNTER_DIR="${TMPDIR:-/tmp}/hestia-api-rl"
+
+# JSON list function
+json_list() {
+	cat <<EOF
+{
+    "limit": $limit,
+    "limit_source": "$limit_source",
+    "window_seconds": $WINDOW,
+    "active_keys": $active_keys,
+    "total_requests": $total_requests,
+    "counter_dir": "$COUNTER_DIR",
+    "counter_files": $counter_files
+}
+EOF
+}
+
+# SHELL list function
+shell_list() {
+	echo "LIMIT:               $limit"
+	echo "LIMIT SOURCE:        $limit_source"
+	echo "WINDOW (SECONDS):    $WINDOW"
+	echo "ACTIVE KEYS:         $active_keys"
+	echo "REQUESTS IN WINDOW:  $total_requests"
+	echo "COUNTER DIR:         $COUNTER_DIR"
+	echo "COUNTER FILES:       $counter_files"
+}
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+case "$format" in
+	json) ;;
+	shell) ;;
+	*)
+		echo "ERROR: Invalid FORMAT '$format'. Allowed: json, shell."
+		exit 1
+		;;
+esac
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Read the active limit (default when missing or invalid)
+limit="$DEFAULT_LIMIT"
+limit_source="default"
+if [ -r "$LIMIT_FILE" ]; then
+	stored_limit=$(head -n 1 "$LIMIT_FILE" 2> /dev/null | tr -d '[:space:]')
+	if [[ "$stored_limit" =~ ^[0-9]+$ ]] && [ "$stored_limit" -ge 1 ] \
+		&& [ "$stored_limit" -le 100000 ]; then
+		limit="$stored_limit"
+		limit_source="file"
+	fi
+fi
+
+# Summarize the per-key counter files (format: "window_start count")
+now=$(date +%s)
+counter_files=0
+active_keys=0
+total_requests=0
+for cnt in "$COUNTER_DIR"/*.cnt; do
+	[ -f "$cnt" ] || continue
+	counter_files=$((counter_files + 1))
+	win_start=""
+	win_count=""
+	read -r win_start win_count < "$cnt" 2> /dev/null || continue
+	win_count="${win_count:-0}"
+	# Skip corrupted counters (both fields must be plain integers)
+	case "${win_start}${win_count}" in
+		'' | *[!0-9]*) continue ;;
+	esac
+	if [ "$((now - win_start))" -lt "$WINDOW" ]; then
+		active_keys=$((active_keys + 1))
+		total_requests=$((total_requests + win_count))
+	fi
+done
+
+case "$format" in
+	json) json_list ;;
+	shell) shell_list ;;
+esac
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+exit 0

@@ -49,6 +49,118 @@ function api_error($exit_code, $message, $hst_return, bool $add_log = false, $us
 }
 
 /**
+ * Per-key API rate limiter using a fixed 60 second window.
+ *
+ * Counter files are kept in a dedicated 0700 subdirectory of
+ * sys_get_temp_dir() (writable by hestiaweb, unlike $HESTIA/data/keys)
+ * and are named after a SHA-256 hash of the identity, so the key itself
+ * never appears in a file name. The subdirectory isolation plus a
+ * symlink guard keep other same-user file writes (e.g. the
+ * v-make-tmp-file API command) from pre-creating or hijacking a counter. Every counter
+ * update is atomic (flock). The limiter fails open: when the temp
+ * directory or the counter file is unavailable the request is allowed
+ * through and the reason is recorded via error_log(), so a broken limiter
+ * can never take the API down. The limit is read from
+ * /usr/local/hestia/data/api-rate-limit (mode 644, set with
+ * v-set-sys-api-rate-limit); when unreadable the default of 120 is used.
+ *
+ * @param string $identity Stable per-key identity (access key id, key file
+ *                         name or legacy username); never written to disk
+ * @param string $hst_return Return format ("code" or "data")
+ * @return void
+ */
+function api_rate_limit(string $identity, string $hst_return) {
+	$limit_file = "/usr/local/hestia/data/api-rate-limit";
+	$window = 60;
+	$limit = 120; // default when the limit file is missing or unreadable
+	if (is_readable($limit_file)) {
+		$raw_limit = trim(@file_get_contents($limit_file));
+		if (ctype_digit($raw_limit) && (int) $raw_limit >= 1) {
+			$limit = (int) $raw_limit;
+		}
+	}
+
+	$tmp_dir = sys_get_temp_dir();
+	if (!is_dir($tmp_dir) || !is_writable($tmp_dir)) {
+		error_log("hestia api rate limit: temp directory not writable, failing open");
+		return;
+	}
+
+	// Counters live in a dedicated 0700 subdirectory so files sprayed into
+	// the temp directory root by other means (e.g. the v-make-tmp-file API
+	// command) can never collide with, or pre-create, a counter.
+	$counter_dir = $tmp_dir . "/hestia-api-rl";
+	if (!is_dir($counter_dir)) {
+		@mkdir($counter_dir, 0700);
+		if (is_dir($counter_dir)) {
+			@chmod($counter_dir, 0700);
+		}
+	}
+	if (!is_dir($counter_dir) || !is_writable($counter_dir)) {
+		error_log("hestia api rate limit: counter directory unavailable, failing open");
+		return;
+	}
+
+	$counter_file = $counter_dir . "/" . hash("sha256", $identity) . ".cnt";
+	$now = time();
+
+	// Never follow a symlinked counter file (same-user tampering):
+	// recreate it as a fresh regular file instead.
+	if (@is_link($counter_file)) {
+		error_log("hestia api rate limit: counter file is a symlink, recreating");
+		@unlink($counter_file);
+	}
+
+	$fp = @fopen($counter_file, "c+");
+	if (!$fp) {
+		error_log("hestia api rate limit: unable to open counter file, failing open");
+		return;
+	}
+
+	if (!flock($fp, LOCK_EX)) {
+		fclose($fp);
+		error_log("hestia api rate limit: unable to lock counter file, failing open");
+		return;
+	}
+
+	// Read the "window_start count" pair written by previous requests
+	$contents = trim((string) stream_get_contents($fp));
+	$parts = explode(" ", $contents);
+	$window_start =
+		isset($parts[0]) && ctype_digit($parts[0]) && (int) $parts[0] > 0 ? (int) $parts[0] : 0;
+	$count = isset($parts[1]) && ctype_digit($parts[1]) ? (int) $parts[1] : 0;
+
+	// A window start in the future means a tampered counter: clamp it to
+	// now so a forged file can never lock an identity for longer than one
+	// regular window
+	if ($window_start > $now) {
+		$window_start = $now;
+	}
+
+	// Start a new window when the previous one has expired
+	if ($window_start === 0 || $now - $window_start >= $window) {
+		$window_start = $now;
+		$count = 0;
+	}
+	$count++;
+
+	// Persist the counter before deciding, so rejected requests keep
+	// counting towards the current window
+	ftruncate($fp, 0);
+	rewind($fp);
+	fwrite($fp, $window_start . " " . $count . "\n");
+	fflush($fp);
+	flock($fp, LOCK_UN);
+	fclose($fp);
+
+	if ($count > $limit) {
+		$retry_after = max(1, (int) ceil($window_start + $window - $now));
+		header("Retry-After: $retry_after");
+		api_error(429, "rate limit exceeded", $hst_return);
+	}
+}
+
+/**
  * Legacy connection format using hash or user and password.
  *
  * @param array{user: string?, pass: string?, hash?: string, cmd: string, arg1?: string, arg2?: string, arg3?: string, arg4?: string, arg5?: string, arg6?: string, arg7?: string, arg8?: string, arg9?: string, arg10?: string, arg11?: string, arg12?: string, arg13?: string, returncode?: string} $request_data
@@ -149,6 +261,9 @@ function api_legacy(array $request_data) {
 		if ($return_var > 0) {
 			api_error(E_PASSWORD, "Error: authentication failed", $hst_return);
 		}
+
+		// Rate limit the authenticated legacy user before any command is prepared
+		api_rate_limit("user:" . $root_user, $hst_return);
 	} else {
 		$key = "/usr/local/hestia/data/keys/" . basename($request_data["hash"]);
 		$v_ip = quoteshellarg(get_real_user_ip());
@@ -162,6 +277,9 @@ function api_legacy(array $request_data) {
 		if ($return_var > 0) {
 			api_error(E_PASSWORD, "Error: authentication failed", $hst_return);
 		}
+
+		// Rate limit the authenticated legacy key before any command is prepared
+		api_rate_limit("key:" . basename($request_data["hash"]), $hst_return);
 	}
 
 	$hst_cmd = trim($request_data["cmd"] ?? "");
@@ -286,6 +404,9 @@ function api_connection(array $request_data) {
 	}
 	$key_data = json_decode(implode("", $output), true) ?? [];
 	unset($output, $return_var);
+
+	// Rate limit the authenticated key before any command is prepared
+	api_rate_limit("key:" . $hst_access_key_id, $hst_return);
 
 	$key_user = $key_data["USER"];
 	$user_arg_position =

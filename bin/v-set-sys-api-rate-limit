@@ -1,0 +1,74 @@
+#!/bin/bash
+# info: set the per-key REST API rate limit (requests per 60s window)
+# options: LIMIT
+#
+# example: v-set-sys-api-rate-limit 300
+#
+# LIMIT is an integer between 1 and 100000 and defines how many requests a
+# single API key may perform per 60 second window. The value is stored in
+# $HESTIA/data/api-rate-limit (mode 644 so the web API running as hestiaweb
+# can read it). There is no read mode: use v-list-sys-api-stats to inspect
+# the currently active limit.
+
+# Use a stable locale so regex character ranges behave identically
+# regardless of the server language (e.g. tr_TR.UTF-8 collation)
+export LC_ALL=C
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+arg1=$1
+limit="$arg1"
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+LIMIT_FILE="$HESTIA/data/api-rate-limit"
+
+#----------------------------------------------------------#
+#                       Verifications                      #
+#----------------------------------------------------------#
+
+# Ensure root user
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: v-set-sys-api-rate-limit can be executed only by root user"
+	exit 10
+fi
+
+# Limit is mandatory (no read mode)
+if [ -z "$limit" ]; then
+	echo "ERROR: Limit is required. Usage: v-set-sys-api-rate-limit LIMIT (integer 1-100000)."
+	exit 1
+fi
+
+# Integer 1-100000 only
+if ! [[ "$limit" =~ ^[0-9]+$ ]] || [ "$limit" -lt 1 ] || [ "$limit" -gt 100000 ]; then
+	echo "ERROR: Invalid limit '$limit'. Use an integer between 1 and 100000."
+	exit 1
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+printf '%s\n' "$limit" > "$LIMIT_FILE" || {
+	echo "ERROR: Unable to write $LIMIT_FILE"
+	exit 1
+}
+chmod 644 "$LIMIT_FILE"
+
+if [ -x "$HESTIA/bin/v-log-action" ]; then
+	$HESTIA/bin/v-log-action "system" "Info" "API" "REST API rate limit set to $limit requests per 60s window."
+fi
+
+echo "[+] API rate limit set to $limit requests per 60s window ($LIMIT_FILE)"
+exit 0
