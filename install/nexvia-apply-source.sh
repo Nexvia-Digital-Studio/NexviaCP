@@ -147,6 +147,17 @@ if [ -d "$HESTIA/web/fm" ]; then
 	chown -R hestiaweb:hestiaweb "$HESTIA/web/fm/private" 2>/dev/null || true
 fi
 
+# Sync Dovecot config
+if [ -d "/etc/dovecot/conf.d" ]; then
+	DOVECOT_VER=$(dovecot --version 2>/dev/null | cut -d. -f1,2)
+	if [ "$DOVECOT_VER" = "2.4" ] && [ -d "$HESTIA/install/common/dovecot/2.4/conf.d" ]; then
+		cp -rf "$HESTIA/install/common/dovecot/2.4/conf.d/." "/etc/dovecot/conf.d/" 2>/dev/null || true
+	elif [ -d "$HESTIA/install/common/dovecot/2.3/conf.d" ]; then
+		cp -rf "$HESTIA/install/common/dovecot/2.3/conf.d/." "/etc/dovecot/conf.d/" 2>/dev/null || true
+	fi
+	systemctl reload dovecot 2>/dev/null || systemctl restart dovecot 2>/dev/null || true
+fi
+
 #----------------------------------------------------------#
 #                 5. Restart the panel                      #
 #----------------------------------------------------------#

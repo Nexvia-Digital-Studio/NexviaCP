@@ -64,6 +64,39 @@ cp -rf "$src_dir/web"/* "$HESTIA/web/" 2>/dev/null || true
 
 rm -rf "$tmp_dir"
 
+# Sync templates to live data directory
+mkdir -p "$HESTIA/data/templates"
+cp -rf "$HESTIA/install/deb/templates/." "$HESTIA/data/templates/" 2>/dev/null || true
+[ -d "$HESTIA/install/common/templates/web" ] && cp -rf "$HESTIA/install/common/templates/web/." "$HESTIA/data/templates/web/" 2>/dev/null || true
+[ -d "$HESTIA/install/common/templates/dns" ] && cp -rf "$HESTIA/install/common/templates/dns/." "$HESTIA/data/templates/dns/" 2>/dev/null || true
+
+# Sync packages
+mkdir -p "$HESTIA/data/packages"
+[ -d "$HESTIA/install/common/packages" ] && cp -rf "$HESTIA/install/common/packages/." "$HESTIA/data/packages/" 2>/dev/null || true
+
+# Ensure File Manager is installed and configuration is synced
+if [ ! -d "$HESTIA/web/fm" ] || [ ! -f "$HESTIA/web/fm/configuration.php" ]; then
+	echo "[*] Ensuring File Manager is installed..."
+	"$HESTIA/bin/v-add-sys-filemanager" >/dev/null 2>&1 || true
+fi
+if [ -d "$HESTIA/web/fm" ]; then
+	cp -f "$HESTIA/install/deb/filemanager/filegator/configuration.php" "$HESTIA/web/fm/configuration.php" 2>/dev/null || true
+	chown root:root "$HESTIA/web/fm/configuration.php" 2>/dev/null || true
+	chmod 644 "$HESTIA/web/fm/configuration.php" 2>/dev/null || true
+	chown -R hestiaweb:hestiaweb "$HESTIA/web/fm/private" 2>/dev/null || true
+fi
+
+# Sync Dovecot config if present
+if [ -d "/etc/dovecot/conf.d" ]; then
+	DOVECOT_VER=$(dovecot --version 2>/dev/null | cut -d. -f1,2)
+	if [ "$DOVECOT_VER" = "2.4" ] && [ -d "$HESTIA/install/common/dovecot/2.4/conf.d" ]; then
+		cp -rf "$HESTIA/install/common/dovecot/2.4/conf.d/." "/etc/dovecot/conf.d/" 2>/dev/null || true
+	elif [ -d "$HESTIA/install/common/dovecot/2.3/conf.d" ]; then
+		cp -rf "$HESTIA/install/common/dovecot/2.3/conf.d/." "/etc/dovecot/conf.d/" 2>/dev/null || true
+	fi
+	systemctl reload dovecot 2>/dev/null || true
+fi
+
 # Reload panel services gracefully in background so HTTP response is returned cleanly
 echo "[*] Scheduling graceful service reload..."
 (sleep 1 && (systemctl reload hestia-php hestia-nginx 2>/dev/null || systemctl restart hestia-php hestia-nginx 2>/dev/null)) >/dev/null 2>&1 &
