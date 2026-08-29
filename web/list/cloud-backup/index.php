@@ -113,7 +113,7 @@ if (!empty($_POST["save_settings"])) {
 // 2. Action: Test Connection
 if (isset($_GET["test_connection"]) || isset($_POST["test_connection"])) {
 	if (verify_csrf($_REQUEST)) {
-		exec(HESTIA_CMD . "v-backup-cloud-sync " . quoteshellarg($user) . " test", $test_output, $ret_code);
+		exec(HESTIA_CMD . "v-backup-cloud-sync " . $user . " test", $test_output, $ret_code);
 		if ($ret_code === 0) {
 			$_SESSION["ok_msg"] = $is_tr
 				? "Bağlantı Başarılı: Bulut depolama alanı doğrulandı ve yazma yetkisi onaylandı."
@@ -129,7 +129,7 @@ if (isset($_GET["test_connection"]) || isset($_POST["test_connection"])) {
 // 3. Action: Manual Sync
 if (isset($_GET["sync_now"]) || isset($_POST["sync_now"])) {
 	if (verify_csrf($_REQUEST)) {
-		exec(HESTIA_CMD . "v-backup-cloud-sync " . quoteshellarg($user) . " sync", $sync_output, $ret_code);
+		exec(HESTIA_CMD . "v-backup-cloud-sync " . $user . " sync", $sync_output, $ret_code);
 		if ($ret_code === 0) {
 			$_SESSION["ok_msg"] = $is_tr
 				? "Bulut senkronizasyonu tamamlandı: Tüm yerel yedekler şifrelenerek buluta aktarıldı."
@@ -145,7 +145,7 @@ if (isset($_GET["sync_now"]) || isset($_POST["sync_now"])) {
 // 4. Action: Backup & Sync
 if (isset($_POST["backup_and_sync"])) {
 	if (verify_csrf($_POST)) {
-		exec(HESTIA_CMD . "v-backup-cloud-sync " . quoteshellarg($user) . " backup-and-sync", $sync_output, $ret_code);
+		exec(HESTIA_CMD . "v-backup-cloud-sync " . $user . " backup-and-sync", $sync_output, $ret_code);
 		if ($ret_code === 0) {
 			$_SESSION["ok_msg"] = $is_tr
 				? "Yeni yedek alındı ve güvenli şekilde bulut depolamaya aktarıldı."
@@ -162,7 +162,7 @@ if (isset($_POST["backup_and_sync"])) {
 if (!empty($_GET["restore_file"])) {
 	if (verify_csrf($_GET)) {
 		$v_file = quoteshellarg($_GET["restore_file"]);
-		exec(HESTIA_CMD . "v-backup-cloud-sync " . quoteshellarg($user) . " restore " . $v_file, $res_output, $ret_code);
+		exec(HESTIA_CMD . "v-backup-cloud-sync " . $user . " restore " . $v_file, $res_output, $ret_code);
 		if ($ret_code === 0) {
 			$_SESSION["ok_msg"] = $is_tr
 				? "Bulut yedeği indirildi ve şifresi çözülerek yerel sisteme aktarıldı: " . htmlspecialchars($_GET["restore_file"])
@@ -176,11 +176,11 @@ if (!empty($_GET["restore_file"])) {
 }
 
 // Fetch Remote Cloud Backups
-exec(HESTIA_CMD . "v-backup-cloud-sync " . quoteshellarg($user) . " list json", $list_output, $ret_val);
+exec(HESTIA_CMD . "v-backup-cloud-sync " . $user . " list json", $list_output, $ret_val);
 $cloud_backups = json_decode(implode("\n", $list_output), true) ?: [];
 
 // Fetch Local Backups count
-exec(HESTIA_CMD . "v-list-user-backups " . quoteshellarg($user) . " json", $local_b_out, $ret_val);
+exec(HESTIA_CMD . "v-list-user-backups " . $user . " json", $local_b_out, $ret_val);
 $local_backups = json_decode(implode("", $local_b_out), true) ?: [];
 
 // Secrets are write-only: hand the template "is set" flags only and strip the

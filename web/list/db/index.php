@@ -17,7 +17,7 @@ if (!empty($_POST["action_sync_db"])) {
 		header("Location: /list/db/");
 		exit();
 	}
-	exec(HESTIA_CMD . "v-sync-sys-databases " . quoteshellarg($user), $s_out, $s_code);
+	exec(HESTIA_CMD . "v-sync-sys-databases " . $user, $s_out, $s_code);
 	if ($s_code === 0) {
 		$_SESSION["ok_msg"] = $is_tr ? "Veritabanları tarandı ve tüm aktif veritabanları sisteme eşitlendi." : _("Databases scanned and all active databases synchronized successfully.");
 	} else {
@@ -50,7 +50,7 @@ if (!empty($_POST["action_explore_db"])) {
 
 	header('Content-Type: application/json; charset=utf-8');
 	exec(
-		HESTIA_CMD . "v-explore-sys-database " . quoteshellarg($user) . " " . quoteshellarg($target_db) . " " . quoteshellarg($target_table) . " " . quoteshellarg($target_sql),
+		HESTIA_CMD . "v-explore-sys-database " . $user . " " . quoteshellarg($target_db) . " " . quoteshellarg($target_table) . " " . quoteshellarg($target_sql),
 		$exp_out,
 		$exp_code
 	);
@@ -61,7 +61,7 @@ if (!empty($_POST["action_explore_db"])) {
 // Database auto-discovery is intentionally NOT auto-run anymore: silently
 // adopting unmapped server databases into whoever opens the page was a
 // cross-tenant takeover vector. Admins can run it explicitly via the button.
-exec(HESTIA_CMD . "v-list-databases " . quoteshellarg($user) . " json", $output, $return_var);
+exec(HESTIA_CMD . "v-list-databases " . $user . " json", $output, $return_var);
 $data = json_decode(implode("", $output), true) ?: [];
 
 if ($_SESSION["userSortOrder"] == "name") {

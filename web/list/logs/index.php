@@ -46,7 +46,7 @@ if (isset($_GET["ajax"]) || isset($_GET["stream"])) {
 		exit();
 	}
 
-	$v_user = quoteshellarg($user);
+	$v_user = $user;
 	$v_domain = quoteshellarg($active_domain);
 	$v_type = quoteshellarg($log_type);
 	$v_lines = quoteshellarg($lines);
@@ -69,7 +69,7 @@ if (isset($_GET["ajax"]) || isset($_GET["stream"])) {
 // 2. Download Raw Log Action
 if (isset($_GET["download"])) {
 	if (verify_csrf($_GET) && !empty($active_domain)) {
-		$v_user = quoteshellarg($user);
+		$v_user = $user;
 		$v_domain = quoteshellarg($active_domain);
 		$v_type = quoteshellarg($log_type);
 		$v_lines = quoteshellarg(2000);
@@ -86,7 +86,7 @@ if (isset($_GET["download"])) {
 // 3. Initial Log Fetch for Page Render
 $initial_logs = [];
 if (!empty($active_domain)) {
-	$v_user = quoteshellarg($user);
+	$v_user = $user;
 	$v_domain = quoteshellarg($active_domain);
 	$v_type = quoteshellarg($log_type);
 	$v_lines = quoteshellarg($lines);
