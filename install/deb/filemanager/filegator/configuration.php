@@ -209,17 +209,11 @@ $dist_config["services"]["Filegator\Services\Storage\Filesystem"]["config"][
 		}
 	}
 
-	$is_admin_user = (($_SESSION["userContext"] ?? "") === "admin" && (empty($_SESSION["look"]) || $_SESSION["look"] === "admin"));
-
-	if ($is_admin_user) {
+	if ($v_user === "admin" || (isset($_SESSION["userContext"]) && $_SESSION["userContext"] === "admin" && (empty($_SESSION["look"]) || $_SESSION["look"] === "admin"))) {
 		$root = "/home/" . $v_user;
 	} else {
-		// Isolate regular customer users inside their web directory
-		if (is_dir("/home/" . $v_user . "/web")) {
-			$root = "/home/" . $v_user . "/web";
-		} else {
-			$root = "/home/" . $v_user;
-		}
+		// All customer accounts (e.g. guvende) are jailed directly into /home/USER/web
+		$root = "/home/" . $v_user . "/web";
 	}
 
 	return new \League\Flysystem\Sftp\SftpAdapter([

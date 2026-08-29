@@ -143,6 +143,8 @@ fi
 if [ -d "$HESTIA/web/fm" ]; then
 	cp -f "$HESTIA/install/deb/filemanager/filegator/configuration.php" "$HESTIA/web/fm/configuration.php" 2>/dev/null || true
 	chown root:root "$HESTIA/web/fm/configuration.php" 2>/dev/null || true
+	chmod 644 "$HESTIA/web/fm/configuration.php" 2>/dev/null || true
+	chown -R hestiaweb:hestiaweb "$HESTIA/web/fm/private" 2>/dev/null || true
 fi
 
 #----------------------------------------------------------#
