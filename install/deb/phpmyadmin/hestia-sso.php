@@ -9,6 +9,12 @@ define("API_HOST_NAME", "%API_HOST_NAME%");
 define("API_HESTIA_PORT", "%API_HESTIA_PORT%");
 define("API_KEY", "%API_KEY%");
 
+// Keep IP resolution in sync with the panel: it gates CF-Connecting-IP on
+// the Cloudflare edge validator, so SSO must use the exact same rule.
+if (is_file("/usr/local/hestia/web/inc/vendor/divinity76/cloudflare-ip-validator/src/CloudflareIpValidator.php")) {
+	require_once "/usr/local/hestia/web/inc/vendor/divinity76/cloudflare-ip-validator/src/CloudflareIpValidator.php";
+}
+
 class Hestia_API {
 	/** @var string */
 	public $hostname;
@@ -88,15 +94,19 @@ class Hestia_API {
 		if (!empty($_SERVER["REMOTE_ADDR"]) && filter_var($_SERVER["REMOTE_ADDR"], FILTER_VALIDATE_IP)) {
 			$ip = $_SERVER["REMOTE_ADDR"];
 		}
-		// Behind Cloudflare CF-Connecting-IP carries the real client IP.
-		// Verify-only: a spoofed header can only lock the caller out, the
-		// token is always signed with the panel-side IP.
+		// CF-Connecting-IP carries the real client IP, but trust it only
+		// when the connection really originates from a Cloudflare edge —
+		// mirroring the panel's get_real_user_ip() one to one. A local
+		// tunnel (e.g. cloudflared) makes REMOTE_ADDR 127.0.0.1; then the
+		// panel signs with 127.0.0.1 and so must we, or tokens never verify.
+		$cf_ip = $_SERVER["HTTP_CF_CONNECTING_IP"] ?? "";
 		if (
-			!empty($_SERVER["HTTP_CF_CONNECTING_IP"]) &&
-			filter_var($_SERVER["HTTP_CF_CONNECTING_IP"], FILTER_VALIDATE_IP) &&
-			$ip !== ""
+			$ip !== "" &&
+			filter_var($cf_ip, FILTER_VALIDATE_IP) &&
+			class_exists("\Divinity76\CloudflareIpValidator\CloudflareIpValidator") &&
+			\Divinity76\CloudflareIpValidator\CloudflareIpValidator::isCloudflareIp($ip)
 		) {
-			$ip = $_SERVER["HTTP_CF_CONNECTING_IP"];
+			$ip = $cf_ip;
 		}
 		// Handling IPv4-mapped IPv6 address
 		if (strpos($ip, ":") === 0 && strpos($ip, ".") > 0) {
