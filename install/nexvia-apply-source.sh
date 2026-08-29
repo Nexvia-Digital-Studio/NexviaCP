@@ -134,11 +134,15 @@ mkdir -p "$HESTIA/data/packages"
 cp -rf "$HESTIA/install/common/packages/." "$HESTIA/data/packages/" 2>/dev/null || true
 
 #----------------------------------------------------------#
-#             4.5 Ensure File Manager is installed          #
+#             4.5 Ensure File Manager & branding sync       #
 #----------------------------------------------------------#
 if [ ! -d "$HESTIA/web/fm" ] || [ ! -f "$HESTIA/web/fm/configuration.php" ]; then
 	echo "[*] Installing NexviaCP File Manager..."
 	"$HESTIA/bin/v-add-sys-filemanager" || echo "[!] File manager setup reported an issue (continuing)"
+fi
+if [ -d "$HESTIA/web/fm" ]; then
+	cp -f "$HESTIA/install/deb/filemanager/filegator/configuration.php" "$HESTIA/web/fm/configuration.php" 2>/dev/null || true
+	chown root:root "$HESTIA/web/fm/configuration.php" 2>/dev/null || true
 fi
 
 #----------------------------------------------------------#
