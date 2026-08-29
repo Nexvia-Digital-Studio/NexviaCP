@@ -2,6 +2,10 @@
 
 Bu kılavuz, **Nexvia Digital Studio** bünyesinde geliştirilen tüm Web Sitelerinin ve API projelerinin (PHP, Node.js, .NET Core, React, Python) **NexviaCP** üzerinde sıfır yapılandırmayla (zero-config) tek tıkla kurulması, otomatik veritabanı açılması, `.env` secret yönetimi ve GitHub CI/CD ile canlıya alınması için gereken standartları içerir.
 
+> 📘 **Detaylı uygulama rehberi:** Klasör yapıları, teknoloji bazlı "olmalı/olmamalı"
+> listeleri, sık karşılaşılan sorunlar ve Docker Compose çoklu servis kuralları için
+> [`NEXVIA-PROJE-REHBERI.md`](NEXVIA-PROJE-REHBERI.md)'ne bakın.
+
 ---
 
 ## 📁 1. `.env` ve Secret (Ortam Değişkenleri) Standartları
