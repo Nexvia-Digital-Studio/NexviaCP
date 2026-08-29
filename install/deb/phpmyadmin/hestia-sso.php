@@ -80,40 +80,29 @@ class Hestia_API {
 	}
 
 	public function get_user_ip() {
-		// Saving user IPs to the session for preventing session hijacking
-		$user_combined_ip = [];
-		if ($_SERVER["REMOTE_ADDR"] != $_SERVER["SERVER_ADDR"]) {
-			$user_combined_ip[] = $_SERVER["REMOTE_ADDR"];
+		// Must return the same single real client IP as the panel's
+		// get_real_user_ip() (web/inc/helpers.php): list_db.php signs the
+		// SSO token with that value, so a combined "proxy|client" string
+		// never verifies behind Cloudflare.
+		$ip = "";
+		if (!empty($_SERVER["REMOTE_ADDR"]) && filter_var($_SERVER["REMOTE_ADDR"], FILTER_VALIDATE_IP)) {
+			$ip = $_SERVER["REMOTE_ADDR"];
 		}
-		if (isset($_SERVER["HTTP_CLIENT_IP"])) {
-			$user_combined_ip .= "|" . $_SERVER["HTTP_CLIENT_IP"];
+		// Behind Cloudflare CF-Connecting-IP carries the real client IP.
+		// Verify-only: a spoofed header can only lock the caller out, the
+		// token is always signed with the panel-side IP.
+		if (
+			!empty($_SERVER["HTTP_CF_CONNECTING_IP"]) &&
+			filter_var($_SERVER["HTTP_CF_CONNECTING_IP"], FILTER_VALIDATE_IP) &&
+			$ip !== ""
+		) {
+			$ip = $_SERVER["HTTP_CF_CONNECTING_IP"];
 		}
-		if (isset($_SERVER["HTTP_X_FORWARDED_FOR"])) {
-			if ($_SERVER["REMOTE_ADDR"] != $_SERVER["HTTP_X_FORWARDED_FOR"]) {
-				$user_combined_ip[] = $_SERVER["HTTP_X_FORWARDED_FOR"];
-			}
+		// Handling IPv4-mapped IPv6 address
+		if (strpos($ip, ":") === 0 && strpos($ip, ".") > 0) {
+			$ip = substr($ip, strrpos($ip, ":") + 1);
 		}
-		if (isset($_SERVER["HTTP_FORWARDED_FOR"])) {
-			if ($_SERVER["REMOTE_ADDR"] != $_SERVER["HTTP_FORWARDED_FOR"]) {
-				$user_combined_ip[] = $_SERVER["HTTP_FORWARDED_FOR"];
-			}
-		}
-		if (isset($_SERVER["HTTP_X_FORWARDED"])) {
-			if ($_SERVER["REMOTE_ADDR"] != $_SERVER["HTTP_X_FORWARDED"]) {
-				$user_combined_ip[] = $_SERVER["HTTP_X_FORWARDED"];
-			}
-		}
-		if (isset($_SERVER["HTTP_FORWARDED"])) {
-			if ($_SERVER["REMOTE_ADDR"] != $_SERVER["HTTP_FORWARDED"]) {
-				$user_combined_ip[] = "|" . $_SERVER["HTTP_FORWARDED"];
-			}
-		}
-		if (isset($_SERVER["HTTP_CF_CONNECTING_IP"])) {
-			if (!empty($_SERVER["HTTP_CF_CONNECTING_IP"])) {
-				$user_combined_ip[] = $_SERVER["HTTP_CF_CONNECTING_IP"];
-			}
-		}
-		return implode("|", $user_combined_ip);
+		return $ip;
 	}
 }
 
