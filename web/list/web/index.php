@@ -8,6 +8,24 @@ include $_SERVER["DOCUMENT_ROOT"] . "/inc/main.php";
 
 $is_tr = (($_SESSION['language'] ?? '') === 'tr' || ($_SESSION['LANGUAGE'] ?? '') === 'tr');
 
+// Sanitize a comma-separated list of env variable names for display
+// (deployer output / hidden wizard field). Returns "" or "A, B, C (+N)".
+function wz_filter_env_keys($raw) {
+	$keys = [];
+	foreach (explode(",", (string)$raw) as $k) {
+		$k = trim($k);
+		if ($k !== "" && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $k)) {
+			$keys[] = $k;
+		}
+	}
+	$keys = array_values(array_unique($keys));
+	if (!$keys) {
+		return "";
+	}
+	$extra = count($keys) > 12 ? " (+" . (count($keys) - 12) . ")" : "";
+	return implode(", ", array_slice($keys, 0, 12)) . $extra;
+}
+
 // Action: Update Git Repository for Web Domain
 if (!empty($_GET["git_update"]) && !empty($_GET["domain"])) {
 	if (verify_csrf($_GET)) {
@@ -134,6 +152,13 @@ if (!empty($_POST["deploy_repo"]) && ($_SESSION["userContext"] ?? "") === "admin
 					$_SESSION["ok_msg"] = $is_tr
 						? "Docker uygulaması kurulmaya başladı: " . htmlspecialchars($v_app_name) . " — durumunu uygulama detayından izleyin."
 						: _("Docker app deployment started: ") . htmlspecialchars($v_app_name);
+					$req_keys = wz_filter_env_keys($_POST["deploy_env_required"] ?? "");
+					if ($req_keys) {
+						$_SESSION["ok_msg"] .= $is_tr
+							? " — ⚠️ Doldurmanız gereken ortam değişkenleri: " . $req_keys
+							. ". Uygulama detay sayfasındaki .env editöründen girip yeniden deploy edin."
+							: " — ⚠️ Environment variables to fill: " . $req_keys;
+					}
 					header("Location: /list/docker-app/?app=" . urlencode($v_app_name));
 					exit();
 				}
@@ -153,6 +178,21 @@ if (!empty($_POST["deploy_repo"]) && ($_SESSION["userContext"] ?? "") === "admin
 			);
 			if ($return_var == 0) {
 				$_SESSION["ok_msg"] = $is_tr ? "Web sitesi başarıyla kuruldu ve yayınlandı: " : _("Web site deployed successfully: ") . $_POST["deploy_domain"];
+				// the deployer reports .env values still missing (post-deploy notice)
+				$req_keys = "";
+				if (is_array($output)) {
+					foreach ($output as $oline) {
+						if (strpos($oline, "__NEXVIA_ENV_REQUIRED__ ") === 0) {
+							$req_keys = wz_filter_env_keys(substr($oline, strlen("__NEXVIA_ENV_REQUIRED__ ")));
+						}
+					}
+				}
+				if ($req_keys) {
+					$_SESSION["ok_msg"] .= $is_tr
+						? " — ⚠️ Doldurmanız gereken ortam değişkenleri: " . $req_keys
+						. ". Dosya Yöneticisi ile web/" . $v_domain_name . "/public_html/.env dosyasını düzenleyin."
+						: " — ⚠️ Environment variables to fill: " . $req_keys;
+				}
 			} else {
 				$_SESSION["error_msg"] = ($is_tr ? "Dağıtım hatası: " : _("Deployment error: ")) . implode(" ", array_slice($output, -3));
 			}

@@ -408,7 +408,7 @@
 <!-- Modal: GitHub Web Site Deploy -->
 <?php if (($_SESSION["userContext"] ?? "") === "admin"): ?>
 <div id="github-web-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.65); z-index:9999; justify-content:center; align-items:center;" onclick="if(event.target===this) this.style.display='none';">
-	<div class="form-container" style="background:var(--color-background, #fff); max-width:580px; width:92%; border-radius:8px; padding:25px 30px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+	<div class="form-container" style="background:var(--color-background, #fff); max-width:580px; width:92%; max-height:92vh; overflow-y:auto; border-radius:8px; padding:25px 30px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
 		<h2 class="u-mb15"><i class="fab fa-github icon-blue"></i> <?= tohtml(__tr("Deploy Web Site from GitHub", "GitHub'dan Web Sitesi Kur")) ?></h2>
 		<p class="u-text-muted u-mb20" style="font-size:0.9rem; line-height:1.4;">
 			<?= tohtml(__tr("Select a repository from your GitHub organization, or pick the last option to deploy any public open-source GitHub repository by pasting its link (PHP, HTML, React, Node.js, .NET).", "GitHub organizasyonunuzdan bir site seçin ya da son seçenekle istediğiniz açık kaynak GitHub reposunun linkini girin (PHP, HTML, React, Node.js, .NET). Otomatik olarak kurulup yayına alınacaktır.")) ?>
@@ -455,18 +455,18 @@
 				</div>
 			</div>
 
-			<div id="wz-result" class="u-mb15" style="display:none;"></div>
-			<div id="wz-env-form" class="u-mb15" style="display:none;"></div>
+			<div id="wz-result" class="u-mb15" style="display:none; max-height:38vh; overflow-y:auto;"></div>
 
 			<input type="hidden" name="deploy_channel" id="deploy-channel" value="git">
 			<input type="hidden" name="deploy_compose" id="deploy-compose" value="docker-compose.yml">
 			<input type="hidden" name="deploy_env" id="deploy-env" value="">
+			<input type="hidden" name="deploy_env_required" id="deploy-env-required" value="">
 
 			<div class="u-mb15" id="wz-docker-name" style="display:none;">
 				<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("Docker App Name", "Docker Uygulama Adı")) ?></label>
 				<input type="text" name="deploy_app_name" id="deploy-app-name" class="form-control" placeholder="proje-adi" style="width:100%;">
 				<small class="u-text-muted" style="display:block; margin-top:4px;">
-					🐳 <?= tohtml(__tr("This project is a Docker Compose stack. It will be deployed as a multi-service Docker app; you will map domains to its services right after install.", "Bu proje bir Docker Compose yığını. Çoklu servisli Docker uygulaması olarak kurulacak; kurulumdan hemen sonra servislerine domain eşleyeceksiniz.")) ?>
+					🐳 <?= tohtml(__tr("This project is a Docker Compose stack. It will be deployed as a multi-service Docker app; you will map domains to its services right after install. Required .env values are asked for after the install.", "Bu proje bir Docker Compose yığını. Çoklu servisli Docker uygulaması olarak kurulacak; kurulumdan hemen sonra servislerine domain eşleyeceksiniz. Gerekli .env değerleri kurulumdan sonra hatırlatılacak.")) ?>
 				</small>
 			</div>
 
@@ -611,6 +611,19 @@ function wzRender(d) {
 			(w.level === 'error' ? '⛔' : w.level === 'warn' ? '⚠️' : 'ℹ️') + ' <b>' + esc(w.message) + '</b>' +
 			(w.hint ? '<br><span style="opacity:.85;">' + esc(w.hint) + '</span>' : '') + '</div>';
 	});
+	/* env summary (no inline inputs — asked again post-deploy) + stash required keys */
+	const vars = (d.env_template && d.env_template.vars) || [];
+	const reqKeys = vars.filter(v => v.required && !v.auto).map(v => v.key);
+	document.getElementById('deploy-env-required').value = reqKeys.join(',');
+	if (vars.length) {
+		const autos = vars.filter(v => v.auto).length;
+		h += '<div style="margin-top:8px; font-size:0.88rem; border-top:1px dashed #cfd8dc; padding-top:8px;">🔑 <b>.env</b>' +
+			(reqKeys.length
+				? ' — ' + reqKeys.length + ' <?= tohtml(__tr("required value(s)", "zorunlu değer")) ?>: ' + reqKeys.slice(0, 6).map(esc).join(', ') + (reqKeys.length > 6 ? '…' : '')
+				: ' — <?= tohtml(__tr("no required values", "zorunlu değer yok")) ?>') +
+			(autos ? ' · ' + autos + ' <?= tohtml(__tr("auto-filled", "otomatik dolacak")) ?>' : '') +
+			'<br><span class="u-text-muted"><?= tohtml(__tr("You will be reminded to fill these right after the install.", "Kurulumdan sonra hangilerini dolduracağın hatırlatılacak.")) ?></span></div>';
+	}
 	h += '</div>';
 	result.innerHTML = h;
 	/* channel switch */
@@ -626,51 +639,10 @@ function wzRender(d) {
 	if (!isDocker && plat.mode && plat.mode !== 'python-unsupported') {
 		document.getElementById('deploy-mode').value = plat.mode;
 	}
-	wzRenderEnv(d.env_template || {});
-}
-function wzRenderEnv(tpl) {
-	const box = document.getElementById('wz-env-form');
-	const vars = (tpl.vars || []).filter(v => !v.auto);
-	const autos = (tpl.vars || []).filter(v => v.auto);
-	if (!vars.length && !autos.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
-	let h = '';
-	if (tpl.file) {
-		h += '<label class="form-label u-mb5 u-text-bold">🔑 <?= tohtml(__tr("Environment Variables", "Ortam Değişkenleri")) ?> <span class="u-text-muted" style="font-weight:400;">(' + esc(tpl.file) + ')</span></label>' +
-			'<small class="u-text-muted" style="display:block; margin-bottom:8px;"><?= tohtml(__tr("The repository ships an .env template — fill in the values below and they will be written to the real .env on deploy.", "Repoda .env şablonu bulundu — aşağıdaki değerleri doldurun, deploy sırasında gerçek .env'e yazılacak.")) ?></small>';
-	}
-	let shown = 0;
-	vars.forEach(v => {
-		if (v.required) shown++;
-		h += wzEnvInput(v, v.required);
-	});
-	const optional = vars.filter(v => !v.required);
-	if (optional.length) {
-		h += '<details style="margin-top:8px;"><summary class="u-text-muted" style="cursor:pointer;"><?= tohtml(__tr("Optional variables", "Opsiyonel değişkenler")) ?> (' + optional.length + ')</summary>' +
-			optional.map(v => wzEnvInput(v, false)).join('') + '</details>';
-	}
-	autos.forEach(v => {
-		h += '<div class="u-text-muted" style="font-size:0.85rem; margin-top:4px;">✅ <b>' + esc(v.key) + '</b> — ' + esc(v.auto) + '</div>';
-	});
-	box.innerHTML = h;
-	box.style.display = '';
-	const firstReq = box.querySelector('input[data-required="1"]');
-	if (firstReq && !firstReq.value) firstReq.focus();
-}
-function wzEnvInput(v, req) {
-	const type = v.kind === 'secret' || v.kind === 'password' ? 'password' : 'text';
-	return '<div style="margin-bottom:8px;">' +
-		'<label style="font-size:0.85rem;">' + (req ? '<b>' : '') + esc(v.key) + (req ? ' <span style="color:#c62828;">*</span></b>' : '') +
-		(v.kind === 'secret' ? ' 🔑' : '') + (v.description ? ' <span class="u-text-muted">— ' + esc(v.description) + '</span>' : '') + '</label>' +
-		'<input type="' + type + '" data-envkey="' + esc(v.key) + '" data-required="' + (req ? '1' : '0') + '" class="form-control" style="width:100%;"' +
-		(v.example ? ' placeholder="' + esc(v.example) + '"' : '') + (req ? ' required' : '') + '></div>';
 }
 function wzPrepare(form) {
-	/* collect wizard env inputs into deploy_env KEY=VALUE lines */
-	const lines = [];
-	document.querySelectorAll('#wz-env-form input[data-envkey]').forEach(inp => {
-		if (inp.value.trim() !== '') lines.push(inp.dataset.envkey + '=' + inp.value.trim());
-	});
-	document.getElementById('deploy-env').value = lines.join('\n');
+	/* env values are NOT collected here anymore — post-deploy notice lists them */
+	document.getElementById('deploy-env').value = '';
 	/* if docker channel was detected but user left app name empty, block */
 	if (document.getElementById('deploy-channel').value === 'docker') {
 		const name = document.getElementById('deploy-app-name').value.trim();

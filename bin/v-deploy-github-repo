@@ -284,6 +284,28 @@ elif ls "$docroot"/seed.sql "$docroot"/seeds.sql "$docroot"/database/seed.sql "$
 	echo "    (Add schema.sql so the panel can auto-create the database, or create the DB manually and re-deploy.)"
 fi
 
+# Detect .env values the user still has to fill in — the panel turns this
+# into a post-deploy notice. Auto-filled DB credentials and generated keys
+# are excluded; a value counts as "missing" when empty or a placeholder.
+env_required=""
+if [ -f "$docroot/.env" ]; then
+	while IFS='=' read -r ek ev; do
+		case "$ek" in
+			"" | DB_HOST | DB_PORT | DB_NAME | DB_DATABASE | DB_USER | DB_USERNAME | DB_PASS | DB_PASSWORD | APP_KEY)
+				continue
+				;;
+		esac
+		[[ "$ek" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+		ev_low=$(echo "$ev" | tr '[:upper:]' '[:lower:]')
+		case "$ev_low" in
+			"" | "changeme" | "change_me" | "xxx"* | "your"* | *"here" | *"<"* | *"{"*)
+				env_required="${env_required:+$env_required,}$ek"
+				;;
+		esac
+	done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$docroot/.env" | head -120)
+fi
+[ -n "$env_required" ] && echo "__NEXVIA_ENV_REQUIRED__ $env_required"
+
 chmod 600 "$docroot/.env" 2>/dev/null || true
 chown -R "$user:$user" "$docroot"
 

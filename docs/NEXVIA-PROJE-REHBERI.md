@@ -43,10 +43,12 @@ klonlayıp tarar (`v-analyze-repo`) ve size kurulumdan önce şunları gösterir
   compose servislerinde healthcheck durumu (monorepo'lar için alt dizin taraması dahil)
 - **İletişim haritası** — servisler birbirine nasıl bağlanıyor (`depends_on`, servis adı
   DNS'leri, `.env.example` içindeki `http://api:8080` gibi işaretler)
-- **`.env` sihirbazı** — repodaki `.env.example` parse edilir; zorunlu alanlar (\*)
-  işaretli inputlara dönüşür, secret/url/port türleri uygun input tipiyle gelir, DB
-  değişkenleri "otomatik doldurulacak" olarak gri gösterilir. Doldurduğunuz değerler
-  deploy'da gerçek `.env`'e yazılır (DB kimlik bilgileri her zaman otomatiğinkidir).
+- **`.env` farkındalığı** — repodaki `.env.example` parse edilir; kartta "N zorunlu değer:
+  A, B, C · X otomatik dolacak" özeti gösterilir. Form kısa kalır: **değerler kurulumdan
+  sonra istenir** — deploy bitiminde panel "⚠️ Doldurmanız gereken ortam değişkenleri: A,
+  B, C — Dosya Yöneticisi ile web/DOMAIN/public_html/.env dosfasını düzenleyin" diye
+  hatırlatır (Docker kanalında: uygulama detayındaki .env editörü). DB kimlik bilgileri
+  ve Laravel `APP_KEY` otomatik doldurulduğu için hatırlatmaya girmez.
 - **Veritabanı + seed planı** — `schema.sql` görürse DB otomatik açılır; `seed.sql`,
   `seeds/*.sql`, `build/seed*.php` ve Laravel `db:seed` otomatik uygulanır
 - **Risk uyarıları** — repodaki gerçek `.env`, commit'lenmiş `node_modules/vendor/dist`,
