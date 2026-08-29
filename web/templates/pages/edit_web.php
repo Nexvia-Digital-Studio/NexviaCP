@@ -52,81 +52,78 @@
 			<h1 class="u-mb20"><?= tohtml( _("Edit Web Domain")) ?></h1>
 			<?php show_alert_message($_SESSION); ?>
 
-			<?php if (!empty($cf_dns_enabled)) { ?>
-				<div class="card u-mb20" style="border: 1px solid #f48120; border-radius: 8px; overflow: hidden; background: #fffdfa; box-shadow: 0 2px 6px rgba(244,129,32,0.08);">
-					<div style="background: linear-gradient(90deg, #f48120 0%, #faad3f 100%); color: #fff; padding: 12px 18px; display: flex; justify-content: space-between; align-items: center;">
-						<div style="display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px;">
-							<i class="fab fa-cloudflare fa-lg"></i>
-							<span>Cloudflare DNS &amp; NS Durumu — <?= tohtml(trim($v_domain, "'")) ?></span>
+						<?php if (!empty($cf_dns_enabled)) { ?>
+				<div class="card u-mb20" style="border-left: 4px solid #f48120;">
+					<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #d3d3d3; flex-wrap: wrap; background: #fbfaf8;">
+						<div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap;">
+							<i class="fab fa-cloudflare fa-lg" style="color: #f48120;"></i>
+							<span style="font-weight: 700; font-size: 14px; color: #1f2937;">Cloudflare DNS &amp; NS Durumu</span>
+							<span style="font-size: 12px; font-weight: 700; background: #1e293b; color: #f8fafc; padding: 3px 12px; border-radius: 99px; letter-spacing: 0.3px;"><?= tohtml(trim($v_domain, "'")) ?></span>
 						</div>
-						<div>
-							<a href="/edit/web/?domain=<?= tohtml(urlencode(trim($v_domain, "'"))) ?>&token=<?= tohtml($_SESSION['token']) ?>&check_cf_zone=1" class="button button-secondary" style="padding: 4px 12px; font-size: 12px; font-weight: 600; background: #ffffff; color: #d97706; border: 1px solid rgba(0,0,0,0.1);">
-								<i class="fas fa-arrows-rotate u-mr5"></i>Zone Geldi mi? Test Et
-							</a>
-						</div>
+						<a href="/edit/web/?domain=<?= tohtml(urlencode(trim($v_domain, "'"))) ?>&token=<?= tohtml($_SESSION['token']) ?>&check_cf_zone=1" class="button button-secondary" style="font-size: 12px; font-weight: 600;">
+							<i class="fas fa-arrows-rotate u-mr5"></i>Zone Geldi mi? Test Et
+						</a>
 					</div>
-					<div style="padding: 18px;">
+					<div style="padding: 16px 18px;">
 						<?php if ($cf_zone_status && !empty($cf_zone_status["success"])) { 
 							$is_active = ($cf_zone_status["zone_status"] ?? "") === "active";
 							$is_delegated = !empty($cf_zone_status["is_delegated"]);
 						?>
 							<?php if ($is_delegated) { ?>
-								<div class="alert alert-success u-mb15" style="background: #ecfdf5; border-color: #a7f3d0; color: #065f46; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 6px;">
-									<i class="fas fa-circle-check fa-lg" style="color: #10b981;"></i>
-									<div>
-										<strong>✅ DNS Doğru Bağlı:</strong> Domain nameserver kayıtlarınız Cloudflare ile başarıyla eşleşti ve aktif.
-									</div>
+								<div class="alert alert-success u-mb15" style="display: flex; align-items: center; gap: 10px; padding: 10px 14px;">
+									<i class="fas fa-circle-check fa-lg" style="color: #16a34a;"></i>
+									<div><strong>DNS Doğru Bağlı:</strong> Domain nameserver kayıtlarınız Cloudflare ile başarıyla eşleşti ve aktif.</div>
 								</div>
 							<?php } else { ?>
-								<div class="alert alert-warning u-mb15" style="background: #fffbeb; border-color: #fde68a; color: #92400e; padding: 12px 14px; border-radius: 6px;">
+								<div class="alert alert-warning u-mb15" style="padding: 12px 14px;">
 									<div style="display: flex; align-items: flex-start; gap: 10px;">
-										<i class="fas fa-triangle-exclamation fa-lg u-mt5" style="color: #f59e0b;"></i>
+										<i class="fas fa-triangle-exclamation fa-lg u-mt5" style="color: #d97706;"></i>
 										<div>
-											<strong style="font-size: 14px;">⚠️ Nameserver (NS) Yönlendirmesi Bekleniyor</strong>
+											<strong style="font-size: 14px;">Nameserver (NS) Yönlendirmesi Bekleniyor</strong>
 											<p style="margin: 4px 0 0 0; font-size: 13px; line-height: 1.5;">
-												Domain kayıt firmanızın (Registrar / Godaddy, Namecheap, Natro, IHS vb.) yönetim paneline girip <strong>DNS / Nameserver</strong> ayarlarını aşağıdaki 2 adresle güncelleyin:
+												Domain kayıt firmanızın (GoDaddy, Namecheap, Natro, İHS vb.) yönetim paneline girip <strong>DNS / Nameserver</strong> ayarlarını aşağıdaki 2 adresle güncelleyin:
 											</p>
 										</div>
 									</div>
 								</div>
 							<?php } ?>
 
-							<div style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 14px; background: #f8fafc; padding: 10px 14px; border-radius: 6px; border: 1px solid #e2e8f0;">
+							<div style="display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 14px; background: #ffffff; padding: 12px 16px; border-radius: 6px; border: 1px solid #d3d3d3;">
 								<div>
-									<small style="color: #64748b; display: block; font-weight: 600;">Zone Durumu:</small>
+									<small style="color: #64748b; display: block; font-weight: 600; margin-bottom: 3px;">Zone Durumu</small>
 									<?php if ($is_active) { ?>
-										<span class="badge" style="background: #10b981; color: #fff; padding: 4px 8px; border-radius: 4px; font-weight: 600;"><i class="fas fa-circle-check u-mr5"></i>Active (Aktif)</span>
+										<span style="background: #dcfce7; color: #166534; padding: 4px 10px; border-radius: 99px; font-weight: 700; font-size: 12px;"><i class="fas fa-circle-check u-mr5"></i>Active (Aktif)</span>
 									<?php } else { ?>
-										<span class="badge" style="background: #f59e0b; color: #fff; padding: 4px 8px; border-radius: 4px; font-weight: 600;"><i class="fas fa-clock u-mr5"></i>Pending (Bekleniyor)</span>
+										<span style="background: #fef3c7; color: #92400e; padding: 4px 10px; border-radius: 99px; font-weight: 700; font-size: 12px;"><i class="fas fa-clock u-mr5"></i>Pending (Bekleniyor)</span>
 									<?php } ?>
 								</div>
 								<div>
-									<small style="color: #64748b; display: block; font-weight: 600;">NS Delegasyon Durumu:</small>
+									<small style="color: #64748b; display: block; font-weight: 600; margin-bottom: 3px;">NS Delegasyon Durumu</small>
 									<?php if ($is_delegated) { ?>
-										<span class="badge" style="background: #10b981; color: #fff; padding: 4px 8px; border-radius: 4px; font-weight: 600;"><i class="fas fa-check u-mr5"></i>Doğrulandı</span>
+										<span style="background: #dcfce7; color: #166534; padding: 4px 10px; border-radius: 99px; font-weight: 700; font-size: 12px;"><i class="fas fa-check u-mr5"></i>Doğrulandı</span>
 									<?php } else { ?>
-										<span class="badge" style="background: #ef4444; color: #fff; padding: 4px 8px; border-radius: 4px; font-weight: 600;"><i class="fas fa-triangle-exclamation u-mr5"></i>Yönlendirilmemiş</span>
+										<span style="background: #fee2e2; color: #991b1b; padding: 4px 10px; border-radius: 99px; font-weight: 700; font-size: 12px;"><i class="fas fa-triangle-exclamation u-mr5"></i>Yönlendirilmemiş</span>
 									<?php } ?>
 								</div>
 								<?php if (!empty($cf_zone_status["resolved_ip"])) { ?>
 								<div>
-									<small style="color: #64748b; display: block; font-weight: 600;">Çözümlenen Canlı IP:</small>
-									<code style="font-weight: 600; color: #0f172a;"><?= tohtml($cf_zone_status["resolved_ip"]) ?></code>
+									<small style="color: #64748b; display: block; font-weight: 600; margin-bottom: 3px;">Çözümlenen IP (Cloudflare Edge)</small>
+									<code style="font-weight: 700; color: #1e293b;"><?= tohtml($cf_zone_status["resolved_ip"]) ?></code>
 								</div>
 								<?php } ?>
 							</div>
 
 							<?php if (!empty($cf_zone_status["assigned_nameservers"])) { ?>
 								<div class="u-mb10">
-									<label class="form-label" style="font-size: 13px; font-weight: 700; margin-bottom: 6px; display: block;">
-										<i class="fas fa-server u-mr5" style="color: #f48120;"></i>Atanan Cloudflare Nameserver (NS) Adresleri:
+									<label class="form-label" style="font-size: 13px; font-weight: 700; margin-bottom: 8px; display: block;">
+										<i class="fas fa-server u-mr5" style="color: #ea580c;"></i>Atanan Cloudflare Nameserver (NS) Adresleri
 									</label>
 									<div style="display: flex; gap: 12px; flex-wrap: wrap;">
 										<?php $ns_idx = 1; foreach ($cf_zone_status["assigned_nameservers"] as $ns_item) { ?>
-											<div style="background: #ffffff; border: 2px solid #fed7aa; padding: 8px 14px; border-radius: 6px; display: inline-flex; align-items: center; gap: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-												<span style="font-size: 11px; font-weight: 700; color: #ea580c; background: #ffedd5; padding: 2px 6px; border-radius: 3px;">NS <?= $ns_idx++ ?></span>
-												<code style="font-size: 14px; font-weight: 700; color: #0284c7; font-family: monospace;"><?= tohtml($ns_item) ?></code>
-												<button type="button" class="button button-secondary" style="padding: 3px 8px; font-size: 11px; font-weight: 600;" onclick="navigator.clipboard.writeText('<?= tohtml($ns_item) ?>'); this.innerText='Kopyalandı!'; setTimeout(() => this.innerText='Kopyala', 2000);">
+											<div style="background: #ffffff; border: 1px solid #d3d3d3; padding: 8px 14px; border-radius: 6px; display: inline-flex; align-items: center; gap: 10px;">
+												<span style="font-size: 11px; font-weight: 700; color: #c2410c; background: #ffedd5; padding: 2px 8px; border-radius: 99px;">NS <?= $ns_idx++ ?></span>
+												<code style="font-size: 14px; font-weight: 700; color: #1e293b; font-family: monospace;"><?= tohtml($ns_item) ?></code>
+												<button type="button" class="button button-secondary" style="padding: 3px 10px; font-size: 11px; font-weight: 600;" onclick="navigator.clipboard.writeText('<?= tohtml($ns_item) ?>'); this.innerText='Kopyalandı!'; setTimeout(() => this.innerText='Kopyala', 2000);">
 													<i class="fas fa-copy u-mr5"></i>Kopyala
 												</button>
 											</div>
@@ -142,12 +139,12 @@
 							<?php } ?>
 						<?php } else { ?>
 							<p style="color: #666; margin: 0; font-size: 13px;">
-								<i class="fas fa-info-circle u-mr5"></i>Cloudflare Zone durumu sorgulanıyor veya zone henüz açılmadı.
+								<i class="fas fa-circle-info u-mr5"></i>Cloudflare Zone durumu sorgulanıyor veya zone henüz açılmadı.
 							</p>
 						<?php } ?>
 					</div>
 				</div>
-			<?php } ?>
+				<?php } ?>
 
 			<div class="u-mb10">
 				<label for="v_domain" class="form-label"><?= tohtml( _("Domain")) ?></label>
