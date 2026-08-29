@@ -21,7 +21,12 @@ if (!empty($_POST["action_sync_db"])) {
 	if ($s_code === 0) {
 		$_SESSION["ok_msg"] = $is_tr ? "Veritabanları tarandı ve tüm aktif veritabanları sisteme eşitlendi." : _("Databases scanned and all active databases synchronized successfully.");
 	} else {
-		$_SESSION["error_msg"] = implode(" ", $s_out);
+		$err_text = trim(implode(" ", $s_out));
+		if (stripos($err_text, "doesn't exist") !== false || stripos($err_text, "bulunamadı") !== false) {
+			$_SESSION["error_msg"] = $is_tr ? "Hesap henüz oluşturulmamış veya sistemde bulunamadı ($user)." : sprintf(_("User account '%s' does not exist yet."), $user);
+		} else {
+			$_SESSION["error_msg"] = $err_text ?: ($is_tr ? "Veritabanları taranırken bir hata oluştu." : _("An error occurred while scanning databases."));
+		}
 	}
 	header("Location: /list/db/");
 	exit();

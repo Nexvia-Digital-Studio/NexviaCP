@@ -2153,6 +2153,11 @@ if [ "$postgresql" = 'yes' ] && [ -x "$HESTIA/bin/v-add-sys-pga-sso" ]; then
 	$HESTIA/bin/v-add-sys-pga-sso >> $LOG 2>&1 || true
 fi
 
+# phpMyAdmin SSO bridge (only meaningful when MySQL is installed).
+if [ "$mysql" = 'yes' ] && [ -x "$HESTIA/bin/v-add-sys-pma-sso" ]; then
+	$HESTIA/bin/v-add-sys-pma-sso quiet >> $LOG 2>&1 || true
+fi
+
 #----------------------------------------------------------#
 #                      Configure Bind                      #
 #----------------------------------------------------------#

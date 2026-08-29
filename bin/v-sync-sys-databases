@@ -30,7 +30,10 @@ if [ "x$(id -u)" != 'x0' ]; then
 fi
 
 is_format_valid 'user'
-is_object_valid 'user' 'USER' "$target_user"
+if [ ! -d "$HESTIA/data/users/$target_user" ]; then
+	echo "Hata: '$target_user' kullanıcısı sistemde bulunamadı (hesap henüz oluşturulmamış görünüyor)."
+	exit 3
+fi
 
 # MySQL credentials (defaults file only — never passwords on the command line)
 MYSQL_CMD="mysql"

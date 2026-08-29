@@ -46,12 +46,12 @@ if [ -f "/usr/share/phpmyadmin/hestia-sso.php" ]; then
 	exit 2
 fi
 
-if [ -f "/usr/local/hesta/web/api/index.php" ]; then
+if [ ! -f "$HESTIA/web/api/index.php" ]; then
 	echo "Error: API script not installed"
 	exit 2
 fi
 
-if [ "API_SYSTEM" = "0" ]; then
+if [ "$API_SYSTEM" = "0" ]; then
 	echo "Error: API is not enabled"
 	exit 2
 fi
@@ -65,9 +65,12 @@ phpmyadminkey=$(generate_password)
 apikey=$($BIN/v-add-access-key "$ROOT_USER" 'phpmyadmin-sso' 'phpMyAdmin' 'plain')
 
 # copy config dir to /usr/share/phpmyadmin/
-cp -f $HESTIA_INSTALL_DIR/phpmyadmin/hestia-sso.php $PMA_INSTALL/hestia-sso.php
-chmod 640 $PMA_INSTALL/hestia-sso.php
-chown root:hestiamail $PMA_INSTALL/hestia-sso.php
+cp -f "$HESTIA_INSTALL_DIR/phpmyadmin/hestia-sso.php" "$PMA_INSTALL/hestia-sso.php" 2>/dev/null
+if [ ! -f "$PMA_INSTALL/hestia-sso.php" ]; then
+	cp -f "$HESTIA/install/deb/phpmyadmin/hestia-sso.php" "$PMA_INSTALL/hestia-sso.php"
+fi
+chmod 640 "$PMA_INSTALL/hestia-sso.php"
+chown root:hestiamail "$PMA_INSTALL/hestia-sso.php"
 
 sed -i "s/%PHPMYADMIN_KEY%/$phpmyadminkey/g" $PMA_INSTALL/hestia-sso.php
 sed -i "s/%API_KEY%/$apikey/g" $PMA_INSTALL/hestia-sso.php

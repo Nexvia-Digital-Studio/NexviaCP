@@ -1,5 +1,6 @@
 location /%pma_alias% {
 	alias /usr/share/phpmyadmin/;
+	index index.php;
 
 	location ~ /(libraries|setup|templates|locale) {
 		deny   all;

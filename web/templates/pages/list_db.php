@@ -21,6 +21,49 @@ if (!empty($_SESSION["DB_PMA_ALIAS"])) {
 if (!empty($_SESSION["DB_PGA_ALIAS"])) {
 	$db_pgadmin_link = "//" . $pma_host . "/" . $_SESSION["DB_PGA_ALIAS"] . "/";
 }
+
+$first_mysql_db = null;
+$first_pgsql_db = null;
+if (!empty($data) && is_array($data)) {
+	foreach ($data as $db_name => $db_info) {
+		if (!$first_mysql_db && ($db_info['TYPE'] ?? '') === 'mysql' && ($db_info['SUSPENDED'] ?? '') !== 'yes') {
+			$first_mysql_db = $db_name;
+		}
+		if (!$first_pgsql_db && ($db_info['TYPE'] ?? '') === 'pgsql' && ($db_info['SUSPENDED'] ?? '') !== 'yes') {
+			$first_pgsql_db = $db_name;
+		}
+	}
+}
+
+$top_pma_link = $db_myadmin_link;
+if ($first_mysql_db && !empty($_SESSION['PHPMYADMIN_KEY']) && !ipUsed()) {
+	$time = time();
+	$hestia_sso_token = password_hash(
+		$first_mysql_db . $user_plain . $_SESSION['user_combined_ip'] . $time . $_SESSION['PHPMYADMIN_KEY'],
+		PASSWORD_DEFAULT,
+	);
+	$top_pma_link = $db_myadmin_link . "hestia-sso.php?" . http_build_query([
+		"database" => $first_mysql_db,
+		"user" => $user_plain,
+		"exp" => $time,
+		"hestia_token" => $hestia_sso_token,
+	]);
+}
+
+$top_pga_link = $db_pgadmin_link;
+if ($first_pgsql_db && !empty($_SESSION['PGA_SSO_KEY']) && !ipUsed()) {
+	$time = time();
+	$hestia_pga_sso_token = password_hash(
+		$first_pgsql_db . $user_plain . $_SESSION['user_combined_ip'] . $time . $_SESSION['PGA_SSO_KEY'],
+		PASSWORD_DEFAULT,
+	);
+	$top_pga_link = $db_pgadmin_link . "hestia-sso.php?" . http_build_query([
+		"database" => $first_pgsql_db,
+		"user" => $user_plain,
+		"exp" => $time,
+		"token" => $hestia_pga_sso_token,
+	]);
+}
 ?>
 
 <!-- Begin toolbar -->
@@ -32,12 +75,12 @@ if (!empty($_SESSION["DB_PGA_ALIAS"])) {
 					<i class="fas fa-circle-plus icon-green"></i><?= tohtml( _("Add Database")) ?>
 				</a>
 				<?php if ($_SESSION["DB_SYSTEM"] === "mysql" || $_SESSION["DB_SYSTEM"] === "mysql,pgsql" || $_SESSION["DB_SYSTEM"] === "pgsql,mysql") { ?>
-					<a class="button button-secondary <?= tohtml(ipUsed() ? "button-suspended" : "") ?>" href="<?= tohtml($db_myadmin_link) ?>" target="_blank">
+					<a class="button button-secondary <?= tohtml(ipUsed() ? "button-suspended" : "") ?>" href="<?= tohtml($top_pma_link) ?>" target="_blank" title="<?= tohtml($first_mysql_db && !empty($_SESSION['PHPMYADMIN_KEY']) ? "phpMyAdmin (SSO: " . $first_mysql_db . ")" : "phpMyAdmin") ?>">
 						<i class="fas fa-database icon-orange"></i>phpMyAdmin
 					</a>
 				<?php } ?>
 				<?php if ($_SESSION["DB_SYSTEM"] === "pgsql" || $_SESSION["DB_SYSTEM"] === "mysql,pgsql" || $_SESSION["DB_SYSTEM"] === "pgsql,mysql") { ?>
-					<a class="button button-secondary <?= tohtml(ipUsed() ? "button-suspended" : "") ?>" href="<?= tohtml($db_pgadmin_link) ?>" target="_blank">
+					<a class="button button-secondary <?= tohtml(ipUsed() ? "button-suspended" : "") ?>" href="<?= tohtml($top_pga_link) ?>" target="_blank" title="<?= tohtml($first_pgsql_db && !empty($_SESSION['PGA_SSO_KEY']) ? "phpPgAdmin (SSO: " . $first_pgsql_db . ")" : "phpPgAdmin") ?>">
 						<i class="fas fa-database icon-orange"></i>phpPgAdmin
 					</a>
 				<?php } ?>
