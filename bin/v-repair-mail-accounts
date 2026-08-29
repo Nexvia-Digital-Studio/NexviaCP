@@ -1,0 +1,120 @@
+﻿#!/bin/bash
+# info: repair mail accounts passwd paths, Maildir structure, and permissions
+# options: [USER] [DOMAIN]
+#
+# example: v-repair-mail-accounts admin nexviastudio.com
+#
+# Fixes corrupted passwd home paths (strips erroneous double-path /mail/ from field 6),
+# ensures Maildir cur/new/tmp directory structures exist, and fixes dovecot/exim permissions.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+user=$1
+domain=$2
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+if [ -f "/etc/hestiacp/hestia.conf" ]; then
+	source /etc/hestiacp/hestia.conf
+fi
+if [ -z "$HESTIA" ]; then
+	HESTIA="/usr/local/hestia"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+source "$HESTIA/func/main.sh"
+# shellcheck source=/usr/local/hestia/func/domain.sh
+source "$HESTIA/func/domain.sh"
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_hestia_demo_mode
+
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "Error: Script can be executed only by root"
+	exit 10
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+repair_domain() {
+	local u="$1"
+	local d="$2"
+	local passwd_file="$HOMEDIR/$u/conf/mail/$d/passwd"
+	local exim_passwd="/etc/exim4/domains/$d/passwd"
+
+	[ ! -f "$passwd_file" ] && return 0
+
+	local modified=0
+	local tmp_file
+	tmp_file=$(mktemp)
+
+	while IFS=':' read -r acc md5 luser grp gecos home extra; do
+		[ -z "$acc" ] && continue
+		# Check if home path incorrectly contains /mail/$d/$acc
+		if [[ "$home" == */mail/* ]]; then
+			home="$HOMEDIR/$luser"
+			modified=1
+		fi
+		# Ensure correct Dovecot userdb quota format
+		if [[ "$extra" =~ userdb_quota_storage_size ]] || [[ "$extra" =~ userdb_quota_rule ]]; then
+			echo "$acc:$md5:$luser:$grp:$gecos:$home:$extra" >> "$tmp_file"
+		else
+			echo "$acc:$md5:$luser:$grp:$gecos:$home:$extra" >> "$tmp_file"
+		fi
+
+		# Ensure Maildir subdirectories
+		local mdir="$HOMEDIR/$u/mail/$d/$acc"
+		mkdir -p "$mdir/cur" "$mdir/new" "$mdir/tmp"
+		mkdir -p "$mdir/.Drafts/cur" "$mdir/.Drafts/new" "$mdir/.Drafts/tmp"
+		mkdir -p "$mdir/.Sent/cur" "$mdir/.Sent/new" "$mdir/.Sent/tmp"
+		mkdir -p "$mdir/.Trash/cur" "$mdir/.Trash/new" "$mdir/.Trash/tmp"
+		mkdir -p "$mdir/.Junk/cur" "$mdir/.Junk/new" "$mdir/.Junk/tmp"
+		chown -R "$u:mail" "$mdir" 2>/dev/null || true
+		chmod -R 770 "$mdir" 2>/dev/null || true
+	done < "$passwd_file"
+
+	if [ "$modified" -eq 1 ]; then
+		cp "$tmp_file" "$passwd_file"
+		[ -f "$exim_passwd" ] && cp "$tmp_file" "$exim_passwd"
+		$BIN/v-log-action "system" "Info" "Mail" "Repaired passwd paths and Maildir for $d ($u)."
+	fi
+	rm -f "$tmp_file"
+
+	# Fix domain permissions
+	chmod 771 "$HOMEDIR/$u/conf/mail/$d" 2>/dev/null || true
+	chmod 660 "$HOMEDIR/$u/conf/mail/$d"/* 2>/dev/null || true
+	chown -R dovecot:mail "$HOMEDIR/$u/conf/mail/$d/passwd" 2>/dev/null || true
+	chown Debian-exim:mail "$HOMEDIR/$u/conf/mail/$d/accounts" 2>/dev/null || true
+	chmod 770 "$HOMEDIR/$u/mail/$d" 2>/dev/null || true
+	chown "$u:mail" "$HOMEDIR/$u/mail/$d" 2>/dev/null || true
+}
+
+if [ -n "$user" ] && [ -n "$domain" ]; then
+	repair_domain "$user" "$domain"
+elif [ -n "$user" ]; then
+	for d in $(ls -d "$HOMEDIR/$user/conf/mail/"*/ 2>/dev/null | sed 's#/$##' | awk -F/ '{print $NF}'); do
+		repair_domain "$user" "$d"
+	done
+else
+	for u in $(ls "$HESTIA/data/users" 2>/dev/null); do
+		[ ! -d "$HOMEDIR/$u/conf/mail" ] && continue
+		for d in $(ls -d "$HOMEDIR/$u/conf/mail/"*/ 2>/dev/null | sed 's#/$##' | awk -F/ '{print $NF}'); do
+			repair_domain "$u" "$d"
+		done
+	done
+fi
+
+# Restart mail and imap services
+$BIN/v-restart-mail yes >/dev/null 2>&1 || true
+
+log_event "$OK" "$ARGUMENTS"
+exit 0

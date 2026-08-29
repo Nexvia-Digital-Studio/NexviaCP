@@ -97,10 +97,12 @@ if [[ "$MAIL_SYSTEM" =~ exim ]]; then
 	fi
 fi
 
-# Create mail account folder (mailbox)
-mkdir $HOMEDIR/$user/mail/$domain_idn/$account
-chown $user:mail $HOMEDIR/$user/mail/$domain_idn/$account
-chmod 700 $HOMEDIR/$user/mail/$domain_idn/$account
+# Create mail account folder (Maildir structure)
+mkdir -p "$HOMEDIR/$user/mail/$domain_idn/$account/cur"
+mkdir -p "$HOMEDIR/$user/mail/$domain_idn/$account/new"
+mkdir -p "$HOMEDIR/$user/mail/$domain_idn/$account/tmp"
+chown -R "$user:mail" "$HOMEDIR/$user/mail/$domain_idn/$account"
+chmod -R 770 "$HOMEDIR/$user/mail/$domain_idn/$account"
 
 #----------------------------------------------------------#
 #                       Hestia                             #

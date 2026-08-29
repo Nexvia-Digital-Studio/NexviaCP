@@ -735,11 +735,17 @@ rebuild_mail_domain_conf() {
 				sed -i "/^$account@$domain_idn:/ d" $HOMEDIR/$user/conf/mail/$domain/limits
 				echo "$account@$domain_idn:$user_rate_limit" >> $HOMEDIR/$user/conf/mail/$domain/limits
 			else
-				#revert to system value
 				system=$(cat /etc/exim4/limit.conf)
 				sed -i "/^$account@$domain_idn:/ d" $HOMEDIR/$user/conf/mail/$domain/limits
 				echo "$account@$domain_idn:$system" >> $HOMEDIR/$user/conf/mail/$domain/limits
 			fi
+
+			# Ensure Maildir structure and permissions
+			mkdir -p "$HOMEDIR/$user/mail/$domain_idn/$account/cur"
+			mkdir -p "$HOMEDIR/$user/mail/$domain_idn/$account/new"
+			mkdir -p "$HOMEDIR/$user/mail/$domain_idn/$account/tmp"
+			chown -R "$user:mail" "$HOMEDIR/$user/mail/$domain_idn/$account"
+			chmod -R 770 "$HOMEDIR/$user/mail/$domain_idn/$account"
 		fi
 	done
 

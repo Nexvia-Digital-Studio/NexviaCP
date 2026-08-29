@@ -673,6 +673,7 @@ function syshealth_repair_system_config() {
 	fi
 
 	source_conf "$HESTIA/conf/hestia.conf"
+	syshealth_repair_mail_passwd_paths
 }
 
 # Repair System Cron Jobs
@@ -753,5 +754,11 @@ syshealth_adapt_nginx_resolver() {
 		if [ -n "$resolver" ]; then
 			sed -i "s/1.0.0.1 8.8.4.4 1.1.1.1 8.8.8.8/$resolver/g" "$NGINX_CONF"
 		fi
+	fi
+}
+
+function syshealth_repair_mail_passwd_paths() {
+	if [ -x "$BIN/v-repair-mail-accounts" ]; then
+		$BIN/v-repair-mail-accounts >/dev/null 2>&1
 	fi
 }
