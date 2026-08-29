@@ -209,7 +209,18 @@ $dist_config["services"]["Filegator\Services\Storage\Filesystem"]["config"][
 		}
 	}
 
-	$root = "/home/" . $v_user;
+	$is_admin_user = (($_SESSION["userContext"] ?? "") === "admin" && (empty($_SESSION["look"]) || $_SESSION["look"] === "admin"));
+
+	if ($is_admin_user) {
+		$root = "/home/" . $v_user;
+	} else {
+		// Isolate regular customer users inside their web directory
+		if (is_dir("/home/" . $v_user . "/web")) {
+			$root = "/home/" . $v_user . "/web";
+		} else {
+			$root = "/home/" . $v_user;
+		}
+	}
 
 	return new \League\Flysystem\Sftp\SftpAdapter([
 		"host" => "127.0.0.1",
