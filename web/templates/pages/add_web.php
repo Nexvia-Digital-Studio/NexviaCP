@@ -70,7 +70,7 @@
 					</select>
 					<small class="form-text text-muted u-mt5"><?= tohtml( _("Uygulamanızın çalışma modunu seçin. Seçilen mod Nginx reverse proxy ve SSL yönlendirmesini otomatik ayarlar.")) ?></small>
 				</div>
-				<?php if (isset($_SESSION["DNS_SYSTEM"]) && !empty($_SESSION["DNS_SYSTEM"])) { ?>
+				<?php if (isset($_SESSION["DNS_SYSTEM"]) && !empty($_SESSION["DNS_SYSTEM"]) && $_SESSION["DNS_SYSTEM"] !== "no") { ?>
 					<?php if ($panel[$user_plain]["DNS_DOMAINS"] != "0") { ?>
 						<div class="form-check u-mb10">
 							<input class="form-check-input" type="checkbox" name="v_dns" id="v_dns" <?php if (empty($v_dns) && $panel[$user_plain]["DNS_DOMAINS"] != "0"); ?>>

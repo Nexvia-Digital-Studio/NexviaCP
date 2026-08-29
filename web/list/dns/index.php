@@ -5,7 +5,10 @@ $TAB = "DNS";
 // Main include
 include $_SERVER["DOCUMENT_ROOT"] . "/inc/main.php";
 
-// Data & Render page
+if (empty($_SESSION["DNS_SYSTEM"]) || $_SESSION["DNS_SYSTEM"] === "no") {
+	header("Location: /list/web/");
+	exit();
+}
 
 if (empty($_GET["domain"])) {
 	exec(HESTIA_CMD . "v-list-dns-domains " . $user . " 'json'", $output, $return_var);

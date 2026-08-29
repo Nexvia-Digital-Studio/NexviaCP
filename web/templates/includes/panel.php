@@ -218,6 +218,12 @@
 									<span class="top-bar-menu-link-label u-hide-desktop"><?= _("Docker Manager") ?></span>
 								</a>
 							</li>
+							<li class="top-bar-menu-item">
+								<a title="<?= function_exists('__tr') ? __tr("Web & Proxy Templates", "Web & Proxy Şablonları") : _("Web & Proxy Templates") ?>" class="top-bar-menu-link <?php if ($TAB == "TEMPLATES") { echo "active"; } ?>" href="/list/templates/">
+									<i class="fas fa-layer-group icon-teal"></i>
+									<span class="top-bar-menu-link-label u-hide-desktop"><?= function_exists('__tr') ? __tr("Templates", "Şablonlar") : _("Templates") ?></span>
+								</a>
+							</li>
 
 							<!-- AI Ops & Self-Healing Hub — admin only -->
 							<li class="top-bar-menu-item">
@@ -529,7 +535,7 @@
 				<?php } ?>
 
 				<!-- 3. DNS tab -->
-				<?php if (isset($_SESSION["DNS_SYSTEM"]) && !empty($_SESSION["DNS_SYSTEM"])) { ?>
+				<?php if (isset($_SESSION["DNS_SYSTEM"]) && !empty($_SESSION["DNS_SYSTEM"]) && $_SESSION["DNS_SYSTEM"] !== "no") { ?>
 					<?php if ($panel[$user]["DNS_DOMAINS"] != "0") { ?>
 						<li class="main-menu-item">
 							<a class="main-menu-item-link <?php if ($TAB == "DNS") {

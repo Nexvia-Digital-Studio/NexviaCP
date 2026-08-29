@@ -28,6 +28,10 @@ source_conf "$HESTIA/conf/hestia.conf"
 check_args '1' "$#" 'SERVICE [RESTART]'
 is_format_valid 'service' 'restart'
 
+if [ "$service" = "no" ] || [ -z "$service" ]; then
+	exit 0
+fi
+
 #----------------------------------------------------------#
 #                       Action                             #
 #----------------------------------------------------------#

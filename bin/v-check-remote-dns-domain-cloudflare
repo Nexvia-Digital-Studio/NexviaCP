@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # info: check Cloudflare zone status and live nameserver delegation
 # options: DOMAIN [FORMAT]
 #

@@ -59,6 +59,12 @@ fi
 # Perform verification if read-only mode is enabled
 check_hestia_demo_mode
 
+# Skip if already installed and not forced
+if [ "$MODE" != "force" ] && [ -f "$FM_INSTALL_DIR/configuration.php" ] && [ "$FILE_MANAGER" = "true" ]; then
+	echo "File Manager is already installed."
+	exit 0
+fi
+
 #----------------------------------------------------------#
 #                       Action                             #
 #----------------------------------------------------------#

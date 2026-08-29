@@ -7,6 +7,11 @@ $TAB = "DNS";
 // Main include
 include $_SERVER["DOCUMENT_ROOT"] . "/inc/main.php";
 
+if (empty($_SESSION["DNS_SYSTEM"]) || $_SESSION["DNS_SYSTEM"] === "no") {
+	header("Location: /list/web/");
+	exit();
+}
+
 // Check domain name
 if (empty($_GET["domain"])) {
 	header("Location: /list/dns/");

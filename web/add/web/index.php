@@ -93,8 +93,9 @@ if (!empty($_POST["ok"])) {
 	if (empty($_POST["v_mail"])) {
 		$_POST["v_mail"] = "no";
 	}
-	// Add DNS domain
-	if ($_POST["v_dns"] == "on" && empty($_SESSION["error_msg"])) {
+	// Add DNS domain (only if local DNS system is active)
+	$dns_system_active = !empty($_SESSION["DNS_SYSTEM"]) && $_SESSION["DNS_SYSTEM"] !== "no";
+	if ($dns_system_active && $_POST["v_dns"] == "on" && empty($_SESSION["error_msg"])) {
 		exec(
 			HESTIA_CMD .
 				"v-add-dns-domain " .

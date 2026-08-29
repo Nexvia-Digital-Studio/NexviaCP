@@ -64,3 +64,17 @@ jobs:
 
       - name: Run Biome lint
         run: biome lint .
+
+  bom-check:
+    name: UTF-8 BOM Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Check for UTF-8 BOM
+        run: |
+          if grep -rlP '^\xEF\xBB\xBF' bin/ func/ web/ install/ data/; then
+            echo "Error: UTF-8 BOM found in the files listed above. Please strip BOM before pushing."
+            exit 1
+          fi

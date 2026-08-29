@@ -1,0 +1,139 @@
+#!/bin/bash
+# info: list all system web, proxy, and backend templates
+# options: [TYPE] [FORMAT]
+#
+# example: v-list-sys-templates all json
+#
+# Returns JSON or shell table of all Nginx, PHP-FPM, Apache, and Web templates.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+filter_type="${1:-all}"
+format="${2:-json}"
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+if [ -f "/etc/hestiacp/hestia.conf" ]; then
+	source /etc/hestiacp/hestia.conf
+fi
+if [ -z "$HESTIA" ]; then
+	HESTIA="/usr/local/hestia"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+source "$HESTIA/func/main.sh"
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+tpl_dir="$HESTIA/data/templates"
+[ ! -d "$tpl_dir" ] && tpl_dir="$HESTIA/install/deb/templates"
+
+get_template_info() {
+	local category="$1"
+	local name="$2"
+	local base_path="$tpl_dir/$category/$name"
+	local has_tpl="no"
+	local has_stpl="no"
+	local has_sh="no"
+	local desc=""
+	local port=""
+
+	[ -f "${base_path}.tpl" ] && has_tpl="yes"
+	[ -f "${base_path}.stpl" ] && has_stpl="yes"
+	[ -f "${base_path}.sh" ] && has_sh="yes"
+
+	case "$name" in
+		node-js)
+			desc="Node.js / Express / Next.js Reverse Proxy (Port 3000)"
+			port="3000"
+			;;
+		dotnet)
+			desc="ASP.NET Core (.NET 8 / 9 / 10) Reverse Proxy (Port 5000)"
+			port="5000"
+			;;
+		websocket)
+			desc="Live WebSocket & Socket.io Reverse Proxy (Port 3000)"
+			port="3000"
+			;;
+		docker-ui)
+			desc="Docker UI / Portainer Dashboard Proxy (Port 9000)"
+			port="9000"
+			;;
+		caching)
+			desc="Nginx Microcaching / FastCGI Cache Template"
+			port=""
+			;;
+		hosting)
+			desc="Shared Web Hosting Isolated Template"
+			port=""
+			;;
+		default)
+			desc="Standard Default Web Application Template"
+			port=""
+			;;
+		socket)
+			desc="PHP-FPM UNIX Socket Pool Template"
+			port=""
+			;;
+		*)
+			desc="Custom Web / Backend Template ($name)"
+			port=""
+			;;
+	esac
+
+	jq -nc \
+		--arg cat "$category" \
+		--arg n "$name" \
+		--arg d "$desc" \
+		--arg p "$port" \
+		--arg tpl "$has_tpl" \
+		--arg stpl "$has_stpl" \
+		--arg sh "$has_sh" \
+		'{
+			category: $cat,
+			name: $n,
+			description: $d,
+			port: $p,
+			has_tpl: ($tpl == "yes"),
+			has_stpl: ($stpl == "yes"),
+			has_sh: ($sh == "yes")
+		}'
+}
+
+results="[]"
+
+# 1. Nginx Web & Proxy Templates
+if [ "$filter_type" = "all" ] || [ "$filter_type" = "web" ] || [ "$filter_type" = "nginx" ]; then
+	nginx_dir="$tpl_dir/web/nginx"
+	if [ -d "$nginx_dir" ]; then
+		for f in "$nginx_dir"/*.tpl; do
+			[ ! -f "$f" ] && continue
+			tname="$(basename "$f" .tpl)"
+			[ "$tname" = "proxy_ip" ] && continue
+			tjson="$(get_template_info "web/nginx" "$tname")"
+			results="$(jq --argjson item "$tjson" '. + [$item]' <<< "$results")"
+		done
+	fi
+fi
+
+# 2. PHP-FPM Backend Templates
+if [ "$filter_type" = "all" ] || [ "$filter_type" = "php-fpm" ] || [ "$filter_type" = "backend" ]; then
+	php_dir="$tpl_dir/web/php-fpm"
+	if [ -d "$php_dir" ]; then
+		for f in "$php_dir"/*.tpl; do
+			[ ! -f "$f" ] && continue
+			tname="$(basename "$f" .tpl)"
+			tjson="$(get_template_info "web/php-fpm" "$tname")"
+			results="$(jq --argjson item "$tjson" '. + [$item]' <<< "$results")"
+		done
+	fi
+fi
+
+if [ "$format" = "json" ]; then
+	echo "$results"
+else
+	echo "$results" | jq -r '.[] | "\(.category)\t\(.name)\t\(.port)\t\(.description)"'
+fi
+
+exit 0

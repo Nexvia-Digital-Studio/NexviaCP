@@ -7,6 +7,11 @@ $TAB = "DNS";
 // Main include
 include $_SERVER["DOCUMENT_ROOT"] . "/inc/main.php";
 
+if (empty($_SESSION["DNS_SYSTEM"]) || $_SESSION["DNS_SYSTEM"] === "no") {
+	header("Location: /list/web/");
+	exit();
+}
+
 // List ip addresses
 exec(HESTIA_CMD . "v-list-user-ips " . $user . " json", $output, $return_var);
 $v_ips = json_decode(implode("", $output), true);

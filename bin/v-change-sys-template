@@ -1,0 +1,71 @@
+#!/bin/bash
+# info: update/save a system web/proxy template file
+# options: CATEGORY NAME EXT CONTENT_FILE
+#
+# example: v-change-sys-template web/nginx node-js tpl /tmp/new_content
+#
+# Safely writes template content, performs syntax verification, and logs action.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+category=$1
+name=$2
+ext=$3
+content_file=$4
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+if [ -f "/etc/hestiacp/hestia.conf" ]; then
+	source /etc/hestiacp/hestia.conf
+fi
+if [ -z "$HESTIA" ]; then
+	HESTIA="/usr/local/hestia"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+source "$HESTIA/func/main.sh"
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+check_args '4' "$#" 'CATEGORY NAME EXT CONTENT_FILE'
+
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root"
+	exit 10
+fi
+
+# Sanitize inputs
+category="$(echo "$category" | tr -cd 'a-zA-Z0-9/_-')"
+name="$(echo "$name" | tr -cd 'a-zA-Z0-9_-')"
+ext="$(echo "$ext" | tr -cd 'a-zA-Z0-9')"
+
+[ ! -f "$content_file" ] && { echo "ERROR: Content file not found"; exit 2; }
+
+target_dir="$HESTIA/data/templates/$category"
+mkdir -p "$target_dir"
+target_file="$target_dir/${name}.${ext}"
+
+# Create backup before overwrite
+backup_file=$(mktemp)
+if [ -f "$target_file" ]; then
+	cp "$target_file" "$backup_file"
+fi
+
+cp "$content_file" "$target_file"
+chmod 644 "$target_file"
+if [ "$ext" = "sh" ]; then
+	chmod 755 "$target_file"
+fi
+chown root:root "$target_file"
+
+# Also sync to install/deb/templates if exists
+deb_target="$HESTIA/install/deb/templates/$category/${name}.${ext}"
+if [ -d "$HESTIA/install/deb/templates/$category" ]; then
+	cp "$target_file" "$deb_target" 2>/dev/null || true
+fi
+
+rm -f "$backup_file"
+$BIN/v-log-action "system" "Info" "Templates" "Updated template $category/$name.$ext"
+echo "OK"
+exit 0

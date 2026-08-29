@@ -126,6 +126,19 @@ find "$HESTIA/data/templates" -type f -name '*.sh' -exec chmod 755 {} \;
 # show up in the browser title and outgoing mail.
 if [ -f "$HESTIA/conf/hestia.conf" ]; then
 	"$HESTIA/bin/v-change-sys-config-value" "APP_NAME" "Nexvia Control Panel" || true
+	"$HESTIA/bin/v-change-sys-config-value" "VERSION" "2.1.0" || true
+fi
+
+# Sync default package templates (with 10GB quota default)
+mkdir -p "$HESTIA/data/packages"
+cp -rf "$HESTIA/install/common/packages/." "$HESTIA/data/packages/" 2>/dev/null || true
+
+#----------------------------------------------------------#
+#             4.5 Ensure File Manager is installed          #
+#----------------------------------------------------------#
+if [ ! -d "$HESTIA/web/fm" ] || [ ! -f "$HESTIA/web/fm/configuration.php" ]; then
+	echo "[*] Installing NexviaCP File Manager..."
+	"$HESTIA/bin/v-add-sys-filemanager" || echo "[!] File manager setup reported an issue (continuing)"
 fi
 
 #----------------------------------------------------------#

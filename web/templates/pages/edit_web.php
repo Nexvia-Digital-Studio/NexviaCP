@@ -53,34 +53,55 @@
 			<?php show_alert_message($_SESSION); ?>
 
 			<?php if (!empty($cf_dns_enabled)) { ?>
-				<div class="card u-mb20" style="border: 1px solid #f48120; border-radius: 8px; overflow: hidden; background: #fffdfa;">
-					<div style="background: linear-gradient(90deg, #f48120 0%, #faad3f 100%); color: #fff; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center;">
-						<div style="display: flex; align-items: center; gap: 8px; font-weight: 600;">
+				<div class="card u-mb20" style="border: 1px solid #f48120; border-radius: 8px; overflow: hidden; background: #fffdfa; box-shadow: 0 2px 6px rgba(244,129,32,0.08);">
+					<div style="background: linear-gradient(90deg, #f48120 0%, #faad3f 100%); color: #fff; padding: 12px 18px; display: flex; justify-content: space-between; align-items: center;">
+						<div style="display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px;">
 							<i class="fab fa-cloudflare fa-lg"></i>
-							<span>Cloudflare DNS &amp; Zone Durumu</span>
+							<span>Cloudflare DNS &amp; Nameserver (NS) Durumu</span>
 						</div>
 						<div>
-							<a href="/edit/web/?domain=<?= tohtml(urlencode(trim($v_domain, "'"))) ?>&token=<?= tohtml($_SESSION['token']) ?>&check_cf_zone=1" class="button button-secondary" style="padding: 3px 10px; font-size: 12px; background: rgba(255,255,255,0.9); color: #333;">
+							<a href="/edit/web/?domain=<?= tohtml(urlencode(trim($v_domain, "'"))) ?>&token=<?= tohtml($_SESSION['token']) ?>&check_cf_zone=1" class="button button-secondary" style="padding: 4px 12px; font-size: 12px; font-weight: 600; background: #ffffff; color: #d97706; border: 1px solid rgba(0,0,0,0.1);">
 								<i class="fas fa-arrows-rotate u-mr5"></i>Zone Geldi mi? Test Et
 							</a>
 						</div>
 					</div>
-					<div style="padding: 16px;">
+					<div style="padding: 18px;">
 						<?php if ($cf_zone_status && !empty($cf_zone_status["success"])) { 
 							$is_active = ($cf_zone_status["zone_status"] ?? "") === "active";
 							$is_delegated = !empty($cf_zone_status["is_delegated"]);
 						?>
-							<div style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 12px;">
+							<?php if ($is_delegated) { ?>
+								<div class="alert alert-success u-mb15" style="background: #ecfdf5; border-color: #a7f3d0; color: #065f46; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 6px;">
+									<i class="fas fa-circle-check fa-lg" style="color: #10b981;"></i>
+									<div>
+										<strong>✅ DNS Doğru Bağlı:</strong> Domain nameserver kayıtlarınız Cloudflare ile başarıyla eşleşti ve aktif.
+									</div>
+								</div>
+							<?php } else { ?>
+								<div class="alert alert-warning u-mb15" style="background: #fffbeb; border-color: #fde68a; color: #92400e; padding: 12px 14px; border-radius: 6px;">
+									<div style="display: flex; align-items: flex-start; gap: 10px;">
+										<i class="fas fa-triangle-exclamation fa-lg u-mt5" style="color: #f59e0b;"></i>
+										<div>
+											<strong style="font-size: 14px;">⚠️ Nameserver (NS) Yönlendirmesi Bekleniyor</strong>
+											<p style="margin: 4px 0 0 0; font-size: 13px; line-height: 1.5;">
+												Domain kayıt firmanızın (Registrar / Godaddy, Namecheap, Natro, IHS vb.) yönetim paneline girip <strong>DNS / Nameserver</strong> ayarlarını aşağıdaki 2 adresle güncelleyin:
+											</p>
+										</div>
+									</div>
+								</div>
+							<?php } ?>
+
+							<div style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 14px; background: #f8fafc; padding: 10px 14px; border-radius: 6px; border: 1px solid #e2e8f0;">
 								<div>
-									<small style="color: #666; display: block;">Zone Durumu:</small>
+									<small style="color: #64748b; display: block; font-weight: 600;">Zone Durumu:</small>
 									<?php if ($is_active) { ?>
 										<span class="badge" style="background: #10b981; color: #fff; padding: 4px 8px; border-radius: 4px; font-weight: 600;"><i class="fas fa-circle-check u-mr5"></i>Active (Aktif)</span>
 									<?php } else { ?>
-										<span class="badge" style="background: #f59e0b; color: #fff; padding: 4px 8px; border-radius: 4px; font-weight: 600;"><i class="fas fa-clock u-mr5"></i>Pending (NS Bekleniyor)</span>
+										<span class="badge" style="background: #f59e0b; color: #fff; padding: 4px 8px; border-radius: 4px; font-weight: 600;"><i class="fas fa-clock u-mr5"></i>Pending (Bekleniyor)</span>
 									<?php } ?>
 								</div>
 								<div>
-									<small style="color: #666; display: block;">Delegasyon / NS Durumu:</small>
+									<small style="color: #64748b; display: block; font-weight: 600;">NS Delegasyon Durumu:</small>
 									<?php if ($is_delegated) { ?>
 										<span class="badge" style="background: #10b981; color: #fff; padding: 4px 8px; border-radius: 4px; font-weight: 600;"><i class="fas fa-check u-mr5"></i>Doğrulandı</span>
 									<?php } else { ?>
@@ -89,24 +110,24 @@
 								</div>
 								<?php if (!empty($cf_zone_status["resolved_ip"])) { ?>
 								<div>
-									<small style="color: #666; display: block;">Çözümlenen Canlı IP:</small>
-									<code><?= tohtml($cf_zone_status["resolved_ip"]) ?></code>
+									<small style="color: #64748b; display: block; font-weight: 600;">Çözümlenen Canlı IP:</small>
+									<code style="font-weight: 600; color: #0f172a;"><?= tohtml($cf_zone_status["resolved_ip"]) ?></code>
 								</div>
 								<?php } ?>
 							</div>
 
 							<?php if (!empty($cf_zone_status["assigned_nameservers"])) { ?>
 								<div class="u-mb10">
-									<label class="form-label" style="font-size: 13px; margin-bottom: 4px;">
-										<strong>Atanan Cloudflare Nameserver (NS) Adresleri:</strong>
-										<span class="hint">(Domain firmanızda bu 2 NS adresini tanımlayın)</span>
+									<label class="form-label" style="font-size: 13px; font-weight: 700; margin-bottom: 6px; display: block;">
+										<i class="fas fa-server u-mr5" style="color: #f48120;"></i>Atanan Cloudflare Nameserver (NS) Adresleri:
 									</label>
-									<div style="display: flex; gap: 10px; flex-wrap: wrap;">
-										<?php foreach ($cf_zone_status["assigned_nameservers"] as $ns_item) { ?>
-											<div style="background: #fff; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 6px; display: inline-flex; align-items: center; gap: 8px;">
-												<code style="font-size: 13px; font-weight: 600; color: #0284c7;"><?= tohtml($ns_item) ?></code>
-												<button type="button" class="button button-secondary" style="padding: 2px 6px; font-size: 11px;" onclick="navigator.clipboard.writeText('<?= tohtml($ns_item) ?>'); this.innerText='Kopyalandı!'; setTimeout(() => this.innerText='Kopyala', 2000);">
-													<i class="fas fa-copy"></i>
+									<div style="display: flex; gap: 12px; flex-wrap: wrap;">
+										<?php $ns_idx = 1; foreach ($cf_zone_status["assigned_nameservers"] as $ns_item) { ?>
+											<div style="background: #ffffff; border: 2px solid #fed7aa; padding: 8px 14px; border-radius: 6px; display: inline-flex; align-items: center; gap: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+												<span style="font-size: 11px; font-weight: 700; color: #ea580c; background: #ffedd5; padding: 2px 6px; border-radius: 3px;">NS <?= $ns_idx++ ?></span>
+												<code style="font-size: 14px; font-weight: 700; color: #0284c7; font-family: monospace;"><?= tohtml($ns_item) ?></code>
+												<button type="button" class="button button-secondary" style="padding: 3px 8px; font-size: 11px; font-weight: 600;" onclick="navigator.clipboard.writeText('<?= tohtml($ns_item) ?>'); this.innerText='Kopyalandı!'; setTimeout(() => this.innerText='Kopyala', 2000);">
+													<i class="fas fa-copy u-mr5"></i>Kopyala
 												</button>
 											</div>
 										<?php } ?>
@@ -114,15 +135,14 @@
 								</div>
 							<?php } ?>
 
-							<?php if (!$is_delegated) { ?>
-								<div class="alert alert-warning" style="margin: 0; padding: 10px 14px; font-size: 13px;">
-									<i class="fas fa-triangle-exclamation u-mr5"></i>
-									<strong>Önemli Uyarı:</strong> Domain kayıt firmanızda (Registrar) nameserver kayıtları henüz yukarıdaki Cloudflare NS adreslerine yönlendirilmemiş görünüyor. NS değişikliği yaptıktan sonra <em>"Zone Geldi mi? Test Et"</em> butonuna basarak kontrol edebilirsiniz.
+							<?php if (!empty($cf_zone_status["live_nameservers_str"])) { ?>
+								<div style="margin-top: 10px; font-size: 12px; color: #64748b;">
+									<strong>Dünyanın Gördüğü Mevcut NS:</strong> <code><?= tohtml($cf_zone_status["live_nameservers_str"]) ?></code>
 								</div>
 							<?php } ?>
 						<?php } else { ?>
 							<p style="color: #666; margin: 0; font-size: 13px;">
-								<i class="fas fa-info-circle u-mr5"></i>Cloudflare Zone durumu sorgulanamadı veya zone henüz açılmadı.
+								<i class="fas fa-info-circle u-mr5"></i>Cloudflare Zone durumu sorgulanıyor veya zone henüz açılmadı.
 							</p>
 						<?php } ?>
 					</div>
@@ -156,6 +176,8 @@
 					?>
 				</select>
 			</div>
+
+			<?php if (($_SESSION["userContext"] ?? "") === "admin") { ?>
 			<div class="u-mb20">
 				<label for="v_app_preset" class="form-label">
 					<i class="fas fa-layer-group icon-purple u-mr5"></i><?= tohtml( _("Application Runtime & Proxy Preset (Uygulama Çalıştırma Tipi)")) ?>
@@ -165,12 +187,12 @@
 					<option value="node-js" <?php if ($v_proxy_template == 'node-js' || $v_proxy_template == "'node-js'") echo 'selected'; ?>>🟢 Node.js / Express / Next.js (Port 3000)</option>
 					<option value="dotnet" <?php if ($v_proxy_template == 'dotnet' || $v_proxy_template == "'dotnet'") echo 'selected'; ?>>🔷 .NET 8 / 9 / 10 ASP.NET Core (Port 5000)</option>
 					<option value="websocket" <?php if ($v_proxy_template == 'websocket' || $v_proxy_template == "'websocket'") echo 'selected'; ?>>⚡ Live WebSocket & Socket.io (Port 3000)</option>
-					<?php if (($_SESSION["userContext"] ?? "") === "admin") { ?>
 					<option value="docker-ui" <?php if ($v_proxy_template == 'docker-ui' || $v_proxy_template == "'docker-ui'") echo 'selected'; ?>>🐳 Docker UI / Portainer Management (Port 9000)</option>
-					<?php } ?>
 				</select>
 				<small class="form-text text-muted u-mt5"><?= tohtml( _("Uygulamanızın çalışma modunu seçin. Seçilen mod Nginx reverse proxy ve SSL yönlendirmesini otomatik ayarlar.")) ?></small>
 			</div>
+			<?php } ?>
+
 			<div class="u-mb10">
 				<label for="v_stats" class="form-label"><?= tohtml( _("Web Statistics")) ?></label>
 				<select class="form-select js-stats-select" name="v_stats" id="v_stats">
@@ -187,6 +209,8 @@
 					?>
 				</select>
 			</div>
+
+			<?php if (($_SESSION["userContext"] ?? "") === "admin") { ?>
 			<div class="u-mb10 js-stats-auth" style="<?php if ($v_stats == "none") { ?>display:none<?php } ?>">
 				<div class="form-check">
 					<input x-model="statsAuthEnabled" class="form-check-input" type="checkbox" name="v_stats_auth" id="v_stats_auth">
@@ -214,6 +238,7 @@
 					</div>
 				</div>
 			</div>
+			<?php } ?>
 			<div class="form-check u-mb10">
 				<input x-model="redirectEnabled" class="form-check-input" type="checkbox" name="v-redirect-checkbox" id="v-redirect-checkbox">
 				<label for="v-redirect-checkbox">
@@ -539,6 +564,7 @@
 				<?php } ?>
 			</div>
 
+			<?php if (($_SESSION["userContext"] ?? "") === "admin") { ?>
 			<details class="collapse u-mt20" id="git-deployment-options" <?= !empty($v_git_repo) ? "open" : "" ?>>
 				<summary class="collapse-header">
 					<i class="fab fa-github icon-blue u-mr5"></i><?= tohtml( _("Git Repository & Auto-Deploy (Public / Private)")) ?>
@@ -638,11 +664,13 @@
 					</div>
 				</div>
 			</details>
+			<?php } ?>
 		</div>
 
 	</form>
 
 	<!-- Domain-Level .env Secrets (Zero-Knowledge) -->
+	<?php if (($_SESSION["userContext"] ?? "") === "admin") { ?>
 	<details class="collapse u-mt20" id="web-env-secrets" open>
 		<summary class="collapse-header">
 			<i class="fas fa-shield-halved icon-purple u-mr5"></i><?= tohtml(__tr("Environment Variables & Secrets (.env)", "Ortam Değişkenleri & Secret Yönetimi (.env)")) ?> (<?= count($domain_env_secrets ?? []) ?>)
@@ -713,6 +741,7 @@
 			<?php endif; ?>
 		</div>
 	</details>
+	<?php } ?>
 </div>
 
 <div class="u-hidden js-ftp-account-template">

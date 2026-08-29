@@ -1,0 +1,74 @@
+#!/bin/bash
+# info: get content of a system web/proxy template file
+# options: CATEGORY NAME EXT [FORMAT]
+#
+# example: v-get-sys-template web/nginx node-js tpl json
+#
+# Returns template content, path, and metadata.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+category=$1
+name=$2
+ext=${3:-tpl}
+format=${4:-json}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+if [ -f "/etc/hestiacp/hestia.conf" ]; then
+	source /etc/hestiacp/hestia.conf
+fi
+if [ -z "$HESTIA" ]; then
+	HESTIA="/usr/local/hestia"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+source "$HESTIA/func/main.sh"
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+check_args '3' "$#" 'CATEGORY NAME EXT [FORMAT]'
+
+# Sanitize inputs
+category="$(echo "$category" | tr -cd 'a-zA-Z0-9/_-')"
+name="$(echo "$name" | tr -cd 'a-zA-Z0-9_-')"
+ext="$(echo "$ext" | tr -cd 'a-zA-Z0-9')"
+
+target_file="$HESTIA/data/templates/$category/${name}.${ext}"
+if [ ! -f "$target_file" ]; then
+	target_file="$HESTIA/install/deb/templates/$category/${name}.${ext}"
+fi
+
+if [ ! -f "$target_file" ]; then
+	if [ "$format" = "json" ]; then
+		jq -nc --arg c "$category" --arg n "$name" --arg e "$ext" \
+			'{success: false, error: "Template file not found", category: $c, name: $n, ext: $e}'
+	else
+		echo "ERROR: Template file not found: $target_file"
+	fi
+	exit 3
+fi
+
+content="$(cat "$target_file")"
+
+if [ "$format" = "json" ]; then
+	jq -nc \
+		--arg c "$category" \
+		--arg n "$name" \
+		--arg e "$ext" \
+		--arg p "$target_file" \
+		--arg val "$content" \
+		'{
+			success: true,
+			category: $c,
+			name: $n,
+			ext: $e,
+			path: $p,
+			content: $val
+		}'
+else
+	echo "$content"
+fi
+
+exit 0

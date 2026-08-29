@@ -95,10 +95,12 @@
 				<i class="fas fa-earth-americas" title="<?= tohtml( _("Web Domains")) ?>"></i>
 				<span class="u-hidden-visually"><?= tohtml( _("Web Domains")) ?></span>
 			</div>
+			<?php if (isset($_SESSION["DNS_SYSTEM"]) && !empty($_SESSION["DNS_SYSTEM"]) && $_SESSION["DNS_SYSTEM"] !== "no") { ?>
 			<div class="units-table-cell compact u-text-center">
 				<i class="fas fa-book-atlas" title="<?= tohtml( _("DNS Zones")) ?>"></i>
 				<span class="u-hidden-visually"><?= tohtml( _("DNS Zones")) ?></span>
 			</div>
+			<?php } ?>
 			<div class="units-table-cell compact u-text-center">
 				<i class="fas fa-envelopes-bulk" title="<?= tohtml( _("Mail Domains")) ?>"></i>
 				<span class="u-hidden-visually"><?= tohtml( _("Mail Domains")) ?></span>
@@ -276,12 +278,14 @@
 						<?= tohtml($data[$key]["U_WEB_DOMAINS"]) ?>
 					</span>
 				</div>
+				<?php if (isset($_SESSION["DNS_SYSTEM"]) && !empty($_SESSION["DNS_SYSTEM"]) && $_SESSION["DNS_SYSTEM"] !== "no") { ?>
 				<div class="units-table-cell compact u-text-center-desktop">
 					<span class="u-hide-desktop u-text-bold"><?= tohtml( _("DNS Zones")) ?>:</span>
 					<span class="units-table-badge">
 						<?= tohtml($data[$key]["U_DNS_DOMAINS"]) ?>
 					</span>
 				</div>
+				<?php } ?>
 				<div class="units-table-cell compact u-text-center-desktop">
 					<span class="u-hide-desktop u-text-bold"><?= tohtml( _("Mail Domains")) ?>:</span>
 					<span class="units-table-badge">
