@@ -26,16 +26,48 @@ if (!empty($_GET["git_update"]) && !empty($_GET["domain"])) {
 // Action: 1-Click Deploy Web Site from GitHub
 if (!empty($_POST["deploy_repo"]) && ($_SESSION["userContext"] ?? "") === "admin") {
 	if (verify_csrf($_POST)) {
-		$v_target_user = quoteshellarg(trim($_POST["deploy_user"] ?? $user_plain, "'\" "));
-		$v_domain_name = quoteshellarg($_POST["deploy_domain"] ?? "");
-		$v_repo = quoteshellarg($_POST["deploy_repo_name"] ?? "");
-		$v_branch = quoteshellarg($_POST["deploy_branch"] ?? "main");
-		$v_mode = quoteshellarg($_POST["deploy_mode"] ?? "auto");
+		$v_target_user = trim($_POST["deploy_user"] ?? $user_plain, "'\" ");
+		$v_domain_name = $_POST["deploy_domain"] ?? "";
+		$v_repo_input = $_POST["deploy_repo_name"] ?? "";
+		$v_branch = $_POST["deploy_branch"] ?? "main";
+		$v_mode = $_POST["deploy_mode"] ?? "auto";
+		$deploy_error = "";
+		$v_repo = "";
 
-		if (!empty($_POST["deploy_domain"]) && !empty($_POST["deploy_repo_name"])) {
-			exec(HESTIA_CMD . "v-deploy-github-repo " . $v_target_user . " " . $v_domain_name . " " . $v_repo . " " . $v_branch . " " . $v_mode, $output, $return_var);
+		if ($v_repo_input === "__custom__") {
+			// Any public GitHub repository entered by link
+			$raw_url = trim($_POST["deploy_repo_url"] ?? "");
+			if ($raw_url === "") {
+				$deploy_error = $is_tr ? "Lütfen GitHub repo linkini giriniz." : _("Please enter the GitHub repository URL.");
+			} elseif (preg_match('#^(?:https?://)?(?:www\.)?github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?(?:/(?:tree|blob)/([A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*))?/?$#i', $raw_url, $m)) {
+				if (!empty($m[3])) {
+					$v_branch = $m[3];
+				}
+				$v_repo = "https://github.com/{$m[1]}/{$m[2]}.git";
+			} else {
+				$deploy_error = $is_tr
+					? "Geçersiz GitHub linki. Örnek: https://github.com/kullanici/proje"
+					: _("Invalid GitHub URL. Example: https://github.com/user/project");
+			}
+		} else {
+			$v_repo = $v_repo_input;
+		}
+
+		if ($deploy_error !== "") {
+			$_SESSION["error_msg"] = $deploy_error;
+		} elseif (!empty($v_domain_name) && !empty($v_repo)) {
+			exec(
+				HESTIA_CMD . "v-deploy-github-repo " .
+					quoteshellarg($v_target_user) . " " .
+					quoteshellarg($v_domain_name) . " " .
+					quoteshellarg($v_repo) . " " .
+					quoteshellarg($v_branch) . " " .
+					quoteshellarg($v_mode),
+				$output,
+				$return_var
+			);
 			if ($return_var == 0) {
-				$_SESSION["ok_msg"] = ($is_tr ? "Web sitesi başarıyla kuruldu ve yayınlandı: " : _("Web site deployed successfully: ")) . $_POST["deploy_domain"];
+				$_SESSION["ok_msg"] = $is_tr ? "Web sitesi başarıyla kuruldu ve yayınlandı: " : _("Web site deployed successfully: ") . $_POST["deploy_domain"];
 			} else {
 				$_SESSION["error_msg"] = ($is_tr ? "Dağıtım hatası: " : _("Deployment error: ")) . implode(" ", array_slice($output, -3));
 			}

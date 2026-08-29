@@ -49,6 +49,14 @@ if [[ ! "$repo_input" =~ ^https?:// ]] && [[ ! "$repo_input" =~ ^git@ ]]; then
 	fi
 fi
 
+# Human-readable repo slug used for DB naming: bare repo names stay as-is,
+# full URLs (any GitHub repo, not just our org) reduce to owner_repo —
+# otherwise every URL deploy would collide on the same "https_github..." db.
+repo_slug="$repo_input"
+if [[ "$repo_input" =~ ^https?:// ]] || [[ "$repo_input" =~ ^git@ ]]; then
+	repo_slug=$(echo "$repo_input" | sed -e 's#\.git/*$##' -e 's#^\(https\{0,1\}://[^/]*/\|git@[^:]*:\)##' -e 's#/#_#g')
+fi
+
 #----------------------------------------------------------#
 #                       Action                             #
 #----------------------------------------------------------#
@@ -165,7 +173,7 @@ for f in "$docroot/schema.sql" "$docroot/database.sql" "$docroot/db.sql" "$docro
 done
 
 if [ -n "$sql_file" ]; then
-	clean_repo_db=$(echo "$repo_input" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g' | cut -c 1-12)
+	clean_repo_db=$(echo "$repo_slug" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g' | cut -c 1-12)
 	db_name="${clean_repo_db}"
 	full_db_name="${user}_${db_name}"
 	db_pass=$(head /dev/urandom 2>/dev/null | tr -dc A-Za-z0-9 | head -c 16)

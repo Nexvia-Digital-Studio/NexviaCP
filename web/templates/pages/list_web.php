@@ -411,16 +411,16 @@
 	<div class="form-container" style="background:var(--color-background, #fff); max-width:580px; width:92%; border-radius:8px; padding:25px 30px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
 		<h2 class="u-mb15"><i class="fab fa-github icon-blue"></i> <?= tohtml(__tr("Deploy Web Site from GitHub", "GitHub'dan Web Sitesi Kur")) ?></h2>
 		<p class="u-text-muted u-mb20" style="font-size:0.9rem; line-height:1.4;">
-			<?= tohtml(__tr("Select a repository from your GitHub organization (PHP, HTML, React, Node.js, .NET). It will be deployed automatically with isolated runtime and environment management.", "GitHub organizasyonunuzdan bir site seçin (PHP, HTML, React, Node.js, .NET). Otomatik olarak kurulup yayına alınacaktır.")) ?>
+			<?= tohtml(__tr("Select a repository from your GitHub organization, or pick the last option to deploy any public open-source GitHub repository by pasting its link (PHP, HTML, React, Node.js, .NET).", "GitHub organizasyonunuzdan bir site seçin ya da son seçenekle istediğiniz açık kaynak GitHub reposunun linkini girin (PHP, HTML, React, Node.js, .NET). Otomatik olarak kurulup yayına alınacaktır.")) ?>
 		</p>
-		
+
 		<form method="post" action="/list/web/" onsubmit="const b = this.querySelector('button[type=submit]'); b.disabled=true; b.innerHTML='<i class=\'fas fa-spinner fa-spin\'></i> ' + ('<?= (($_SESSION['language'] ?? '') === 'tr') ? "Kuruluyor..." : "Deploying..." ?>');">
 			<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
 			<input type="hidden" name="deploy_repo" value="1">
-			
+
 			<div class="u-mb15">
 				<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("GitHub Repository", "GitHub Deposu (Repo)")) ?></label>
-				<select name="deploy_repo_name" class="form-select" required style="width:100%;">
+				<select name="deploy_repo_name" id="deploy-repo-select" class="form-select" required style="width:100%;">
 					<?php if (empty($github_repos) || isset($github_repos["error"])): ?>
 						<option value=""><?= tohtml(__tr("-- No repos found / Token not set --", "-- Repo bulunamadı / Token ayarlanmadı --")) ?></option>
 					<?php else: ?>
@@ -431,7 +431,16 @@
 							</option>
 						<?php endforeach; ?>
 					<?php endif; ?>
+					<option value="__custom__">🌍 <?= tohtml(__tr("Any public GitHub repo — paste link…", "İstediğim açık kaynak GitHub reposu — linkini gireceğim…")) ?></option>
 				</select>
+			</div>
+
+			<div class="u-mb15" id="deploy-repo-url-wrap" style="display:none;">
+				<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("Public GitHub Repository URL", "Açık Kaynak GitHub Repo Linki")) ?></label>
+				<input type="text" name="deploy_repo_url" id="deploy-repo-url" placeholder="https://github.com/kullanici/proje" class="form-control" style="width:100%;">
+				<small class="u-text-muted" style="display:block; margin-top:4px;">
+					💡 <?= tohtml(__tr("Public (open-source) repositories only. A branch link like /tree/dev also sets the branch.", "Sadece herkese açık (open source) repolar. /tree/dal gibi bir link yapıştırırsanız dal da otomatik seçilir.")) ?>
+				</small>
 			</div>
 
 			<div class="u-mb15">
@@ -477,5 +486,18 @@ document.addEventListener('keydown', function(e) {
 		if (m) m.style.display = 'none';
 	}
 });
+(function() {
+	const sel = document.getElementById('deploy-repo-select');
+	const wrap = document.getElementById('deploy-repo-url-wrap');
+	const urlInput = document.getElementById('deploy-repo-url');
+	if (!sel || !wrap || !urlInput) return;
+	function toggleCustomRepoUrl() {
+		const custom = sel.value === '__custom__';
+		wrap.style.display = custom ? '' : 'none';
+		urlInput.required = custom;
+	}
+	sel.addEventListener('change', toggleCustomRepoUrl);
+	toggleCustomRepoUrl();
+})();
 </script>
 <?php endif; ?>
