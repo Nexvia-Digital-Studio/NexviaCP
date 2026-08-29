@@ -1,0 +1,89 @@
+﻿#!/bin/bash
+# info: scan a web domain for config mistakes (localhost URLs, exposed sensitive files)
+# options: USER DOMAIN [MODE]
+#
+# example: v-scan-web-domain-config guvende anilarimguvende.com
+# example: v-scan-web-domain-config guvende anilarimguvende.com fix
+#
+# MODE "fix": safely rewrites SITE_URL in .env files to the real domain
+#            (with timestamped backup); everything else is report-only.
+
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+user=$1
+domain=$2
+mode=${3:-report}
+
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+if [ -z "$user" ] || [ -z "$domain" ]; then
+	echo "Usage: v-scan-web-domain-config USER DOMAIN [fix|report]"
+	exit 20
+fi
+
+is_object_valid 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
+
+docroot="$HOMEDIR/$user/web/$domain/public_html"
+if [ ! -d "$docroot" ]; then
+	echo "ERROR: docroot not found: $docroot"
+	exit 21
+fi
+
+findings=0
+report=""
+
+# --- 1) localhost URLs in config files -------------------------------------
+while IFS=: read -r file line content; do
+	[ -z "$file" ] && continue
+	findings=$((findings + 1))
+	report="$report
+[!!] localhost referansi: $file:$line -> $content"
+done < <(grep -rIn --include=".env*" --include="*config*.php" --include="settings*.php" \
+	-E "https?://localhost" "$docroot" 2>/dev/null)
+
+# --- 2) sensitive files inside docroot -------------------------------------
+while IFS= read -r sfile; do
+	[ -z "$sfile" ] && continue
+	findings=$((findings + 1))
+	report="$report
+[!!] Hassas dosya web kokunde: $sfile"
+done < <(find "$docroot" -maxdepth 3 -type f \( -name "*.sql" -o -name "*.sql.gz" \
+	-o -name "*.bak" -o -name "*.old" -o -name "*.log" -o -name "*.sqlite" \
+	-o -name "*.db" -o -name ".env.bak" -o -name ".env.copy" \) 2>/dev/null)
+
+# --- fix mode: rewrite SITE_URL inside .env files --------------------------
+if [ "$mode" = "fix" ]; then
+	for envfile in "$docroot"/.env "$docroot"/.env.*; do
+		[ -f "$envfile" ] || continue
+		grep -q "^SITE_URL=.*localhost" "$envfile" || continue
+		cp -a "$envfile" "${envfile}.bak-$(date +%Y%m%d%H%M%S)"
+		sed -i "s|^SITE_URL=.*|SITE_URL=https://$domain|" "$envfile"
+		findings=$((findings - 1))
+		report="$report
+[OK] SITE_URL duzeltildi: $envfile -> https://$domain (yedek alindi)"
+	done
+fi
+
+if [ "$findings" -eq 0 ]; then
+	echo "[OK] $domain: yapilandirma temiz (localhost referansi / hassas dosya yok)."
+	exit 0
+fi
+
+echo "[!!] $domain icin $findings bulgu:$report"
+
+$BIN/v-add-user-notification "$user" "Yapilandirma taramasi: $domain" \
+	"Web sitesi yapilandirmasinda <b>$findings</b> bulgu tespit edildi. Ayrintilar icin: v-scan-web-domain-config $user $domain" >/dev/null 2>&1
+
+$BIN/v-send-sys-notification "Yapilandirma taramasi: $domain" \
+	"$findings bulgu tespit edildi. Detay: v-scan-web-domain-config $user $domain (duzeltme icin 'fix' modu)." \
+	"WARNING" "" "config-scan" >/dev/null 2>&1
+
+exit 2

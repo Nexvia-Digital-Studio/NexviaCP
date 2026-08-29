@@ -86,6 +86,31 @@ if [ -d "$HESTIA/web/fm" ]; then
 	chown -R hestiaweb:hestiaweb "$HESTIA/web/fm/private" 2>/dev/null || true
 fi
 
+# Ensure phpMyAdmin/phpPgAdmin routes exist in panel nginx config
+# (panel nginx comes from the hestia-nginx package and is NOT managed by this
+# script otherwise — inject idempotently so fresh installs get the routes too)
+PMA_PANEL_CONF="$HESTIA/nginx/conf/nginx.conf"
+if [ -f "$HESTIA/install/deb/nginx/phpmyadmin-panel.snippet" ] && ! grep -q "location /phpmyadmin" "$PMA_PANEL_CONF"; then
+	echo "[*] Adding phpMyAdmin/phpPgAdmin routes to panel nginx..."
+	cp -f "$PMA_PANEL_CONF" "${PMA_PANEL_CONF}.bak-nexvia"
+	python3 - "$PMA_PANEL_CONF" "$HESTIA/install/deb/nginx/phpmyadmin-panel.snippet" <<'PYEOF'
+import sys
+conf_path, snippet_path = sys.argv[1], sys.argv[2]
+conf = open(conf_path).read()
+snippet = open(snippet_path).read()
+anchor = "\t\tlocation ~ \\.php$ {"
+if anchor not in conf:
+    sys.exit("anchor not found")
+open(conf_path, "w").write(conf.replace(anchor, snippet + anchor, 1))
+PYEOF
+	if ! "$HESTIA/nginx/sbin/hestia-nginx" -t -c "$PMA_PANEL_CONF" >/dev/null 2>&1; then
+		echo "[-] Panel nginx config test failed; restoring backup."
+		cp -f "${PMA_PANEL_CONF}.bak-nexvia" "$PMA_PANEL_CONF"
+	else
+		echo "[+] Panel phpMyAdmin/phpPgAdmin routes ensured."
+	fi
+fi
+
 # Sync Dovecot config if present
 if [ -d "/etc/dovecot/conf.d" ]; then
 	DOVECOT_VER=$(dovecot --version 2>/dev/null | cut -d. -f1,2)

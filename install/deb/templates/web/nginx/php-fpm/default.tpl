@@ -20,7 +20,13 @@ server {
 		return 404;
 	}
 
+	location ~* \.(sql|bak|old|log|ini|env|sqlite|db)$ {
+		deny all;
+		return 404;
+	}
+
 	location / {
+		try_files $uri $uri/ /index.php?$args;
 		location ~* ^.+\.(jpeg|jpg|png|webp|gif|bmp|ico|svg|css|js)$ {
 			expires max;
 			fastcgi_hide_header "Set-Cookie";
