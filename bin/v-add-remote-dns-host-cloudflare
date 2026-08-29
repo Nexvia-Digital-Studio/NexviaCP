@@ -173,12 +173,26 @@ if [ -z "$zone_id" ]; then
 
 	zone_id=$(echo "$zone_json" | jq -r '.result.id')
 
-	# Log assigned nameservers to Hestia action log
-	echo "$zone_json" | jq -r '.result.name_servers[]? // empty' | while read -r ns; do
-		if [ -n "$ns" ]; then
-			$BIN/v-log-action "system" "Info" "DNS" "Cloudflare zone $domain created, assigned NS: $ns"
+	# Extract assigned nameservers and dispatch notifications
+	ns_array=$(echo "$zone_json" | jq -r '.result.name_servers[]? // empty')
+	ns_list=$(echo "$ns_array" | paste -sd ", " -)
+
+	if [ -n "$ns_list" ]; then
+		$BIN/v-log-action "system" "Info" "DNS" "Cloudflare zone $domain created, assigned NS: $ns_list"
+
+		# 1) Panel notification (bell) for admin
+		if [ -x "$BIN/v-add-user-notification" ]; then
+			$BIN/v-add-user-notification "admin" "Cloudflare NS Yönlendirmesi Gerekli: $domain" "Yeni Cloudflare DNS alanı oluşturuldu. Lütfen domain kayıt firmanızda (Registrar) nameserver adreslerini şu şekilde güncelleyin:<br><strong>$ns_list</strong>" "warning" >/dev/null 2>&1 || true
 		fi
-	done
+
+		# 2) Email notification to admin (WARNING level)
+		if [ -x "$BIN/v-send-sys-notification" ]; then
+			notif_sub="[DNS Yönlendirmesi] Cloudflare NS Atandı: $domain"
+			notif_body="Yeni web sitesi için Cloudflare DNS alanı (zone) oluşturuldu.\n\nDomain: $domain\nAtanan Cloudflare Nameserver (NS) Adresleri:\n$ns_list\n\nSite ve SSL sertifikalarının sorunsuz çalışması için domain kayıt firmanızın (registrar) yönetim panelinden NS kayıtlarını yukarıdaki adreslerle güncelleyin."
+			notif_extra=$(jq -nc --arg d "$domain" --arg ns "$ns_list" '{"service":"Cloudflare DNS","status":"NS_DELEGATION_REQUIRED","domain":$d,"name_servers":$ns}')
+			$BIN/v-send-sys-notification "$notif_sub" "$notif_body" "WARNING" "" "dns_ns_assigned" "$notif_extra" >/dev/null 2>&1 &
+		fi
+	fi
 fi
 
 # 3) Create DNS records (A record for hostname, and CNAME for www if apex domain)
@@ -186,17 +200,9 @@ if [ -n "$ip" ]; then
 	cf_add_record "$domain" "A" "$ip" "$cf_proxied"
 fi
 
-# Check if domain is an apex domain (to create www CNAME)
-is_apex="yes"
-IFS='.' read -r -a domain_elements <<< "$domain"
-if [ "${#domain_elements[@]}" -gt 2 ]; then
-	is_valid_2_part_extension "$domain"
-	if [ $? -ne 0 ]; then
-		is_apex="no"
-	fi
-fi
-
-if [ "$is_apex" = "yes" ]; then
+# Check if domain is a true apex domain (only apex domains get www CNAME)
+get_base_domain "$domain"
+if [ "$domain" = "$basedomain" ]; then
 	cf_add_record "www.$domain" "CNAME" "$domain" "$cf_proxied"
 fi
 

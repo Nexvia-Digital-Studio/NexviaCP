@@ -1,0 +1,189 @@
+﻿#!/bin/bash
+# info: check Cloudflare zone status and live nameserver delegation
+# options: DOMAIN [FORMAT]
+#
+# example: v-check-remote-dns-domain-cloudflare example.com json
+#
+# Returns live status of Cloudflare zone, assigned nameservers, and public DNS delegation.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+domain=$1
+format=${2:-json}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+if [ -f "/etc/hestiacp/hestia.conf" ]; then
+	source /etc/hestiacp/hestia.conf
+fi
+if [ -z "$HESTIA" ]; then
+	HESTIA="/usr/local/hestia"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+source "$HESTIA/func/main.sh"
+# shellcheck source=/usr/local/hestia/func/domain.sh
+source "$HESTIA/func/domain.sh"
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+# Format domain
+format_domain
+
+# Cloudflare API helper
+cf_api() {
+	local method="$1"
+	local endpoint="$2"
+	printf 'header = "Authorization: Bearer %s"\n' "$CF_API_TOKEN" | \
+		curl --silent --show-error --max-time 15 -K - \
+			--request "$method" "https://api.cloudflare.com/client/v4$endpoint"
+}
+
+# Resolve zone ID
+resolve_zone_id() {
+	local target="$1"
+	local cur="$target"
+	local zid=""
+	while [ -n "$cur" ]; do
+		zid=$(cf_api GET "/zones?name=$cur" | jq -r '.result[0].id // empty')
+		if [ -n "$zid" ]; then
+			echo "$zid"
+			return 0
+		fi
+		if [[ "$cur" == *.* ]]; then
+			cur="${cur#*.}"
+		else
+			break
+		fi
+	done
+	return 1
+}
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '1' "$#" 'DOMAIN [FORMAT]'
+is_format_valid 'domain'
+
+if [ "$DNS_API_PROVIDER" != "cloudflare" ] || [ -z "$CF_API_TOKEN" ]; then
+	if [ "$format" = "json" ]; then
+		echo '{"success":false,"error":"Cloudflare DNS API is not configured on this server."}'
+	else
+		echo "ERROR: Cloudflare DNS API is not configured on this server."
+	fi
+	exit "$E_NOTEXIST"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+zone_id=$(resolve_zone_id "$domain")
+
+if [ -z "$zone_id" ]; then
+	if [ "$format" = "json" ]; then
+		echo "{\"success\":false,\"domain\":\"$domain\",\"error\":\"No Cloudflare zone found for $domain\"}"
+	else
+		echo "ERROR: No Cloudflare zone found for $domain"
+	fi
+	exit "$E_NOTEXIST"
+fi
+
+# Query zone details from Cloudflare
+zone_details=$(cf_api GET "/zones/$zone_id")
+zone_status=$(echo "$zone_details" | jq -r '.result.status // "unknown"')
+zone_name=$(echo "$zone_details" | jq -r '.result.name // empty')
+zone_paused=$(echo "$zone_details" | jq -r '.result.paused // false')
+
+# Extract assigned NS
+assigned_ns_json=$(echo "$zone_details" | jq -c '.result.name_servers // []')
+assigned_ns_str=$(echo "$zone_details" | jq -r '.result.name_servers[]? // empty' | paste -sd ", " -)
+
+# Query live public NS records (via 1.1.1.1 / 8.8.8.8)
+live_ns_raw=""
+if command -v dig >/dev/null 2>&1; then
+	live_ns_raw=$(dig +short +time=3 +tries=2 NS "$domain" @1.1.1.1 2>/dev/null | tr '[:upper:]' '[:lower:]' | sed 's/\.$//' | sort -u)
+	if [ -z "$live_ns_raw" ]; then
+		live_ns_raw=$(dig +short +time=3 +tries=2 NS "$domain" @8.8.8.8 2>/dev/null | tr '[:upper:]' '[:lower:]' | sed 's/\.$//' | sort -u)
+	fi
+elif command -v host >/dev/null 2>&1; then
+	live_ns_raw=$(host -t NS "$domain" 1.1.1.1 2>/dev/null | awk '/name server/ {print $NF}' | tr '[:upper:]' '[:lower:]' | sed 's/\.$//' | sort -u)
+fi
+
+live_ns_json=$(echo "$live_ns_raw" | grep -v '^$' | jq -R -s -c 'split("\n")[:-1]')
+live_ns_str=$(echo "$live_ns_raw" | grep -v '^$' | paste -sd ", " -)
+
+# Check live A record resolution
+live_a=""
+if command -v dig >/dev/null 2>&1; then
+	live_a=$(dig +short +time=3 +tries=2 A "$domain" @1.1.1.1 2>/dev/null | head -n1)
+elif command -v getent >/dev/null 2>&1; then
+	live_a=$(getent hosts "$domain" 2>/dev/null | awk '{print $1}' | head -n1)
+fi
+
+# Determine delegation & health status
+is_delegated="false"
+delegation_msg="Nameservers not yet delegated"
+
+if [ "$zone_status" = "active" ]; then
+	is_delegated="true"
+	delegation_msg="Zone active and properly configured on Cloudflare"
+else
+	# Check if live NS matches any assigned NS
+	matched_count=0
+	for ns in $(echo "$zone_details" | jq -r '.result.name_servers[]? // empty'); do
+		if echo "$live_ns_raw" | grep -qi "$ns"; then
+			matched_count=$((matched_count + 1))
+		fi
+	done
+	if [ "$matched_count" -gt 0 ]; then
+		is_delegated="true"
+		delegation_msg="Nameservers match Cloudflare; waiting for Cloudflare edge propagation"
+	else
+		delegation_msg="Nameservers at domain registrar do not match Cloudflare assigned NS"
+	fi
+fi
+
+if [ "$format" = "json" ]; then
+	jq -nc \
+		--arg d "$domain" \
+		--arg zid "$zone_id" \
+		--arg zname "$zone_name" \
+		--arg zstatus "$zone_status" \
+		--argjson zpaused "$zone_paused" \
+		--argjson assigned_ns "$assigned_ns_json" \
+		--arg assigned_ns_str "$assigned_ns_str" \
+		--argjson live_ns "$live_ns_json" \
+		--arg live_ns_str "$live_ns_str" \
+		--arg live_a "$live_a" \
+		--argjson is_delegated "$is_delegated" \
+		--arg delegation_msg "$delegation_msg" \
+		'{
+			success: true,
+			domain: $d,
+			zone_id: $zid,
+			zone_name: $zname,
+			zone_status: $zstatus,
+			paused: $zpaused,
+			assigned_nameservers: $assigned_ns,
+			assigned_nameservers_str: $assigned_ns_str,
+			live_nameservers: $live_ns,
+			live_nameservers_str: $live_ns_str,
+			resolved_ip: $live_a,
+			is_delegated: $is_delegated,
+			status_message: $delegation_msg
+		}'
+else
+	echo "Domain: $domain"
+	echo "Zone ID: $zone_id"
+	echo "Zone Status: $zone_status"
+	echo "Assigned NS: $assigned_ns_str"
+	echo "Live NS: $live_ns_str"
+	echo "Resolved IP: $live_a"
+	echo "Delegation: $delegation_msg"
+fi
+
+exit 0

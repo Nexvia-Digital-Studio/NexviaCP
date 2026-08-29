@@ -102,15 +102,15 @@ cf_add_record() {
 	return 0
 }
 
-# Add MX record idempotently
+# Add MX record idempotently checking content
 cf_add_mx_record() {
 	local rec_name="$1"
 	local rec_content="$2"
 	local rec_priority="${3:-10}"
 
-	local existing_id
-	existing_id=$(cf_api GET "/zones/$zone_id/dns_records?type=MX&name=$rec_name" | jq -r '.result[0].id // empty')
-	if [ -n "$existing_id" ]; then
+	local matching_id
+	matching_id=$(cf_api GET "/zones/$zone_id/dns_records?type=MX&name=$rec_name" | jq -r --arg content "$rec_content" '.result[] | select(.content == $content) | .id // empty' | head -n1)
+	if [ -n "$matching_id" ]; then
 		return 0
 	fi
 
@@ -130,6 +130,41 @@ cf_add_mx_record() {
 		return 1
 	fi
 	return 0
+}
+
+# Sync or merge SPF TXT record (preserves existing SPF while ensuring server IP is authorized)
+cf_sync_spf_record() {
+	local rec_name="$1"
+	local target_ip="$2"
+	local ip_token="ip4:$target_ip"
+
+	local txt_records spf_record_id spf_content
+	txt_records=$(cf_api GET "/zones/$zone_id/dns_records?type=TXT&name=$rec_name")
+	spf_record_id=$(echo "$txt_records" | jq -r '.result[] | select(.content | startswith("v=spf1")) | .id // empty' | head -n1)
+	spf_content=$(echo "$txt_records" | jq -r '.result[] | select(.content | startswith("v=spf1")) | .content // empty' | head -n1)
+
+	if [ -z "$spf_record_id" ]; then
+		local default_spf="v=spf1 a mx ip4:$target_ip ~all"
+		local payload
+		payload=$(jq -nc --arg name "$rec_name" --arg content "$default_spf" \
+			'{type:"TXT", name:$name, content:$content, ttl:1, proxied:false}')
+		cf_api POST "/zones/$zone_id/dns_records" "$payload" >/dev/null 2>&1
+	else
+		if [[ "$spf_content" =~ $ip_token ]]; then
+			return 0
+		fi
+		local new_content
+		if [[ "$spf_content" =~ (\~all|\-all|\?all|\+all) ]]; then
+			new_content=$(echo "$spf_content" | sed -E "s/(\~all|\-all|\?all|\+all)/$ip_token \1/")
+		else
+			new_content="$spf_content $ip_token ~all"
+		fi
+		local payload
+		payload=$(jq -nc --arg name "$rec_name" --arg content "$new_content" \
+			'{type:"TXT", name:$name, content:$content, ttl:1, proxied:false}')
+		cf_api PUT "/zones/$zone_id/dns_records/$spf_record_id" "$payload" >/dev/null 2>&1
+		$BIN/v-log-action "system" "Info" "DNS" "Updated Cloudflare SPF record for $rec_name to include $ip_token."
+	fi
 }
 
 #----------------------------------------------------------#
@@ -205,9 +240,20 @@ if [ -z "$zone_id" ]; then
 		success=$(echo "$zone_json" | jq -r '.success // false')
 		if [ "$success" = "true" ]; then
 			zone_id=$(echo "$zone_json" | jq -r '.result.id')
-			echo "$zone_json" | jq -r '.result.name_servers[]? // empty' | while read -r ns; do
-				[ -n "$ns" ] && $BIN/v-log-action "system" "Info" "DNS" "Cloudflare zone $domain created, assigned NS: $ns"
-			done
+			ns_array=$(echo "$zone_json" | jq -r '.result.name_servers[]? // empty')
+			ns_list=$(echo "$ns_array" | paste -sd ", " -)
+			if [ -n "$ns_list" ]; then
+				$BIN/v-log-action "system" "Info" "DNS" "Cloudflare zone $domain created, assigned NS: $ns_list"
+				if [ -x "$BIN/v-add-user-notification" ]; then
+					$BIN/v-add-user-notification "admin" "Cloudflare NS Yönlendirmesi Gerekli: $domain" "Yeni Cloudflare DNS alanı oluşturuldu. Lütfen domain kayıt firmanızda (Registrar) nameserver adreslerini şu şekilde güncelleyin:<br><strong>$ns_list</strong>" "warning" >/dev/null 2>&1 || true
+				fi
+				if [ -x "$BIN/v-send-sys-notification" ]; then
+					notif_sub="[DNS Yönlendirmesi] Cloudflare NS Atandı: $domain"
+					notif_body="Yeni mail domaini için Cloudflare DNS alanı (zone) oluşturuldu.\n\nDomain: $domain\nAtanan Cloudflare Nameserver (NS) Adresleri:\n$ns_list\n\nMail gönderimi ve DNS kayıtlarının doğrulanması için domain kayıt firmanızın yönetim panelinden NS kayıtlarını yukarıdaki adreslerle güncelleyin."
+					notif_extra=$(jq -nc --arg d "$domain" --arg ns "$ns_list" '{"service":"Cloudflare DNS","status":"NS_DELEGATION_REQUIRED","domain":$d,"name_servers":$ns}')
+					$BIN/v-send-sys-notification "$notif_sub" "$notif_body" "WARNING" "" "dns_ns_assigned" "$notif_extra" >/dev/null 2>&1 &
+				fi
+			fi
 		fi
 	fi
 fi
@@ -227,8 +273,8 @@ cf_add_record "webmail.$domain" "CNAME" "mail.$domain" "false"
 # MX record
 cf_add_mx_record "$domain" "mail.$domain" 10
 
-# SPF TXT record
-cf_add_record "$domain" "TXT" "v=spf1 a mx ip4:$local_ip ~all" "false"
+# SPF TXT record (intelligent merge)
+cf_sync_spf_record "$domain" "$local_ip"
 
 # DKIM TXT record
 if [ -f "$USER_DATA/mail/$domain.pub" ]; then

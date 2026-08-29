@@ -51,6 +51,84 @@
 		<div class="form-container">
 			<h1 class="u-mb20"><?= tohtml( _("Edit Web Domain")) ?></h1>
 			<?php show_alert_message($_SESSION); ?>
+
+			<?php if (!empty($cf_dns_enabled)) { ?>
+				<div class="card u-mb20" style="border: 1px solid #f48120; border-radius: 8px; overflow: hidden; background: #fffdfa;">
+					<div style="background: linear-gradient(90deg, #f48120 0%, #faad3f 100%); color: #fff; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center;">
+						<div style="display: flex; align-items: center; gap: 8px; font-weight: 600;">
+							<i class="fab fa-cloudflare fa-lg"></i>
+							<span>Cloudflare DNS &amp; Zone Durumu</span>
+						</div>
+						<div>
+							<a href="/edit/web/?domain=<?= tohtml(urlencode(trim($v_domain, "'"))) ?>&token=<?= tohtml($_SESSION['token']) ?>&check_cf_zone=1" class="button button-secondary" style="padding: 3px 10px; font-size: 12px; background: rgba(255,255,255,0.9); color: #333;">
+								<i class="fas fa-arrows-rotate u-mr5"></i>Zone Geldi mi? Test Et
+							</a>
+						</div>
+					</div>
+					<div style="padding: 16px;">
+						<?php if ($cf_zone_status && !empty($cf_zone_status["success"])) { 
+							$is_active = ($cf_zone_status["zone_status"] ?? "") === "active";
+							$is_delegated = !empty($cf_zone_status["is_delegated"]);
+						?>
+							<div style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 12px;">
+								<div>
+									<small style="color: #666; display: block;">Zone Durumu:</small>
+									<?php if ($is_active) { ?>
+										<span class="badge" style="background: #10b981; color: #fff; padding: 4px 8px; border-radius: 4px; font-weight: 600;"><i class="fas fa-circle-check u-mr5"></i>Active (Aktif)</span>
+									<?php } else { ?>
+										<span class="badge" style="background: #f59e0b; color: #fff; padding: 4px 8px; border-radius: 4px; font-weight: 600;"><i class="fas fa-clock u-mr5"></i>Pending (NS Bekleniyor)</span>
+									<?php } ?>
+								</div>
+								<div>
+									<small style="color: #666; display: block;">Delegasyon / NS Durumu:</small>
+									<?php if ($is_delegated) { ?>
+										<span class="badge" style="background: #10b981; color: #fff; padding: 4px 8px; border-radius: 4px; font-weight: 600;"><i class="fas fa-check u-mr5"></i>Doğrulandı</span>
+									<?php } else { ?>
+										<span class="badge" style="background: #ef4444; color: #fff; padding: 4px 8px; border-radius: 4px; font-weight: 600;"><i class="fas fa-triangle-exclamation u-mr5"></i>Yönlendirilmemiş</span>
+									<?php } ?>
+								</div>
+								<?php if (!empty($cf_zone_status["resolved_ip"])) { ?>
+								<div>
+									<small style="color: #666; display: block;">Çözümlenen Canlı IP:</small>
+									<code><?= tohtml($cf_zone_status["resolved_ip"]) ?></code>
+								</div>
+								<?php } ?>
+							</div>
+
+							<?php if (!empty($cf_zone_status["assigned_nameservers"])) { ?>
+								<div class="u-mb10">
+									<label class="form-label" style="font-size: 13px; margin-bottom: 4px;">
+										<strong>Atanan Cloudflare Nameserver (NS) Adresleri:</strong>
+										<span class="hint">(Domain firmanızda bu 2 NS adresini tanımlayın)</span>
+									</label>
+									<div style="display: flex; gap: 10px; flex-wrap: wrap;">
+										<?php foreach ($cf_zone_status["assigned_nameservers"] as $ns_item) { ?>
+											<div style="background: #fff; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 6px; display: inline-flex; align-items: center; gap: 8px;">
+												<code style="font-size: 13px; font-weight: 600; color: #0284c7;"><?= tohtml($ns_item) ?></code>
+												<button type="button" class="button button-secondary" style="padding: 2px 6px; font-size: 11px;" onclick="navigator.clipboard.writeText('<?= tohtml($ns_item) ?>'); this.innerText='Kopyalandı!'; setTimeout(() => this.innerText='Kopyala', 2000);">
+													<i class="fas fa-copy"></i>
+												</button>
+											</div>
+										<?php } ?>
+									</div>
+								</div>
+							<?php } ?>
+
+							<?php if (!$is_delegated) { ?>
+								<div class="alert alert-warning" style="margin: 0; padding: 10px 14px; font-size: 13px;">
+									<i class="fas fa-triangle-exclamation u-mr5"></i>
+									<strong>Önemli Uyarı:</strong> Domain kayıt firmanızda (Registrar) nameserver kayıtları henüz yukarıdaki Cloudflare NS adreslerine yönlendirilmemiş görünüyor. NS değişikliği yaptıktan sonra <em>"Zone Geldi mi? Test Et"</em> butonuna basarak kontrol edebilirsiniz.
+								</div>
+							<?php } ?>
+						<?php } else { ?>
+							<p style="color: #666; margin: 0; font-size: 13px;">
+								<i class="fas fa-info-circle u-mr5"></i>Cloudflare Zone durumu sorgulanamadı veya zone henüz açılmadı.
+							</p>
+						<?php } ?>
+					</div>
+				</div>
+			<?php } ?>
+
 			<div class="u-mb10">
 				<label for="v_domain" class="form-label"><?= tohtml( _("Domain")) ?></label>
 				<input type="text" class="form-control" name="v_domain" id="v_domain" value="<?= tohtml(trim($v_domain, "'")) ?>" disabled required>

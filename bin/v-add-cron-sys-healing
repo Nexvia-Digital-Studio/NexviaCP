@@ -20,7 +20,7 @@ source $HESTIA/func/main.sh
 # load config file
 source_conf "$HESTIA/conf/hestia.conf"
 
-CRON_TAB="/var/spool/cron/crontabs/hestiaweb"
+CRON_FILE="/etc/cron.d/nexvia-healing"
 
 #----------------------------------------------------------#
 #                    Verifications                         #
@@ -33,29 +33,26 @@ if [ "x$(id -u)" != 'x0' ]; then
 	exit 10
 fi
 
-if [ ! -f "$CRON_TAB" ]; then
-	echo "ERROR: Cron tab file $CRON_TAB not found."
-	exit 1
-fi
-
-check_healing=$(grep 'v-monitor-sys-healing' "$CRON_TAB" 2>/dev/null)
-
 #----------------------------------------------------------#
 #                       Action                             #
 #----------------------------------------------------------#
 
-if [ -z "$check_healing" ]; then
-	echo "*/5 * * * * sudo $HESTIA/bin/v-monitor-sys-healing" >> "$CRON_TAB"
-	chmod 600 "$CRON_TAB"
-	chown hestiaweb:hestiaweb "$CRON_TAB" 2>/dev/null || true
+cat << 'EOF' > "$CRON_FILE"
+# NexviaCP AI Ops & Self-Healing Engine (runs every 5 minutes)
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
-	# Restarting cron
-	$BIN/v-restart-cron
-	check_result $? "Cron restart failed" > /dev/null
+*/5 * * * * root /usr/local/hestia/bin/v-monitor-sys-healing >/dev/null 2>&1
+EOF
 
-	# Logging
-	$BIN/v-log-action "system" "Info" "System" "AI Ops self-healing cron job enabled (every 5 minutes)."
-fi
+chmod 644 "$CRON_FILE"
+
+# Restarting cron
+$BIN/v-restart-cron
+check_result $? "Cron restart failed" > /dev/null
+
+# Logging
+$BIN/v-log-action "system" "Info" "System" "AI Ops self-healing system cron job enabled (/etc/cron.d/nexvia-healing)."
 
 log_event "$OK" "$ARGUMENTS"
 

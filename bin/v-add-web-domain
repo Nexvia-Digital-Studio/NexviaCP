@@ -190,16 +190,11 @@ else
 	ALIAS="www.$domain"
 	if [ -z "$aliases" ]; then
 		# Check and skip www alias for subdomains.
-		IFS='.' read -r -a domain_elements <<< "$domain"
-		if [ "${#domain_elements[@]}" -gt 2 ]; then
-			is_valid_2_part_extension $domain
-			if [ $? -ne 0 ]; then
-				ALIAS=""
-			else
-				ALIAS="www.$domain"
-			fi
-		else
+		get_base_domain "$domain"
+		if [ "$domain" = "$basedomain" ]; then
 			ALIAS="www.$domain"
+		else
+			ALIAS=""
 		fi
 	else
 		ALIAS="$aliases"

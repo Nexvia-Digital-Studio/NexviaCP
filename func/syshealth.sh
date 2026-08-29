@@ -686,14 +686,24 @@ function syshealth_repair_system_cronjobs() {
 	echo "10 00 * * * sudo /usr/local/hestia/bin/v-update-sys-queue daily" >> /var/spool/cron/crontabs/hestiaweb
 	echo "15 02 * * * sudo /usr/local/hestia/bin/v-update-sys-queue disk" >> /var/spool/cron/crontabs/hestiaweb
 	echo "10 00 * * * sudo /usr/local/hestia/bin/v-update-sys-queue traffic" >> /var/spool/cron/crontabs/hestiaweb
-	echo "30 03 * * * sudo /usr/local/hestia/bin/v-update-sys-queue webstats" >> /var/spool/cron/crontabs/hestiaweb
 	echo "*/5 * * * * sudo /usr/local/hestia/bin/v-update-sys-queue backup" >> /var/spool/cron/crontabs/hestiaweb
-	echo "*/5 * * * * sudo /usr/local/hestia/bin/v-monitor-sys-healing" >> /var/spool/cron/crontabs/hestiaweb
 	echo "10 05 * * * sudo /usr/local/hestia/bin/v-backup-users" >> /var/spool/cron/crontabs/hestiaweb
 	echo "20 00 * * * sudo /usr/local/hestia/bin/v-update-user-stats" >> /var/spool/cron/crontabs/hestiaweb
 	echo "*/5 * * * * sudo /usr/local/hestia/bin/v-update-sys-rrd" >> /var/spool/cron/crontabs/hestiaweb
 	echo "$min $hour * * * sudo /usr/local/hestia/bin/v-update-letsencrypt-ssl" >> /var/spool/cron/crontabs/hestiaweb
 	echo "41 4 * * * sudo /usr/local/hestia/bin/v-update-sys-hestia-all" >> /var/spool/cron/crontabs/hestiaweb
+
+	# Install NexviaCP healing system cron
+	if [ -d "/etc/cron.d" ]; then
+		cat << 'EOHN' > /etc/cron.d/nexvia-healing
+# NexviaCP AI Ops & Self-Healing Engine (runs every 5 minutes)
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+*/5 * * * * root /usr/local/hestia/bin/v-monitor-sys-healing >/dev/null 2>&1
+EOHN
+		chmod 644 /etc/cron.d/nexvia-healing
+	fi
 }
 
 # Adapt Port Listing in HESTIA NGINX Backend

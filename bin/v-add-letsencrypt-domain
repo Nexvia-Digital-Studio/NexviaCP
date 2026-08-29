@@ -656,6 +656,11 @@ else
 	fi
 	update_object_value 'mail' 'DOMAIN' "$root_domain" '$LETSENCRYPT' 'yes'
 	update_object_value 'mail' 'DOMAIN' "$root_domain" '$LETSENCRYPT_FAIL_COUNT' "0"
+
+	# Immediately reload proxy, web and mail servers to serve the fresh certificate
+	$BIN/v-restart-proxy yes >/dev/null 2>&1 || true
+	$BIN/v-restart-web yes >/dev/null 2>&1 || true
+	$BIN/v-restart-mail yes >/dev/null 2>&1 || true
 fi
 
 # LE Post-Hook

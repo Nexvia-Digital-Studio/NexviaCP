@@ -70,6 +70,28 @@ if (!empty($_GET["delete_env"]) && !empty($_GET["key"])) {
 // Fetch masked domain .env secrets
 $domain_env_secrets = json_decode(shell_exec(HESTIA_CMD . "v-list-web-domain-env " . $user . " " . quoteshellarg($v_domain) . " json"), true) ?: [];
 
+// Check Cloudflare DNS & Zone Status
+$cf_dns_enabled = (($_SESSION["DNS_API_PROVIDER"] ?? "") === "cloudflare");
+$cf_zone_status = null;
+if ($cf_dns_enabled) {
+	if (!empty($_GET["check_cf_zone"])) {
+		if (verify_csrf($_GET)) {
+			$check_raw = shell_exec(HESTIA_CMD . "v-check-remote-dns-domain-cloudflare " . quoteshellarg($v_domain) . " json");
+			$cf_zone_status = json_decode($check_raw, true);
+			if ($cf_zone_status && !empty($cf_zone_status["success"])) {
+				if (!empty($cf_zone_status["is_delegated"])) {
+					$_SESSION["ok_msg"] = $is_tr ? "Cloudflare Zone aktif! Nameserver yönlendirmesi doğrulandı." : "Cloudflare Zone is active and nameservers are verified.";
+				} else {
+					$_SESSION["error_msg"] = $is_tr ? "Nameserver yönlendirmesi henüz tamamlanmadı. Atanan NS: " . ($cf_zone_status["assigned_nameservers_str"] ?? "") : "Nameservers not yet delegated. Assigned NS: " . ($cf_zone_status["assigned_nameservers_str"] ?? "");
+				}
+			}
+		}
+	} else {
+		$check_raw = shell_exec(HESTIA_CMD . "v-check-remote-dns-domain-cloudflare " . quoteshellarg($v_domain) . " json");
+		$cf_zone_status = json_decode($check_raw, true);
+	}
+}
+
 // Parse domain
 $v_ip = $data[$v_domain]["IP"];
 $v_template = $data[$v_domain]["TPL"];
