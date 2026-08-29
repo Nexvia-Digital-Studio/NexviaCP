@@ -86,7 +86,7 @@ NexviaCP, müşterilerinize SSH yetkisi vermeden güvenle hizmet sunabilmeniz i�
 <details open>
 <summary><h3>🛡️ 5. Güvenlik & SSL Yönetimi</h3></summary>
 
-- **Cloudflare DNS API Wildcard SSL:** Sunucu Ayarları'ndan Cloudflare API Token + Zone ID girildiğinde, `*.siteniz.com` wildcard Let's Encrypt sertifikaları için `_acme-challenge` TXT kaydı Cloudflare API'sine otomatik yazılır ve silinir — yerel DNS zone gerektirmez.
+- **Cloudflare DNS Otomasyonu & Wildcard SSL:** `DNS_API_PROVIDER=cloudflare` etkinleştirildiğinde; Web Domain, Subdomain ve Alias eklendiğinde Cloudflare'de zone yoksa otomatik açılır, `@` A, `www` CNAME ve alias kayıtları otomatik oluşturulur. Dinamik zone çözümleme sayesinde tüm domain ve subdomainlerde `*.siteniz.com` wildcard Let's Encrypt sertifikaları (`dns-01`) sıfır lokal DNS konfigürasyonuyla sorunsuz çalışır.
 - **Otomatik Let's Encrypt SSL:** Standart ve Wildcard SSL sertifikalarını otomatik alma ve süresi dolmadan yenileme.
 - **Dahili Saldırı Koruması:** `iptables`, `fail2ban` ve `ipset` ile kaba kuvvet (brute-force) ve IP banlama sistemi.
 - **Gelişmiş Giriş Güvenliği:** 2FA (İki Faktörlü Doğrulama) ve SSH IP kısıtlaması.

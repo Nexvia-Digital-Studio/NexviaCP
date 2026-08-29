@@ -108,6 +108,15 @@ check_result $? "Web restart failed" > /dev/null
 $BIN/v-restart-proxy "$restart"
 check_result $? "Proxy restart failed" > /dev/null
 
+# Cloudflare automation: alias record
+if [ "$DNS_API_PROVIDER" = "cloudflare" ] && [ "${CF_AUTO_ZONE:-yes}" != "no" ]; then
+	for a in $(echo "$aliases" | tr ',' '\n'); do
+		[ -z "$a" ] && continue
+		$BIN/v-add-remote-dns-alias-cloudflare "$domain" "$a" \
+			|| $BIN/v-log-action "$user" "Warning" "DNS" "Cloudflare alias sync failed for $a ($domain)"
+	done
+fi
+
 $BIN/v-log-action "$user" "Info" "Web" "Added new web domain alias (Alias: $aliases, Domain: $domain)."
 log_event "$OK" "$ARGUMENTS"
 

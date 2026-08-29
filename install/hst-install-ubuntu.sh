@@ -1610,10 +1610,14 @@ write_config_value "PGA_SSO_KEY" ""
 write_config_value "REDIS_SUPPORT" "no"
 write_config_value "MEMCACHED_SUPPORT" "no"
 
-# NexviaCP Cloudflare DNS API for wildcard SSL (configured in Server Settings).
+# NexviaCP Cloudflare DNS API for wildcard SSL & Automation (configured in Server Settings).
 write_config_value "DNS_API_PROVIDER" ""
 write_config_value "CF_API_TOKEN" ""
 write_config_value "CF_ZONE_ID" ""
+write_config_value "CF_ACCOUNT_ID" ""
+write_config_value "CF_AUTO_ZONE" "yes"
+write_config_value "CF_PROXY_RECORDS_DEFAULT" "true"
+write_config_value "CF_DELETE_ZONE" "no"
 
 # Installing hosting packages
 cp -rf $HESTIA_COMMON_DIR/packages $HESTIA/data/

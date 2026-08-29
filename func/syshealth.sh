@@ -575,7 +575,7 @@ function syshealth_repair_system_config() {
 		$BIN/v-change-sys-config-value "MEMCACHED_SUPPORT" "no"
 	fi
 
-	# NexviaCP Cloudflare DNS API for wildcard SSL
+	# NexviaCP Cloudflare DNS API for wildcard SSL & Automation
 	if [[ -z $(check_key_exists 'DNS_API_PROVIDER') ]]; then
 		echo "[ ! ] Adding missing variable to hestia.conf: DNS_API_PROVIDER ('')"
 		$BIN/v-change-sys-config-value "DNS_API_PROVIDER" ""
@@ -587,6 +587,22 @@ function syshealth_repair_system_config() {
 	if [[ -z $(check_key_exists 'CF_ZONE_ID') ]]; then
 		echo "[ ! ] Adding missing variable to hestia.conf: CF_ZONE_ID ('')"
 		$BIN/v-change-sys-config-value "CF_ZONE_ID" ""
+	fi
+	if [[ -z $(check_key_exists 'CF_ACCOUNT_ID') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: CF_ACCOUNT_ID ('')"
+		$BIN/v-change-sys-config-value "CF_ACCOUNT_ID" ""
+	fi
+	if [[ -z $(check_key_exists 'CF_AUTO_ZONE') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: CF_AUTO_ZONE ('yes')"
+		$BIN/v-change-sys-config-value "CF_AUTO_ZONE" "yes"
+	fi
+	if [[ -z $(check_key_exists 'CF_PROXY_RECORDS_DEFAULT') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: CF_PROXY_RECORDS_DEFAULT ('true')"
+		$BIN/v-change-sys-config-value "CF_PROXY_RECORDS_DEFAULT" "true"
+	fi
+	if [[ -z $(check_key_exists 'CF_DELETE_ZONE') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: CF_DELETE_ZONE ('no')"
+		$BIN/v-change-sys-config-value "CF_DELETE_ZONE" "no"
 	fi
 
 	# NexviaCP AI Ops & Self-Healing Hub

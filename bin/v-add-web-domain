@@ -285,6 +285,12 @@ check_result $? "Web restart failed" > /dev/null
 $BIN/v-restart-proxy "$restart"
 check_result $? "Proxy restart failed" > /dev/null
 
+# Cloudflare automation: zone + records
+if [ "$DNS_API_PROVIDER" = "cloudflare" ] && [ "${CF_AUTO_ZONE:-yes}" != "no" ]; then
+	$BIN/v-add-remote-dns-host-cloudflare "$domain" "$ip" \
+		|| $BIN/v-log-action "$user" "Warning" "DNS" "Cloudflare sync failed for $domain"
+fi
+
 # Logging
 $BIN/v-log-action "$user" "Info" "Web" "Added new web domain (Name: $domain)."
 log_event "$OK" "$ARGUMENTS"

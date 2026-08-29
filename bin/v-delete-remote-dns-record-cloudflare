@@ -24,6 +24,32 @@ source $HESTIA/func/main.sh
 # load config file
 source_conf "$HESTIA/conf/hestia.conf"
 
+# Cloudflare API helper
+cf_get() {
+	printf 'header = "Authorization: Bearer %s"\n' "$CF_API_TOKEN" | \
+		curl --silent --show-error --max-time 30 -K - "https://api.cloudflare.com/client/v4$1"
+}
+
+# Resolve zone ID by walking up domain hierarchy
+resolve_zone_id() {
+	local target="$1"
+	local cur="$target"
+	local zid=""
+	while [ -n "$cur" ]; do
+		zid=$(cf_get "/zones?name=$cur" | jq -r '.result[0].id // empty')
+		if [ -n "$zid" ]; then
+			echo "$zid"
+			return 0
+		fi
+		if [[ "$cur" == *.* ]]; then
+			cur="${cur#*.}"
+		else
+			break
+		fi
+	done
+	return 1
+}
+
 #----------------------------------------------------------#
 #                    Verifications                         #
 #----------------------------------------------------------#
@@ -43,15 +69,21 @@ fi
 if [ -z "$CF_API_TOKEN" ]; then
 	check_result "$E_NOTEXIST" "CF_API_TOKEN is not configured"
 fi
-if [ -z "$CF_ZONE_ID" ]; then
-	check_result "$E_NOTEXIST" "CF_ZONE_ID is not configured"
+
+# Dynamically resolve zone ID from domain or fallback to CF_ZONE_ID
+zone_id=$(resolve_zone_id "$domain")
+if [ -z "$zone_id" ] && [ -n "$CF_ZONE_ID" ]; then
+	zone_id="$CF_ZONE_ID"
+fi
+if [ -z "$zone_id" ]; then
+	check_result "$E_NOTEXIST" "Could not resolve Cloudflare Zone ID for $domain"
 fi
 
 #----------------------------------------------------------#
 #                       Action                             #
 #----------------------------------------------------------#
 
-api_url="https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records/$record_id"
+api_url="https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records/$record_id"
 
 answer=$(curl --silent --show-error --max-time 30 \
 	--request DELETE "$api_url" \

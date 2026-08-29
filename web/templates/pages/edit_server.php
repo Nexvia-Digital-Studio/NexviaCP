@@ -392,8 +392,22 @@
 							>
 						</div>
 						<div class="u-mb10">
+							<label for="v_cf_account_id" class="form-label">
+								<?= tohtml( _("Cloudflare Account ID")) ?>
+								<span class="hint">(<?= tohtml( _("Optional: auto-resolved if blank")) ?>)</span>
+							</label>
+							<input
+								type="text"
+								class="form-control"
+								name="v_cf_account_id"
+								id="v_cf_account_id"
+								value="<?= tohtml($_SESSION["CF_ACCOUNT_ID"] ?? "") ?>"
+							>
+						</div>
+						<div class="u-mb10">
 							<label for="v_cf_zone_id" class="form-label">
 								<?= tohtml( _("Cloudflare Zone ID")) ?>
+								<span class="hint">(<?= tohtml( _("Optional fallback: dynamic resolution is enabled")) ?>)</span>
 							</label>
 							<input
 								type="text"
@@ -402,6 +416,45 @@
 								id="v_cf_zone_id"
 								value="<?= tohtml($_SESSION["CF_ZONE_ID"] ?? "") ?>"
 							>
+						</div>
+						<div class="form-check u-mb10">
+							<input
+								class="form-check-input"
+								type="checkbox"
+								name="v_cf_auto_zone"
+								id="v_cf_auto_zone"
+								value="yes"
+								<?= (($_SESSION["CF_AUTO_ZONE"] ?? "yes") !== "no") ? "checked" : "" ?>
+							>
+							<label class="form-check-label" for="v_cf_auto_zone">
+								<?= tohtml( _("Auto-create Cloudflare Zone & DNS Records on web domain creation")) ?>
+							</label>
+						</div>
+						<div class="form-check u-mb10">
+							<input
+								class="form-check-input"
+								type="checkbox"
+								name="v_cf_proxy_records_default"
+								id="v_cf_proxy_records_default"
+								value="true"
+								<?= (($_SESSION["CF_PROXY_RECORDS_DEFAULT"] ?? "true") !== "false" && ($_SESSION["CF_PROXY_RECORDS_DEFAULT"] ?? "true") !== "no") ? "checked" : "" ?>
+							>
+							<label class="form-check-label" for="v_cf_proxy_records_default">
+								<?= tohtml( _("Enable Cloudflare Proxy (Orange Cloud) by default on created DNS records")) ?>
+							</label>
+						</div>
+						<div class="form-check u-mb10">
+							<input
+								class="form-check-input"
+								type="checkbox"
+								name="v_cf_delete_zone"
+								id="v_cf_delete_zone"
+								value="yes"
+								<?= (($_SESSION["CF_DELETE_ZONE"] ?? "no") === "yes") ? "checked" : "" ?>
+							>
+							<label class="form-check-label" for="v_cf_delete_zone">
+								<?= tohtml( _("Delete Cloudflare Zone entirely when web domain is deleted (Warning: destroys all remote records)")) ?>
+							</label>
 						</div>
 					</div>
 				</details>

@@ -1,0 +1,210 @@
+#!/bin/bash
+# info: create a Cloudflare zone (if missing) and default records for a web domain
+# options: DOMAIN [IP]
+#
+# example: v-add-remote-dns-host-cloudflare example.com 159.195.244.43
+#
+# Uses the Cloudflare API v4 to ensure a DNS zone exists for the given domain
+# (or its parent apex domain) and creates default A (@) and CNAME (www) records.
+# Requires DNS_API_PROVIDER=cloudflare and CF_API_TOKEN in hestia.conf.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+domain=$1
+ip=$2
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/ip.sh
+source $HESTIA/func/ip.sh
+# shellcheck source=/usr/local/hestia/func/domain.sh
+source $HESTIA/func/domain.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+# Cloudflare API helper function
+cf_api() {
+	local method="$1"
+	local endpoint="$2"
+	local data="$3"
+	if [ -n "$data" ]; then
+		printf 'header = "Authorization: Bearer %s"\nheader = "Content-Type: application/json"\n' "$CF_API_TOKEN" | \
+			curl --silent --show-error --max-time 30 -K - \
+				--request "$method" "https://api.cloudflare.com/client/v4$endpoint" \
+				--data "$data"
+	else
+		printf 'header = "Authorization: Bearer %s"\n' "$CF_API_TOKEN" | \
+			curl --silent --show-error --max-time 30 -K - \
+				--request "$method" "https://api.cloudflare.com/client/v4$endpoint"
+	fi
+}
+
+# Resolve zone ID by walking up domain hierarchy (sub.example.com -> example.com)
+resolve_zone_id() {
+	local target="$1"
+	local cur="$target"
+	local zid=""
+	while [ -n "$cur" ]; do
+		zid=$(cf_api GET "/zones?name=$cur" | jq -r '.result[0].id // empty')
+		if [ -n "$zid" ]; then
+			echo "$zid"
+			return 0
+		fi
+		if [[ "$cur" == *.* ]]; then
+			cur="${cur#*.}"
+		else
+			break
+		fi
+	done
+	return 1
+}
+
+# Add a DNS record idempotently
+cf_add_record() {
+	local rec_name="$1"
+	local rec_type="$2"
+	local rec_content="$3"
+	local rec_proxied="$4"
+
+	# Check if record already exists
+	local existing_id
+	existing_id=$(cf_api GET "/zones/$zone_id/dns_records?type=$rec_type&name=$rec_name" | jq -r '.result[0].id // empty')
+	if [ -n "$existing_id" ]; then
+		return 0
+	fi
+
+	local rec_payload rec_resp rec_success
+	rec_payload=$(jq -nc \
+		--arg name "$rec_name" \
+		--arg type "$rec_type" \
+		--arg content "$rec_content" \
+		--argjson proxied "$rec_proxied" \
+		'{type:$type, name:$name, content:$content, ttl:1, proxied:$proxied}')
+
+	rec_resp=$(cf_api POST "/zones/$zone_id/dns_records" "$rec_payload")
+	rec_success=$(echo "$rec_resp" | jq -r '.success // false')
+	if [ "$rec_success" != "true" ]; then
+		local rec_err
+		rec_err=$(echo "$rec_resp" | jq -r '.errors[0].message // "Failed to create record"')
+		$BIN/v-log-action "system" "Warning" "DNS" "Cloudflare DNS record create failed for $rec_name ($rec_type): $rec_err"
+		return 1
+	fi
+	return 0
+}
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '1' "$#" 'DOMAIN [IP]'
+is_format_valid 'domain'
+check_hestia_demo_mode
+
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "Error: Script can be run executed only by root"
+	exit 10
+fi
+
+# Exit silently if Cloudflare provider is not configured or auto zone is disabled
+if [ "$DNS_API_PROVIDER" != "cloudflare" ]; then
+	exit 0
+fi
+
+if [ "${CF_AUTO_ZONE:-yes}" = "no" ]; then
+	exit 0
+fi
+
+if [ -z "$CF_API_TOKEN" ]; then
+	check_result "$E_NOTEXIST" "CF_API_TOKEN is not configured"
+fi
+
+# Default IP fallback if not provided
+if [ -z "$ip" ]; then
+	if [ -d "$HESTIA/data/ips" ]; then
+		ip=$(ls "$HESTIA/data/ips" 2>/dev/null | head -1)
+	fi
+	if [ -z "$ip" ] && [ -n "$IP" ]; then
+		ip=$(get_real_ip "$IP")
+	fi
+fi
+
+# Determine default proxied state (orange cloud)
+cf_proxied="true"
+if [ "$CF_PROXY_RECORDS_DEFAULT" = "false" ] || [ "$CF_PROXY_RECORDS_DEFAULT" = "no" ]; then
+	cf_proxied="false"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# 1) Check if zone already exists for domain or parent domain
+zone_id=$(resolve_zone_id "$domain")
+
+# 2) If zone does not exist, create a new zone in Cloudflare
+if [ -z "$zone_id" ]; then
+	account_id="$CF_ACCOUNT_ID"
+	if [ -z "$account_id" ]; then
+		account_id=$(cf_api GET "/zones?per_page=1" | jq -r '.result[0].account.id // empty')
+	fi
+	if [ -z "$account_id" ]; then
+		account_id=$(cf_api GET "/accounts?per_page=1" | jq -r '.result[0].id // empty')
+	fi
+
+	if [ -z "$account_id" ]; then
+		check_result "$E_CONNECT" "Cannot resolve Cloudflare account ID to create zone for $domain"
+	fi
+
+	zone_payload=$(jq -nc --arg n "$domain" --arg a "$account_id" \
+		'{name:$n, account:{id:$a}, type:"full"}')
+	zone_json=$(cf_api POST "/zones" "$zone_payload")
+	success=$(echo "$zone_json" | jq -r '.success // false')
+
+	if [ "$success" != "true" ]; then
+		err_msg=$(echo "$zone_json" | jq -r '.errors[0].message // "Unknown Cloudflare API error"')
+		check_result "$E_CONNECT" "Failed to create Cloudflare zone for $domain: $err_msg"
+	fi
+
+	zone_id=$(echo "$zone_json" | jq -r '.result.id')
+
+	# Log assigned nameservers to Hestia action log
+	echo "$zone_json" | jq -r '.result.name_servers[]? // empty' | while read -r ns; do
+		if [ -n "$ns" ]; then
+			$BIN/v-log-action "system" "Info" "DNS" "Cloudflare zone $domain created, assigned NS: $ns"
+		fi
+	done
+fi
+
+# 3) Create DNS records (A record for hostname, and CNAME for www if apex domain)
+if [ -n "$ip" ]; then
+	cf_add_record "$domain" "A" "$ip" "$cf_proxied"
+fi
+
+# Check if domain is an apex domain (to create www CNAME)
+is_apex="yes"
+IFS='.' read -r -a domain_elements <<< "$domain"
+if [ "${#domain_elements[@]}" -gt 2 ]; then
+	is_valid_2_part_extension "$domain"
+	if [ $? -ne 0 ]; then
+		is_apex="no"
+	fi
+fi
+
+if [ "$is_apex" = "yes" ]; then
+	cf_add_record "www.$domain" "CNAME" "$domain" "$cf_proxied"
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-log-action "system" "Info" "DNS" "Cloudflare DNS synchronized for $domain (Zone ID: $zone_id)."
+log_event "$OK" "$ARGUMENTS"
+
+exit 0

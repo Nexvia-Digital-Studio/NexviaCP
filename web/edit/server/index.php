@@ -904,7 +904,7 @@ if (!empty($_POST["save"])) {
 				}
 			}
 		}
-		if (!empty($_POST["v_cf_zone_id"])) {
+		if (isset($_POST["v_cf_zone_id"])) {
 			$cur_zone = $_SESSION["CF_ZONE_ID"] ?? "";
 			if ($_POST["v_cf_zone_id"] != $cur_zone) {
 				exec(
@@ -919,6 +919,71 @@ if (!empty($_POST["save"])) {
 				if (empty($_SESSION["error_msg"])) {
 					$_SESSION["CF_ZONE_ID"] = $_POST["v_cf_zone_id"];
 				}
+			}
+		}
+		if (isset($_POST["v_cf_account_id"])) {
+			$cur_account_id = $_SESSION["CF_ACCOUNT_ID"] ?? "";
+			if ($_POST["v_cf_account_id"] != $cur_account_id) {
+				exec(
+					HESTIA_CMD .
+						"v-change-sys-config-value CF_ACCOUNT_ID " .
+						quoteshellarg($_POST["v_cf_account_id"]),
+					$output,
+					$return_var,
+				);
+				check_return_code($return_var, $output);
+				unset($output);
+				if (empty($_SESSION["error_msg"])) {
+					$_SESSION["CF_ACCOUNT_ID"] = $_POST["v_cf_account_id"];
+				}
+			}
+		}
+		$auto_zone = empty($_POST["v_cf_auto_zone"]) ? "no" : "yes";
+		$cur_auto_zone = $_SESSION["CF_AUTO_ZONE"] ?? "yes";
+		if ($auto_zone != $cur_auto_zone) {
+			exec(
+				HESTIA_CMD .
+					"v-change-sys-config-value CF_AUTO_ZONE " .
+					quoteshellarg($auto_zone),
+				$output,
+				$return_var,
+			);
+			check_return_code($return_var, $output);
+			unset($output);
+			if (empty($_SESSION["error_msg"])) {
+				$_SESSION["CF_AUTO_ZONE"] = $auto_zone;
+			}
+		}
+		$proxy_rec = empty($_POST["v_cf_proxy_records_default"]) ? "false" : "true";
+		$cur_proxy_rec = $_SESSION["CF_PROXY_RECORDS_DEFAULT"] ?? "true";
+		if ($proxy_rec != $cur_proxy_rec) {
+			exec(
+				HESTIA_CMD .
+					"v-change-sys-config-value CF_PROXY_RECORDS_DEFAULT " .
+					quoteshellarg($proxy_rec),
+				$output,
+				$return_var,
+			);
+			check_return_code($return_var, $output);
+			unset($output);
+			if (empty($_SESSION["error_msg"])) {
+				$_SESSION["CF_PROXY_RECORDS_DEFAULT"] = $proxy_rec;
+			}
+		}
+		$del_zone = empty($_POST["v_cf_delete_zone"]) ? "no" : "yes";
+		$cur_del_zone = $_SESSION["CF_DELETE_ZONE"] ?? "no";
+		if ($del_zone != $cur_del_zone) {
+			exec(
+				HESTIA_CMD .
+					"v-change-sys-config-value CF_DELETE_ZONE " .
+					quoteshellarg($del_zone),
+				$output,
+				$return_var,
+			);
+			check_return_code($return_var, $output);
+			unset($output);
+			if (empty($_SESSION["error_msg"])) {
+				$_SESSION["CF_DELETE_ZONE"] = $del_zone;
 			}
 		}
 	}

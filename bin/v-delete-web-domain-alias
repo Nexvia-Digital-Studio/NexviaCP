@@ -89,8 +89,15 @@ decrease_user_value "$user" '$U_WEB_ALIASES'
 $BIN/v-restart-web "$restart"
 check_result $? "Web restart failed" > /dev/null
 
+# Restarting proxy server
 $BIN/v-restart-proxy "$restart"
 check_result $? "Proxy restart failed" > /dev/null
+
+# Cloudflare automation: cleanup alias record
+if [ "$DNS_API_PROVIDER" = "cloudflare" ]; then
+	$BIN/v-delete-remote-dns-alias-cloudflare "$domain" "$dom_alias" \
+		|| $BIN/v-log-action "$user" "Warning" "DNS" "Cloudflare cleanup failed for alias $dom_alias ($domain)"
+fi
 
 # Logging
 $BIN/v-log-action "$user" "Info" "Web" "Deleted web domain alias (Alias: $dom_alias, Domain: $domain)."

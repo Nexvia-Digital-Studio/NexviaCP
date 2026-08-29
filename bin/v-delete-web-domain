@@ -156,6 +156,12 @@ check_result $? "Proxy restart failed" > /dev/null
 $BIN/v-restart-web-backend "$restart" "$version"
 check_result $? "PHP restart failed" > /dev/null
 
+# Cloudflare automation: cleanup domain records / zone
+if [ "$DNS_API_PROVIDER" = "cloudflare" ]; then
+	$BIN/v-delete-remote-dns-host-cloudflare "$domain" \
+		|| $BIN/v-log-action "$user" "Warning" "DNS" "Cloudflare delete failed for $domain"
+fi
+
 # Logging
 $BIN/v-log-action "$user" "Info" "Web" "Deleted web domain (Name: $domain)."
 log_event "$OK" "$ARGUMENTS"

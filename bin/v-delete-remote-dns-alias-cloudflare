@@ -1,0 +1,112 @@
+#!/bin/bash
+# info: delete Cloudflare DNS records for a web domain alias
+# options: DOMAIN ALIAS
+#
+# example: v-delete-remote-dns-alias-cloudflare example.com www2.example.com
+#
+# Uses the Cloudflare API v4 to delete DNS records for a domain alias.
+# Requires DNS_API_PROVIDER=cloudflare and CF_API_TOKEN in hestia.conf.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+domain=$1
+alias=$2
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/domain.sh
+source $HESTIA/func/domain.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+# Cloudflare API helper function
+cf_api() {
+	local method="$1"
+	local endpoint="$2"
+	local data="$3"
+	if [ -n "$data" ]; then
+		printf 'header = "Authorization: Bearer %s"\nheader = "Content-Type: application/json"\n' "$CF_API_TOKEN" | \
+			curl --silent --show-error --max-time 30 -K - \
+				--request "$method" "https://api.cloudflare.com/client/v4$endpoint" \
+				--data "$data"
+	else
+		printf 'header = "Authorization: Bearer %s"\n' "$CF_API_TOKEN" | \
+			curl --silent --show-error --max-time 30 -K - \
+				--request "$method" "https://api.cloudflare.com/client/v4$endpoint"
+	fi
+}
+
+# Resolve zone ID by walking up domain hierarchy
+resolve_zone_id() {
+	local target="$1"
+	local cur="$target"
+	local zid=""
+	while [ -n "$cur" ]; do
+		zid=$(cf_api GET "/zones?name=$cur" | jq -r '.result[0].id // empty')
+		if [ -n "$zid" ]; then
+			echo "$zid"
+			return 0
+		fi
+		if [[ "$cur" == *.* ]]; then
+			cur="${cur#*.}"
+		else
+			break
+		fi
+	done
+	return 1
+}
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'DOMAIN ALIAS'
+is_format_valid 'domain' 'alias'
+check_hestia_demo_mode
+
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "Error: Script can be run executed only by root"
+	exit 10
+fi
+
+# Exit silently if Cloudflare provider is not configured
+if [ "$DNS_API_PROVIDER" != "cloudflare" ]; then
+	exit 0
+fi
+
+if [ -z "$CF_API_TOKEN" ]; then
+	exit 0
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+zone_id=$(resolve_zone_id "$alias")
+
+if [ -z "$zone_id" ]; then
+	# Fallback to domain zone
+	zone_id=$(resolve_zone_id "$domain")
+fi
+
+if [ -n "$zone_id" ]; then
+	rec_ids=$(cf_api GET "/zones/$zone_id/dns_records?name=$alias" | jq -r '.result[].id // empty')
+	for rec_id in $rec_ids; do
+		[ -n "$rec_id" ] && cf_api DELETE "/zones/$zone_id/dns_records/$rec_id" >/dev/null 2>&1
+	done
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-log-action "system" "Info" "DNS" "Deleted Cloudflare DNS records for alias $alias ($domain)."
+log_event "$OK" "$ARGUMENTS"
+
+exit 0
