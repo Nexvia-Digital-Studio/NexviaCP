@@ -5,8 +5,12 @@ $TAB = "CRON";
 include $_SERVER["DOCUMENT_ROOT"] . "/inc/main.php";
 
 // Data
-exec(HESTIA_CMD . "v-list-cron-jobs $user json", $output, $return_var);
-$data = json_decode(implode("", $output), true);
+if (is_admin_overview()) {
+	$data = list_records_for_all_users("v-list-cron-jobs", true);
+} else {
+	exec(HESTIA_CMD . "v-list-cron-jobs $user json", $output, $return_var);
+	$data = json_decode(implode("", $output), true);
+}
 if ($_SESSION["userSortOrder"] == "name") {
 	ksort($data);
 } else {

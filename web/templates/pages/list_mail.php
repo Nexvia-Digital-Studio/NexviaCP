@@ -1,3 +1,4 @@
+<?php $admin_overview = is_admin_overview(); ?>
 <?php
 	$search_query = $_GET['q'] ?? '';
 	if (!is_scalar($search_query)) {
@@ -81,6 +82,7 @@
 			<div class="units-table-cell">
 				<input type="checkbox" class="js-toggle-all-checkbox" title="<?= tohtml( _("Select all")) ?>" <?= tohtml($display_mode) ?>>
 			</div>
+			<?php if (!empty($admin_overview)) { ?><div class="units-table-cell"><?= tohtml(__tr("User", "Kullanıcı")) ?></div><?php } ?>
 			<div class="units-table-cell"><?= tohtml( _("Name")) ?></div>
 			<div class="units-table-cell"></div>
 			<div class="units-table-cell u-text-center"><?= tohtml( _("Accounts")) ?></div>
@@ -184,9 +186,10 @@
 						<label for="check<?= tohtml($i) ?>" class="u-hide-desktop"><?= tohtml( _("Select")) ?></label>
 					</div>
 				</div>
+				<?= !empty($admin_overview) ? '<div class="units-table-cell u-text-bold">' . tohtml($value["_owner"] ?? "") . '</div>' : "" ?>
 				<div class="units-table-cell units-table-heading-cell u-text-bold">
 					<span class="u-hide-desktop"><?= tohtml( _("Name")) ?>:</span>
-					<a href="?<?= tohtml(http_build_query(["domain" => $key, "token" => $_SESSION["token"]])) ?>" title="<?= tohtml( _("Mail Accounts")) ?>: <?= tohtml($key) ?>">
+					<a href="?<?= tohtml(http_build_query(["domain" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION["token"]])) ?>" title="<?= tohtml( _("Mail Accounts")) ?>: <?= tohtml($key) ?>">
 						<?= tohtml($key) ?>
 					</a>
 				</div>
@@ -196,7 +199,7 @@
 							<li class="units-table-row-action shortcut-l" data-key-action="href">
 								<a
 									class="units-table-row-action-link"
-									href="?<?= tohtml(http_build_query(["domain" => $key, "token" => $_SESSION["token"]])) ?>"
+									href="?<?= tohtml(http_build_query(["domain" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION["token"]])) ?>"
 									title="<?= tohtml( _("Mail Accounts")) ?>"
 								>
 									<i class="fas fa-users icon-blue"></i>
@@ -231,7 +234,7 @@
 								<li class="units-table-row-action shortcut-n" data-key-action="href">
 									<a
 										class="units-table-row-action-link"
-										href="/add/mail/?<?= tohtml(http_build_query(["domain" => $key, "token" => $_SESSION["token"]])) ?>"
+										href="/add/mail/?<?= tohtml(http_build_query(["domain" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION["token"]])) ?>"
 										title="<?= tohtml( _("Add Mail Account")) ?>"
 									>
 										<i class="fas fa-circle-plus icon-green"></i>
@@ -256,7 +259,7 @@
 								<li class="units-table-row-action shortcut-enter" data-key-action="href">
 									<a
 										class="units-table-row-action-link"
-										href="/edit/mail/?<?= tohtml(http_build_query(["domain" => $key, "token" => $_SESSION["token"]])) ?>"
+										href="/edit/mail/?<?= tohtml(http_build_query(["domain" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION["token"]])) ?>"
 										title="<?= tohtml( _("Edit Mail Domain")) ?>"
 									>
 										<i class="fas fa-pencil icon-orange"></i>
@@ -277,7 +280,7 @@
 							<li class="units-table-row-action shortcut-s" data-key-action="js">
 								<a
 									class="units-table-row-action-link data-controls js-confirm-action"
-									href="/<?= tohtml($spnd_action) ?>/mail/?<?= tohtml(http_build_query(["domain" => $key, "token" => $_SESSION["token"]])) ?>"
+									href="/<?= tohtml($spnd_action) ?>/mail/?<?= tohtml(http_build_query(["domain" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION["token"]])) ?>"
 									title="<?= tohtml($spnd_action_title) ?>"
 									data-confirm-title="<?= tohtml($spnd_action_title) ?>"
 									data-confirm-message="<?= tohtml(sprintf($spnd_confirmation, $key)) ?>"
@@ -289,7 +292,7 @@
 							<li class="units-table-row-action shortcut-delete" data-key-action="js">
 								<a
 									class="units-table-row-action-link data-controls js-confirm-action"
-									href="/delete/mail/?<?= tohtml(http_build_query(["domain" => $key, "token" => $_SESSION["token"]])) ?>"
+									href="/delete/mail/?<?= tohtml(http_build_query(["domain" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION["token"]])) ?>"
 									title="<?= tohtml( _("Delete")) ?>"
 									data-confirm-title="<?= tohtml( _("Delete")) ?>"
 									data-confirm-message="<?= tohtml(sprintf(_("Are you sure you want to delete domain %s?"), $key)) ?>"

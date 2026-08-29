@@ -1,3 +1,4 @@
+<?php $admin_overview = is_admin_overview(); ?>
 <!-- Begin toolbar -->
 <div class="toolbar">
 	<div class="toolbar-inner">
@@ -86,6 +87,7 @@
 				<div class="units-table-cell">
 					<input type="checkbox" class="js-toggle-all-checkbox" title="<?= tohtml( _("Select all")) ?>"<?= $display_mode === "disabled" ? " disabled" : "" ?>>
 				</div>
+			<?php if (!empty($admin_overview)) { ?><div class="units-table-cell"><?= tohtml(__tr("User", "Kullanıcı")) ?></div><?php } ?>
 			<div class="units-table-cell"><?= tohtml( _("Name")) ?></div>
 			<div class="units-table-cell"></div>
 			<div class="units-table-cell u-text-center"><?= tohtml( _("IP Address")) ?></div>
@@ -208,6 +210,7 @@
 						<label for="check<?= tohtml($i) ?>" class="u-hide-desktop"><?= tohtml( _("Select")) ?></label>
 					</div>
 				</div>
+				<?= !empty($admin_overview) ? '<div class="units-table-cell u-text-bold">' . tohtml($value["_owner"] ?? "") . '</div>' : "" ?>
 				<div class="units-table-cell units-table-heading-cell u-text-bold">
 					<span class="u-hide-desktop"><?= tohtml( _("Name")) ?>:</span>
 					<?php if ($read_only === "true") { ?>
@@ -232,7 +235,7 @@
 								5 => '<span class="badge badge-purple" style="font-size:10px; margin-left:6px; padding:2px 5px;" title="VIP Sınırsız (2G+ RAM / Maksimum IO)">👑 VIP</span>'
 							];
 						?>
-						<a href="/edit/web/?<?= tohtml(http_build_query(["domain" => $key, "token" => $_SESSION['token']])) ?>" title="<?= tohtml( _("Edit Domain")) ?>: <?= tohtml($key) ?>">
+						<a href="/edit/web/?<?= tohtml(http_build_query(["domain" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION['token']])) ?>" title="<?= tohtml( _("Edit Domain")) ?>: <?= tohtml($key) ?>">
 							<?= tohtml($key) ?>
 						</a>
 						<?php if (strpos($key, 'pr-') === 0): ?>
@@ -305,7 +308,7 @@
 								<li class="units-table-row-action shortcut-enter" data-key-action="href">
 									<a
 										class="units-table-row-action-link"
-										href="/edit/web/?<?= tohtml(http_build_query(["domain" => $key, "token" => $_SESSION["token"]])) ?>"
+										href="/edit/web/?<?= tohtml(http_build_query(["domain" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION["token"]])) ?>"
 										title="<?= tohtml( _("Edit Domain")) ?>"
 									>
 										<i class="fas fa-pencil icon-orange"></i>
@@ -315,7 +318,7 @@
 								<li class="units-table-row-action" data-key-action="href">
 									<a
 										class="units-table-row-action-link"
-										href="/download/site/?<?= tohtml(http_build_query(["site" => $key, "token" => $_SESSION["token"]])) ?>"
+										href="/download/site/?<?= tohtml(http_build_query(["site" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION["token"]])) ?>"
 										title="<?= tohtml( _("Download Site")) ?>"
 									>
 										<i class="fas fa-download icon-orange"></i>
@@ -336,7 +339,7 @@
 							<li class="units-table-row-action shortcut-s" data-key-action="js">
 								<a
 									class="units-table-row-action-link data-controls js-confirm-action"
-									href="/<?= tohtml($spnd_action) ?>/web/?<?= tohtml(http_build_query(["domain" => $key, "token" => $_SESSION["token"]])) ?>"
+									href="/<?= tohtml($spnd_action) ?>/web/?<?= tohtml(http_build_query(["domain" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION["token"]])) ?>"
 									title="<?= tohtml($spnd_action_title) ?>"
 									data-confirm-title="<?= tohtml($spnd_action_title) ?>"
 									data-confirm-message="<?= tohtml(sprintf($spnd_confirmation, $key)) ?>"
@@ -348,7 +351,7 @@
 							<li class="units-table-row-action shortcut-delete" data-key-action="js">
 								<a
 									class="units-table-row-action-link data-controls js-confirm-action"
-									href="/delete/web/?<?= tohtml(http_build_query(["domain" => $key, "token" => $_SESSION["token"]])) ?>"
+									href="/delete/web/?<?= tohtml(http_build_query(["domain" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION["token"]])) ?>"
 									title="<?= tohtml( _("Delete")) ?>"
 									data-confirm-title="<?= tohtml( _("Delete")) ?>"
 									data-confirm-message="<?= tohtml(sprintf(_("Are you sure you want to delete domain %s?"), $key)) ?>"

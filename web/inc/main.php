@@ -132,6 +132,43 @@ if (!defined("NO_AUTH_REQUIRED")) {
 	}
 }
 
+/**
+ * True when an administrator browses the panel under their own account
+ * (not impersonating via "login as"); list pages then aggregate the
+ * records of every user.
+ */
+function is_admin_overview() {
+	return ($_SESSION["userContext"] ?? "") === "admin" && ($_SESSION["look"] ?? "") === "";
+}
+
+/**
+ * Admin overview: merge the per-user output of $script (e.g.
+ * "v-list-web-domains") into one array, tagging each record with
+ * "_owner". Keys stay the natural record key (domains, databases and
+ * backup files are unique server-wide); set $prefix_keys for scripts
+ * whose keys are only unique per user (cron job ids).
+ */
+function list_records_for_all_users($script, $prefix_keys = false) {
+	$merged = [];
+	exec(HESTIA_CMD . "v-list-users json", $u_out, $u_rc);
+	$users = json_decode(implode("", $u_out), true) ?: [];
+	unset($u_out);
+	foreach (array_keys($users) as $u) {
+		$v_u = quoteshellarg($u);
+		exec(HESTIA_CMD . $script . " " . $v_u . " json", $out, $rc);
+		$chunk = json_decode(implode("", $out), true) ?: [];
+		unset($out);
+		foreach ($chunk as $key => $info) {
+			if (!is_array($info)) {
+				continue;
+			}
+			$info["_owner"] = $u;
+			$merged[$prefix_keys ? $u . ":" . $key : $key] = $info;
+		}
+	}
+	return $merged;
+}
+
 function ipUsed() {
 	[$http_host, $port] = explode(":", $_SERVER["HTTP_HOST"] . ":");
 	if (filter_var($http_host, FILTER_VALIDATE_IP)) {

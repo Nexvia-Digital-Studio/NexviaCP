@@ -46,8 +46,12 @@ if (!empty($_POST["deploy_repo"]) && ($_SESSION["userContext"] ?? "") === "admin
 }
 
 // Data
-exec(HESTIA_CMD . "v-list-web-domains " . $user . " 'json'", $output, $return_var);
-$data = json_decode(implode("", $output), true) ?: [];
+if (is_admin_overview()) {
+	$data = list_records_for_all_users("v-list-web-domains");
+} else {
+	exec(HESTIA_CMD . "v-list-web-domains " . $user . " 'json'", $output, $return_var);
+	$data = json_decode(implode("", $output), true) ?: [];
+}
 if ($_SESSION["userSortOrder"] == "name") {
 	ksort($data);
 } else {

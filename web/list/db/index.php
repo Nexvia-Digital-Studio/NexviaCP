@@ -61,8 +61,12 @@ if (!empty($_POST["action_explore_db"])) {
 // Database auto-discovery is intentionally NOT auto-run anymore: silently
 // adopting unmapped server databases into whoever opens the page was a
 // cross-tenant takeover vector. Admins can run it explicitly via the button.
-exec(HESTIA_CMD . "v-list-databases " . $user . " json", $output, $return_var);
-$data = json_decode(implode("", $output), true) ?: [];
+if (is_admin_overview()) {
+	$data = list_records_for_all_users("v-list-databases");
+} else {
+	exec(HESTIA_CMD . "v-list-databases " . $user . " json", $output, $return_var);
+	$data = json_decode(implode("", $output), true) ?: [];
+}
 
 if ($_SESSION["userSortOrder"] == "name") {
 	ksort($data);

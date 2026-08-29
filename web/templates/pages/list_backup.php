@@ -1,3 +1,4 @@
+<?php $admin_overview = is_admin_overview(); ?>
 <!-- Begin toolbar -->
 <div class="toolbar">
 	<div class="toolbar-inner">
@@ -47,6 +48,7 @@
 			<div class="units-table-cell">
 				<input type="checkbox" class="js-toggle-all-checkbox" title="<?= tohtml( _("Select all")) ?>" <?= tohtml($display_mode) ?>>
 			</div>
+			<?php if (!empty($admin_overview)) { ?><div class="units-table-cell"><?= tohtml(__tr("User", "Kullanıcı")) ?></div><?php } ?>
 			<div class="units-table-cell"><?= tohtml( _("File Name")) ?></div>
 			<div class="units-table-cell"></div>
 			<div class="units-table-cell u-text-center"><?= tohtml( _("Date")) ?></div>
@@ -80,12 +82,13 @@
 						<label for="check<?= tohtml($i) ?>" class="u-hide-desktop"><?= tohtml( _("Select")) ?></label>
 					</div>
 				</div>
+				<?= !empty($admin_overview) ? '<div class="units-table-cell u-text-bold">' . tohtml($value["_owner"] ?? "") . '</div>' : "" ?>
 				<div class="units-table-cell units-table-heading-cell u-text-bold">
 					<span class="u-hide-desktop"><?= tohtml( _("File Name")) ?>:</span>
 					<?php if ($read_only === "true") { ?>
 						<?= tohtml($key) ?>
 					<?php } else { ?>
-						<a href="/list/backup/?<?= tohtml(http_build_query(["backup" => $key, "token" => $_SESSION["token"]])) ?>" title="<?= tohtml( _("Restore")) ?>">
+						<a href="/list/backup/?<?= tohtml(http_build_query(["backup" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION["token"]])) ?>" title="<?= tohtml( _("Restore")) ?>">
 							<?= tohtml($key) ?>
 						</a>
 					<?php } ?>
@@ -96,7 +99,7 @@
 							<li class="units-table-row-action shortcut-d" data-key-action="href">
 								<a
 									class="units-table-row-action-link"
-									href="/download/backup/?<?= tohtml(http_build_query(["backup" => $key, "token" => $_SESSION["token"]])) ?>"
+									href="/download/backup/?<?= tohtml(http_build_query(["backup" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION["token"]])) ?>"
 									title="<?= tohtml( _("Download")) ?>"
 								>
 									<i class="fas fa-file-arrow-down icon-lightblue"></i>
@@ -107,7 +110,7 @@
 								<li class="units-table-row-action shortcut-enter" data-key-action="href">
 									<a
 										class="units-table-row-action-link data-controls"
-										href="/list/backup/?<?= tohtml(http_build_query(["backup" => $key, "token" => $_SESSION["token"]])) ?>"
+										href="/list/backup/?<?= tohtml(http_build_query(["backup" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION["token"]])) ?>"
 										title="<?= tohtml( _("Restore")) ?>"
 									>
 										<i class="fas fa-arrow-rotate-left icon-green"></i>
@@ -117,7 +120,7 @@
 								<li class="units-table-row-action shortcut-delete" data-key-action="js">
 									<a
 										class="units-table-row-action-link data-controls js-confirm-action"
-										href="/delete/backup/?<?= tohtml(http_build_query(["backup" => $key, "token" => $_SESSION["token"]])) ?>"
+										href="/delete/backup/?<?= tohtml(http_build_query(["backup" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION["token"]])) ?>"
 										title="<?= tohtml( _("Delete")) ?>"
 										data-confirm-title="<?= tohtml( _("Delete")) ?>"
 										data-confirm-message="<?= tohtml(sprintf(_("Are you sure you want to delete backup %s?"), $key)) ?>"
