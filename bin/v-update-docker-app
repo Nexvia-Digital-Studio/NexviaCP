@@ -1,0 +1,80 @@
+#!/bin/bash
+# info: update and redeploy a docker compose application from its repository
+# options: APP
+#
+# example: v-update-docker-app mercanadisyon
+#
+# Fetches the latest commit of the tracked branch, regenerates the
+# loopback port override (existing ports are preserved) and rebuilds the
+# stack in the background. This is the command to call from CI (e.g. a
+# GitHub Actions workflow hitting the panel API).
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+app=$1
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/docker-app.sh
+source $HESTIA/func/docker-app.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '1' "$#" 'APP'
+is_docker_app_format_valid "$app" || check_result "$E_INVALID" "invalid APP name"
+is_docker_app_valid "$app" || check_result "$E_NOTEXIST" "docker app '$app' doesn't exist"
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+app_dir="$DOCKER_APPS_DIR/$app"
+repo_dir="$app_dir/repo"
+docker_app_load "$app"
+
+echo "[*] Fetching latest '$BRANCH'..."
+if ! docker_app_git_update "$repo_dir" "$BRANCH"; then
+	check_result "$E_NOTEXIST" "git update failed (check token/branch/network)"
+fi
+
+# A freshly added repo .env only seeds a still-empty managed env file —
+# values the admin already set are never overwritten.
+if [ -f "$repo_dir/.env" ] && [ ! -s "$app_dir/.env" ]; then
+	cp "$repo_dir/.env" "$app_dir/.env"
+	chmod 600 "$app_dir/.env"
+fi
+
+echo "[*] Regenerating port override (existing ports preserved)..."
+docker_app_regenerate_override "$app" \
+	|| check_result "$E_INVALID" "failed to regenerate port override"
+
+echo "[*] Starting background rebuild (STATE=deploying)..."
+docker_app_deploy_async "$app"
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-log-action "system" "Info" "Docker" "Docker app update triggered (App: $app, Branch: $BRANCH)."
+log_event "$OK" "$ARGUMENTS"
+
+echo "[+] Update of '$app' started"
+echo "    STATE: deploying (poll: v-list-docker-app $app)"
+echo "    Log:   $app_dir/deploy.log"
+exit

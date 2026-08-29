@@ -1,0 +1,109 @@
+#!/bin/bash
+# info: list docker compose applications
+# options: [FORMAT]
+#
+# example: v-list-docker-apps
+# example: v-list-docker-apps json
+#
+# Lists every registered docker app with its live state. JSON output is
+# keyed by app name and includes the per-service status (docker_app_status).
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+format=${1-shell}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/docker-app.sh
+source $HESTIA/func/docker-app.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '0' "$#" '[FORMAT]'
+is_format_valid 'format'
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Fields for plain/csv: APP STATE SVC_RUN/SVC_TOTAL BRANCH REPO
+conf_field() {
+	grep -m1 "^$2=" "$1" 2>/dev/null | cut -d"'" -f2
+}
+
+svc_counts() {
+	docker_app_status "$1" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    total = len(d.get("services", []))
+    run = sum(1 for s in d.get("services", []) if s.get("state") == "running")
+    print(f"{run}/{total}")
+except Exception:
+    print("?/?")
+'
+}
+
+json_list() {
+	docker_apps_status
+}
+
+shell_list() {
+	echo "APP                   STATE        SERVICES   BRANCH   REPO"
+	echo "-------------------   ----------   --------   ------   ----"
+	for conf in "$DOCKER_APPS_DIR"/*/app.conf; do
+		[ -f "$conf" ] || continue
+		app=$(conf_field "$conf" APP)
+		[ -n "$app" ] || continue
+		printf "%-20s  %-12s %-10s %-8s %s\n" \
+			"$app" "$(conf_field "$conf" STATE)" "$(svc_counts "$app")" \
+			"$(conf_field "$conf" BRANCH)" "$(conf_field "$conf" REPO)"
+	done
+}
+
+plain_list() {
+	for conf in "$DOCKER_APPS_DIR"/*/app.conf; do
+		[ -f "$conf" ] || continue
+		app=$(conf_field "$conf" APP)
+		[ -n "$app" ] || continue
+		echo -n "$app	$(conf_field "$conf" STATE)	$(svc_counts "$app")	"
+		echo "$(conf_field "$conf" BRANCH)	$(conf_field "$conf" REPO)"
+	done
+}
+
+csv_list() {
+	echo "APP,STATE,SERVICES,BRANCH,REPO"
+	for conf in "$DOCKER_APPS_DIR"/*/app.conf; do
+		[ -f "$conf" ] || continue
+		app=$(conf_field "$conf" APP)
+		[ -n "$app" ] || continue
+		echo "$app,$(conf_field "$conf" STATE),$(svc_counts "$app")," \
+			"$(conf_field "$conf" BRANCH),$(conf_field "$conf" REPO)"
+	done
+}
+
+# Listing docker apps
+case "$format" in
+	json) json_list ;;
+	plain) plain_list ;;
+	csv) csv_list ;;
+	shell) shell_list ;;
+esac
+
+exit

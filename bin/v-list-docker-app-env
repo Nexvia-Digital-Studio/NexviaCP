@@ -1,0 +1,44 @@
+#!/bin/bash
+# info: print the managed .env of a docker app
+# options: APP
+#
+# example: v-list-docker-app-env mercanadisyon
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+app=$1
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/docker-app.sh
+source $HESTIA/func/docker-app.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '1' "$#" 'APP'
+is_docker_app_format_valid "$app" || check_result "$E_INVALID" "invalid APP name"
+is_docker_app_valid "$app" || check_result "$E_NOTEXIST" "docker app '$app' doesn't exist"
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+cat "$DOCKER_APPS_DIR/$app/.env" 2>/dev/null
+
+exit

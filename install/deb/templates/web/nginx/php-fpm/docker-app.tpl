@@ -1,0 +1,41 @@
+#=========================================================================#
+# NexviaCP Docker Compose App Reverse Proxy Template (HTTP)              #
+# Proxies a domain to one service of a docker compose application.       #
+# The port is allocated per domain (APP_BACKEND_PORT / %app_port%) by    #
+# v-add-docker-app-domain; containers only ever bind to 127.0.0.1.       #
+#=========================================================================#
+
+server {
+	listen      %ip%:%web_port%;
+	server_name %domain_idn% %alias_idn%;
+	error_log   /var/log/%web_system%/domains/%domain%.error.log error;
+
+	include %home%/%user%/conf/web/%domain%/nginx.forcessl.conf*;
+
+	location ~ /\.(?!well-known\/|file) {
+		deny all;
+		return 404;
+	}
+
+	location / {
+		# %app_port% is the loopback host port of the mapped compose
+		# service (see nexvia-override.yml of the docker app).
+		proxy_pass http://127.0.0.1:%app_port%;
+		proxy_http_version 1.1;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection 'upgrade';
+		proxy_set_header Host $host;
+		proxy_cache_bypass $http_upgrade;
+		proxy_read_timeout 300s;
+		proxy_send_timeout 300s;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+	}
+
+	location /error/ {
+		alias %home%/%user%/web/%domain%/document_errors/;
+	}
+
+	include %home%/%user%/conf/web/%domain%/nginx.conf_*;
+}

@@ -1,0 +1,173 @@
+#!/bin/bash
+# info: deploy a multi-service docker compose application from a git repository
+# options: APP REPO [BRANCH] [COMPOSE_FILE] [FORCE] [DEPLOY_CMD]
+#
+# example: v-add-docker-app mercanadisyon https://github.com/user/MercanAdisyon.git
+# example: v-add-docker-app blog user/blog main compose.yaml no "bash scripts/deploy-smart.sh"
+#
+# Deploys a single-repo docker compose project (e.g. postgresql + api +
+# admin panel) as the app <APP>. Language agnostic: whatever the compose
+# file starts is what runs. Every published port is re-bound to 127.0.0.1
+# (already-loopback ports keep their number when free); publish domains
+# with v-add-docker-app-domain. The build+up step runs in the background
+# (watch v-list-docker-app or the panel Docker page for STATE). DEPLOY_CMD
+# replaces the default `compose up -d --build` (e.g. a blue-green script;
+# it runs from the repo dir with $NEXVIA_COMPOSE_FILES exported).
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+app=$1
+repo_input=$2
+branch=${3:-main}
+compose_file=${4:-}
+force=${5:-no}
+deploy_cmd=${6:-}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/docker-app.sh
+source $HESTIA/func/docker-app.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'APP REPO [BRANCH] [COMPOSE_FILE] [FORCE] [DEPLOY_CMD]'
+command -v docker >/dev/null 2>&1 || check_result "$E_NOTEXIST" "docker is not installed"
+docker compose version >/dev/null 2>&1 || check_result "$E_NOTEXIST" "docker compose plugin is not installed"
+is_docker_app_format_valid "$app" || check_result "$E_INVALID" "invalid APP name (use lowercase letters, digits, - and _)"
+is_docker_app_valid "$app" && check_result "$E_EXISTS" "docker app '$app' already exists"
+[ "$force" = "yes" ] || force="no"
+deploy_cmd=$(printf '%s' "$deploy_cmd" | tr -d '\r\n')
+if [ -n "$deploy_cmd" ] && [[ ! "$deploy_cmd" =~ ^[a-zA-Z0-9\ .\/\:_-]+$ ]]; then
+	check_result "$E_INVALID" "invalid characters in DEPLOY_CMD (allowed: letters, digits, space . / : _ -)"
+fi
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+# Build the full git repository URL (same convention as v-deploy-github-repo)
+repo_url="$repo_input"
+if [[ ! "$repo_input" =~ ^https?:// ]] && [[ ! "$repo_input" =~ ^git@ ]] && [[ ! "$repo_input" =~ ^/ ]]; then
+	if [ -n "$GITHUB_ORG" ]; then
+		repo_url="https://github.com/${GITHUB_ORG}/${repo_input}.git"
+	else
+		check_result "$E_INVALID" "GitHub token/org not configured. Provide full git URL."
+	fi
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+docker_app_init_root
+app_dir="$DOCKER_APPS_DIR/$app"
+repo_dir="$app_dir/repo"
+
+echo "[*] Cloning $repo_url (branch: $branch)..."
+if ! docker_app_git "$repo_url" "$branch" "$repo_dir"; then
+	rm -rf "$app_dir"
+	check_result "$E_NOTEXIST" "git clone failed (check repo URL/branch/token)"
+fi
+
+# Detect the compose file when not provided.
+if [ -z "$compose_file" ]; then
+	for candidate in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
+		if [ -f "$repo_dir/$candidate" ]; then
+			compose_file="$candidate"
+			break
+		fi
+	done
+fi
+[ -n "$compose_file" ] || {
+	rm -rf "$app_dir"
+	check_result "$E_NOTEXIST" "no compose file found (docker-compose.yml / compose.yml)"
+}
+if [[ ! "$compose_file" =~ ^[a-zA-Z0-9._/-]+$ ]] || [[ "$compose_file" == ..* ]] || [[ "$compose_file" =~ \.\. ]]; then
+	rm -rf "$app_dir"
+	check_result "$E_INVALID" "invalid COMPOSE_FILE path"
+fi
+[ -f "$repo_dir/$compose_file" ] || {
+	rm -rf "$app_dir"
+	check_result "$E_NOTEXIST" "compose file '$compose_file' not found in repository"
+}
+
+# Seed the panel-managed .env from the repository's own .env if present,
+# otherwise start empty. `docker compose --env-file` requires the file.
+if [ -f "$repo_dir/.env" ]; then
+	cp "$repo_dir/.env" "$app_dir/.env"
+else
+	touch "$app_dir/.env"
+fi
+chmod 600 "$app_dir/.env"
+
+# Registry entry (needed before inventory: COMPOSE_FILE is read from it).
+{
+	printf "APP='%s'\n" "$app"
+	printf "REPO='%s'\n" "$repo_url"
+	printf "BRANCH='%s'\n" "$branch"
+	printf "COMPOSE_FILE='%s'\n" "$compose_file"
+	printf "STATE='new'\n"
+	printf "TIME='%s'\n" "$(date +%s)"
+} > "$app_dir/app.conf"
+if [ -n "$deploy_cmd" ]; then
+	docker_app_set "$app" DEPLOY_CMD "$deploy_cmd"
+fi
+chmod 600 "$app_dir/app.conf"
+
+# Validate the compose file resolves.
+if ! docker_app_inventory "$app" >/dev/null 2>"$app_dir/.inventory.err"; then
+	echo "----- 'docker compose config' output -----"
+	cat "$app_dir/.inventory.err" 2>/dev/null
+	rm -rf "$app_dir"
+	check_result "$E_INVALID" "compose file failed to resolve (see output above)"
+fi
+rm -f "$app_dir/.inventory.err"
+
+# Security preflight: refuse risky compose constructs unless FORCE=yes.
+warnings=$(docker_app_preflight "$repo_dir" "$compose_file")
+if [ -n "$warnings" ] && [ "$force" != "yes" ]; then
+	rm -rf "$app_dir"
+	echo "$warnings"
+	check_result "$E_INVALID" "risky compose construct(s) found — re-run with FORCE=yes to accept"
+fi
+[ -n "$warnings" ] && echo "$warnings"
+
+docker_app_ensure_log_rotation
+
+echo "[*] Allocating loopback ports and writing nexvia-override.yml..."
+docker_app_regenerate_override "$app" || {
+	rm -rf "$app_dir"
+	check_result "$E_INVALID" "failed to generate port override"
+}
+
+echo "[*] Starting background build (STATE=deploying)..."
+docker_app_deploy_async "$app"
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-log-action "system" "Info" "Docker" "Docker app added (App: $app, Repo: $repo_url, Branch: $branch)."
+log_event "$OK" "$ARGUMENTS"
+
+echo "[+] Docker app '$app' created"
+echo "    Repo:        $repo_url ($branch)"
+echo "    Compose:     $compose_file"
+echo "    Mappings:    $(grep -m1 '^MAPPINGS=' "$app_dir/app.conf" | cut -d"'" -f2)"
+echo "    Deploy log:  $app_dir/deploy.log"
+echo ""
+echo "    Next: v-list-docker-app $app   # poll STATE (deploying -> running)"
+echo "    Next: v-add-docker-app-domain $app api.example.com <service> [user]"
+exit

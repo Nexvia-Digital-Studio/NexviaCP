@@ -1,0 +1,108 @@
+#!/bin/bash
+# info: list docker compose application details
+# options: APP [FORMAT]
+#
+# example: v-list-docker-app mercanadisyon
+# example: v-list-docker-app mercanadisyon json
+#
+# Shows one docker app: live state, per-service status, port mappings
+# (service:container_port -> 127.0.0.1:host_port) and linked domains.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+app=$1
+format=${2-shell}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/docker-app.sh
+source $HESTIA/func/docker-app.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '1' "$#" 'APP [FORMAT]'
+is_docker_app_format_valid "$app" || check_result "$E_INVALID" "invalid APP name"
+is_docker_app_valid "$app" || check_result "$E_NOTEXIST" "docker app '$app' doesn't exist"
+is_format_valid 'format'
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+json_list() {
+	docker_app_status "$app"
+}
+
+shell_list() {
+	docker_app_status "$app" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+print("STATE:    " + d["state"])
+print("REPO:     " + d["repo"] + " (" + d["branch"] + ")")
+print("COMPOSE:  " + d.get("compose_file", ""))
+print("SERVICES:")
+for s in d.get("services", []):
+    ports = "  ports: " + s["ports"] if s.get("ports") else ""
+    print("  - %-20s %-12s %s%s" % (s["name"], s["state"], s.get("status", ""), ports))
+print("MAPPINGS (service:container:host):")
+for m in (d.get("mappings") or "").split():
+    if m.count(":") == 2:
+        svc, target, host = m.split(":")
+        print("  - %s:%s -> 127.0.0.1:%s" % (svc, target, host))
+print("DOMAINS:")
+for e in (d.get("domains") or "").split():
+    if e.count(":") == 2:
+        dom, svc, host = e.rsplit(":", 2)
+        print("  - %s -> %s (127.0.0.1:%s)" % (dom, svc, host))
+'
+}
+
+plain_list() {
+	docker_app_status "$app" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+print(d["state"])
+for s in d.get("services", []):
+    print(s["name"] + "\t" + s["state"] + "\t" + s.get("status", ""))
+for m in (d.get("mappings") or "").split():
+    print("mapping\t" + m)
+for e in (d.get("domains") or "").split():
+    print("domain\t" + e)
+'
+}
+
+csv_list() {
+	echo "APP,STATE,SERVICE,STATE2,STATUS"
+	docker_app_status "$app" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+for s in d.get("services", []):
+    print(sys.argv[1] + "," + d["state"] + "," + s["name"] + "," + s["state"] + ",\"" + s.get("status", "") + "\"")
+' "$app"
+}
+
+# Listing app details
+case "$format" in
+	json) json_list ;;
+	plain) plain_list ;;
+	csv) csv_list ;;
+	shell) shell_list ;;
+esac
+
+exit

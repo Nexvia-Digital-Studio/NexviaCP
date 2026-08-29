@@ -1,0 +1,82 @@
+#!/bin/bash
+# info: remove a web domain that publishes a docker app service
+# options: APP DOMAIN
+#
+# example: v-delete-docker-app-domain mercanadisyon api.mercanadisyon.com
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+app=$1
+domain=$2
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/docker-app.sh
+source $HESTIA/func/docker-app.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'APP DOMAIN'
+is_docker_app_format_valid "$app" || check_result "$E_INVALID" "invalid APP name"
+is_docker_app_valid "$app" || check_result "$E_NOTEXIST" "docker app '$app' doesn't exist"
+is_format_valid 'domain'
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+docker_app_load "$app"
+
+# Find the registry entry (user@domain:service:host_port).
+entry_user="" entry=""
+for e in $DOMAINS; do
+	entry_dom="${e%%:*}"
+	entry_user="${entry_dom%%@*}"
+	entry_dom="${entry_dom#*@}"
+	if [ "$entry_dom" = "$domain" ]; then
+		entry="$e"
+		break
+	fi
+done
+[ -n "$entry" ] || check_result "$E_NOTEXIST" "domain '$domain' is not linked to app '$app'"
+
+echo "[*] Deleting web domain $domain ($entry_user)..."
+$BIN/v-delete-web-domain "$entry_user" "$domain" >/dev/null 2>&1 \
+	|| echo "[!] v-delete-web-domain failed (continuing with registry cleanup)"
+
+new_domains=""
+for e in $DOMAINS; do
+	[ "$e" = "$entry" ] && continue
+	new_domains="${new_domains}${e} "
+done
+if [ -n "${new_domains% }" ]; then
+	docker_app_set "$app" DOMAINS "${new_domains% }"
+else
+	docker_app_unset "$app" DOMAINS
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-log-action "system" "Info" "Docker" "Docker app domain unlinked (App: $app, Domain: $domain)."
+log_event "$OK" "$ARGUMENTS"
+
+echo "[+] '$domain' detached from '$app' and deleted"
+exit

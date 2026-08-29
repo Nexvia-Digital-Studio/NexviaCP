@@ -1,0 +1,84 @@
+#!/bin/bash
+# info: delete a docker compose application
+# options: APP [VOLUMES] [KEEP_DOMAINS]
+#
+# example: v-delete-docker-app mercanadisyon
+# example: v-delete-docker-app mercanadisyon volumes keep-domains
+#
+# Stops and removes the compose stack. VOLUMES (literal word) also removes
+# named docker volumes — this DELETES the app's database data. Linked web
+# domains are deleted together with the app unless KEEP_DOMAINS is given.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+app=$1
+volumes=${2:-keep}
+keep_domains=${3:-delete}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/docker-app.sh
+source $HESTIA/func/docker-app.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '1' "$#" 'APP [VOLUMES] [KEEP_DOMAINS]'
+is_docker_app_format_valid "$app" || check_result "$E_INVALID" "invalid APP name"
+is_docker_app_valid "$app" || check_result "$E_NOTEXIST" "docker app '$app' doesn't exist"
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+app_dir="$DOCKER_APPS_DIR/$app"
+docker_app_load "$app"
+
+down_args="down"
+[ "$volumes" = "volumes" ] && down_args="down --volumes"
+echo "[*] docker compose $down_args ..."
+# Containers may not exist (failed first deploy); tolerate that.
+docker_app_compose "$app" $down_args
+
+# Remove project images so repeated deploys don't fill the disk.
+docker image prune -f --filter "label=com.docker.compose.project=nexvia-$app" >/dev/null 2>&1
+
+if [ "$keep_domains" != "keep-domains" ]; then
+	entry_user="" entry_domain=""
+	for entry in $DOMAINS; do
+		[ -n "$entry" ] || continue
+		entry_domain="${entry%%:*}"
+		entry_user="${entry_domain%%@*}"
+		entry_domain="${entry_domain#*@}"
+		echo "[*] Deleting linked web domain $entry_domain ($entry_user)..."
+		$BIN/v-delete-web-domain "$entry_user" "$entry_domain" >/dev/null 2>&1 \
+			|| echo "[!] could not delete domain $entry_domain (continuing)"
+	done
+fi
+
+rm -rf "$app_dir"
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-log-action "system" "Warning" "Docker" "Docker app deleted (App: $app, Volumes: $volumes)."
+log_event "$OK" "$ARGUMENTS"
+
+echo "[+] Docker app '$app' deleted (volumes: $volumes, domains: $keep_domains)"
+exit

@@ -1,0 +1,63 @@
+#!/bin/bash
+# info: show docker app logs (deploy log or a service's container logs)
+# options: APP [SERVICE] [LINES]
+#
+# example: v-list-docker-app-logs mercanadisyon
+# example: v-list-docker-app-logs mercanadisyon api 200
+#
+# Without SERVICE the app's deploy.log is tailed; with SERVICE the
+# matching container logs are shown.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+app=$1
+service=${2:-}
+lines=${3:-100}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/docker-app.sh
+source $HESTIA/func/docker-app.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '1' "$#" 'APP [SERVICE] [LINES]'
+is_docker_app_format_valid "$app" || check_result "$E_INVALID" "invalid APP name"
+is_docker_app_valid "$app" || check_result "$E_NOTEXIST" "docker app '$app' doesn't exist"
+[[ "$lines" =~ ^[0-9]+$ ]] || check_result "$E_INVALID" "LINES must be numeric"
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+app_dir="$DOCKER_APPS_DIR/$app"
+
+if [ -z "$service" ]; then
+	deploy_log="$app_dir/deploy.log"
+	[ -f "$deploy_log" ] || check_result "$E_NOTEXIST" "no deploy log yet"
+	tail -n "$lines" "$deploy_log"
+else
+	docker_app_compose "$app" logs --tail="$lines" "$service"
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+exit

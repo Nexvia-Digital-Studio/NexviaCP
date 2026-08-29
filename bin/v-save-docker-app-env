@@ -1,0 +1,60 @@
+#!/bin/bash
+# info: replace the managed .env of a docker app from stdin
+# options: APP
+#
+# example: echo 'DB_PASSWORD=secret' | v-save-docker-app-env mercanadisyon
+#
+# The managed .env feeds compose variable substitution (${VAR} in the
+# compose file). Container-level environment stays under the compose
+# file's control (environment / env_file).
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+app=$1
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/docker-app.sh
+source $HESTIA/func/docker-app.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '1' "$#" 'APP'
+is_docker_app_format_valid "$app" || check_result "$E_INVALID" "invalid APP name"
+is_docker_app_valid "$app" || check_result "$E_NOTEXIST" "docker app '$app' doesn't exist"
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+app_dir="$DOCKER_APPS_DIR/$app"
+tmp="$app_dir/.env.tmp"
+cat > "$tmp" || check_result "$E_INVALID" "could not read env from stdin"
+chmod 600 "$tmp"
+mv "$tmp" "$app_dir/.env"
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-log-action "system" "Info" "Docker" "Docker app environment updated (App: $app)."
+log_event "$OK" "$ARGUMENTS"
+
+echo "[+] .env of '$app' saved — redeploy to apply (v-update-docker-app $app)"
+exit

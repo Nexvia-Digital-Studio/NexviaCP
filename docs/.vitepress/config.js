@@ -92,6 +92,7 @@ function sidebarDocs() {
 				{ text: 'Anomaly detection', link: '/docs/nexvia/anomaly-detection' },
 				{ text: 'WAF & malware', link: '/docs/nexvia/waf-malware' },
 				{ text: 'Docker & Portainer', link: '/docs/nexvia/docker-portainer' },
+				{ text: 'Docker Compose Apps', link: '/docs/nexvia/docker-apps' },
 				{ text: 'Git deploy & PR preview', link: '/docs/nexvia/git-deploy' },
 				{ text: 'Cache governance', link: '/docs/nexvia/cache-governance' },
 				{ text: 'Cloud backup (Restic)', link: '/docs/nexvia/cloud-backup' },

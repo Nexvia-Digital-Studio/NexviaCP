@@ -1,0 +1,119 @@
+#!/bin/bash
+# info: publish a docker app service under a web domain
+# options: APP DOMAIN SERVICE[:CONTAINER_PORT] [USER]
+#
+# example: v-add-docker-app-domain mercanadisyon api.mercanadisyon.com api
+# example: v-add-docker-app-domain mercanadisyon app.mercanadisyon.com web:8080 nexvia
+#
+# Creates a web domain that proxies to the service's loopback host port
+# using the docker-app nginx template (%app_port%). Add SSL afterwards
+# with v-add-letsencrypt-domain. The service must publish a port in the
+# compose file (see v-list-docker-app MAPPINGS).
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+app=$1
+domain=$2
+service_spec=$3
+user=${4:-admin}
+domain_idn=$2
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/docker-app.sh
+source $HESTIA/func/docker-app.sh
+# shellcheck source=/usr/local/hestia/func/domain.sh
+source $HESTIA/func/domain.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '3' "$#" 'APP DOMAIN SERVICE[:CONTAINER_PORT] [USER]'
+is_docker_app_format_valid "$app" || check_result "$E_INVALID" "invalid APP name"
+is_docker_app_valid "$app" || check_result "$E_NOTEXIST" "docker app '$app' doesn't exist"
+is_format_valid 'domain' 'user'
+is_object_valid 'user' 'USER' "$user"
+is_object_unsuspended 'user' 'USER' "$user"
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+app_dir="$DOCKER_APPS_DIR/$app"
+docker_app_load "$app"
+
+# The domain must be free across ALL users.
+if grep -rq "DOMAIN='$domain'" "$HESTIA/data/users/"*/web.conf 2>/dev/null; then
+	check_result "$E_EXISTS" "domain '$domain' already exists"
+fi
+
+# Resolve the service spec against the MAPPINGS registry
+# (entries: service:container_port:host_port).
+service="${service_spec%%:*}"
+wanted_target="${service_spec#*:}"
+[ "$wanted_target" = "$service_spec" ] && wanted_target=""
+
+host_port=""
+available=""
+for mapping in $MAPPINGS; do
+	svc="${mapping%%:*}"
+	rest="${mapping#*:}"
+	target="${rest%%:*}"
+	port="${rest##*:}"
+	available="${available}${svc}:${target} "
+	if [ "$svc" != "$service" ]; then
+		continue
+	fi
+	if [ -z "$wanted_target" ] || [ "$wanted_target" = "$target" ]; then
+		host_port="$port"
+		break
+	fi
+done
+if [ -z "$host_port" ]; then
+	[ -n "$available" ] || check_result "$E_NOTEXIST" "service '$service' publishes no port (add 'ports:' to the compose file)"
+	check_result "$E_NOTEXIST" "no mapping for '$service_spec' — available: ${available% }"
+fi
+
+echo "[*] Creating web domain $domain for user $user..."
+$BIN/v-add-web-domain "$user" "$domain" >/dev/null \
+	|| check_result "$E_INVALID" "v-add-web-domain failed for $domain"
+
+# Persist the backend port so add_web_config substitutes %app_port%.
+add_object_key 'web' 'DOMAIN' "$domain" 'APP_BACKEND_PORT' 'TIME'
+update_object_value 'web' 'DOMAIN' "$domain" '$APP_BACKEND_PORT' "$host_port"
+add_object_key 'web' 'DOMAIN' "$domain" 'APP_TYPE' 'TIME'
+update_object_value 'web' 'DOMAIN' "$domain" '$APP_TYPE' 'docker'
+
+echo "[*] Applying docker-app proxy template (127.0.0.1:$host_port)..."
+$BIN/v-change-web-domain-tpl "$user" "$domain" docker-app yes >/dev/null 2>&1 \
+	|| check_result "$E_INVALID" "failed to apply docker-app template"
+
+# Register the link in the app registry.
+new_domains="${DOMAINS:+$DOMAINS }${user}@${domain}:${service}:${host_port}"
+docker_app_set "$app" DOMAINS "$new_domains"
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-log-action "system" "Info" "Docker" "Docker app domain linked (App: $app, Domain: $domain, Service: $service, Port: $host_port)."
+log_event "$OK" "$ARGUMENTS"
+
+echo "[+] $domain -> $service (127.0.0.1:$host_port)"
+echo "    Next: v-add-letsencrypt-domain $user $domain   # optional SSL"
+exit
