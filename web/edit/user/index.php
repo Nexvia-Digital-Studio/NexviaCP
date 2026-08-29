@@ -113,6 +113,26 @@ if ($v_suspended == "yes") {
 $v_time = $data[$v_username]["TIME"];
 $v_date = $data[$v_username]["DATE"];
 
+// Package limits and current usage (for the package limits card)
+$v_limits = [
+	["label" => _("Web Domains"), "used" => $data[$v_username]["U_WEB_DOMAINS"], "max" => $data[$v_username]["WEB_DOMAINS"]],
+	["label" => _("Web Aliases"), "used" => $data[$v_username]["U_WEB_ALIASES"], "max" => $data[$v_username]["WEB_ALIASES"]],
+	["label" => _("DNS Zones"), "used" => $data[$v_username]["U_DNS_DOMAINS"], "max" => $data[$v_username]["DNS_DOMAINS"]],
+	["label" => _("DNS Records"), "used" => $data[$v_username]["U_DNS_RECORDS"], "max" => $data[$v_username]["DNS_RECORDS"]],
+	["label" => _("Mail Domains"), "used" => $data[$v_username]["U_MAIL_DOMAINS"], "max" => $data[$v_username]["MAIL_DOMAINS"]],
+	["label" => _("Mail Accounts"), "used" => $data[$v_username]["U_MAIL_ACCOUNTS"], "max" => $data[$v_username]["MAIL_ACCOUNTS"]],
+	["label" => _("Databases"), "used" => $data[$v_username]["U_DATABASES"], "max" => $data[$v_username]["DATABASES"]],
+	["label" => _("Cron Jobs"), "used" => $data[$v_username]["U_CRON_JOBS"], "max" => $data[$v_username]["CRON_JOBS"]],
+	["label" => _("Backups"), "used" => $data[$v_username]["U_BACKUPS"], "max" => $data[$v_username]["BACKUPS"]],
+	["label" => _("Quota"), "used" => $data[$v_username]["U_DISK"], "max" => $data[$v_username]["DISK_QUOTA"], "unit" => "mb"],
+	["label" => _("Bandwidth"), "used" => $data[$v_username]["U_BANDWIDTH"], "max" => $data[$v_username]["BANDWIDTH"], "unit" => "mb"],
+];
+foreach ($v_limits as $key => $limit) {
+	if (empty($limit["used"])) {
+		$v_limits[$key]["used"] = 0;
+	}
+}
+
 if (empty($v_phpcli)) {
 	$v_phpcli = substr(DEFAULT_PHP_VERSION, 4);
 }

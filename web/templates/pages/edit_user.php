@@ -259,4 +259,55 @@
 
 	</form>
 
+	<?php if (!empty($v_limits)) { ?>
+	<div class="card u-mt20" style="border-left: 4px solid #f48120;">
+		<div style="padding: 20px;">
+			<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:15px;">
+				<div>
+					<h2 style="margin:0; font-size:16px; font-weight:600;">
+						<i class="fas fa-box-open icon-orange" style="margin-right:6px;"></i><?= tohtml(_("Package")) ?>: <?= tohtml(trim($v_package, "'")) ?>
+					</h2>
+				</div>
+				<?php if ($_SESSION["userContext"] === "admin") { ?>
+					<a href="/edit/package/?<?= tohtml(http_build_query(["package" => trim($v_package, "'"), "token" => $_SESSION["token"]])) ?>" class="button button-secondary">
+						<i class="fas fa-pen-to-square icon-orange"></i><?= tohtml(_("Edit Package")) ?>
+					</a>
+				<?php } ?>
+			</div>
+			<?php foreach ($v_limits as $limit) {
+				$is_unlimited = ($limit["max"] === "unlimited");
+				if (!empty($limit["unit"]) && $limit["unit"] === "mb") {
+					$used_display = humanize_usage_size($limit["used"]) . " " . humanize_usage_measure($limit["used"]);
+					$max_display = $is_unlimited ? _("Unlimited") : (humanize_usage_size($limit["max"]) . " " . humanize_usage_measure($limit["max"]));
+				} else {
+					$used_display = $limit["used"];
+					$max_display = $is_unlimited ? _("Unlimited") : $limit["max"];
+				}
+				$pct = 0;
+				$bar_color = "#22c55e";
+				if (!$is_unlimited && $limit["max"] > 0) {
+					$pct = min(100, round($limit["used"] / $limit["max"] * 100));
+					if ($pct >= 90) {
+						$bar_color = "#ef4444";
+					} elseif ($pct >= 70) {
+						$bar_color = "#f59e0b";
+					}
+				}
+			?>
+			<div style="display:flex; align-items:center; gap:12px; padding:6px 0; border-bottom:1px solid rgba(100,116,139,0.15);">
+				<div style="width:160px; flex-shrink:0; font-size:13px;"><?= tohtml($limit["label"]) ?></div>
+				<div style="flex:1; height:6px; border-radius:3px; background:rgba(100,116,139,0.15); overflow:hidden;">
+					<?php if (!$is_unlimited) { ?>
+					<div style="height:100%; width:<?= tohtml($pct) ?>%; background:<?= tohtml($bar_color) ?>;"></div>
+					<?php } ?>
+				</div>
+				<div style="width:140px; flex-shrink:0; text-align:right; font-size:13px; font-variant-numeric:tabular-nums;">
+					<?= tohtml($used_display) ?> / <?= tohtml($max_display) ?>
+				</div>
+			</div>
+			<?php } ?>
+		</div>
+	</div>
+	<?php } ?>
+
 </div>
