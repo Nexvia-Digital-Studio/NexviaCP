@@ -96,12 +96,12 @@ if [ -f "$HESTIA/install/deb/nginx/phpmyadmin-panel.snippet" ] && ! grep -q "loc
 	python3 - "$PMA_PANEL_CONF" "$HESTIA/install/deb/nginx/phpmyadmin-panel.snippet" <<'PYEOF'
 import sys
 conf_path, snippet_path = sys.argv[1], sys.argv[2]
-conf = open(conf_path).read()
-snippet = open(snippet_path).read()
+conf = open(conf_path, encoding="utf-8-sig").read()
+snippet = open(snippet_path, encoding="utf-8-sig").read().lstrip("\ufeff")
 anchor = "\t\tlocation ~ \\.php$ {"
 if anchor not in conf:
     sys.exit("anchor not found")
-open(conf_path, "w").write(conf.replace(anchor, snippet + anchor, 1))
+open(conf_path, "w", encoding="utf-8").write(conf.replace(anchor, snippet + anchor, 1))
 PYEOF
 	if ! "$HESTIA/nginx/sbin/hestia-nginx" -t -c "$PMA_PANEL_CONF" >/dev/null 2>&1; then
 		echo "[-] Panel nginx config test failed; restoring backup."

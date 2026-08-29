@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # info: scan a web domain for config mistakes (localhost URLs, exposed sensitive files)
 # options: USER DOMAIN [MODE]
 #
@@ -40,9 +40,15 @@ fi
 findings=0
 report=""
 
-# --- 1) localhost URLs in config files -------------------------------------
+# --- 1) localhost URLs in config files (excluding comments & example templates)
 while IFS=: read -r file line content; do
 	[ -z "$file" ] && continue
+	# Skip .env.example or template files
+	[[ "$file" == *".example"* || "$file" == *".sample"* ]] && continue
+	# Skip comment lines (# or // or * or /*)
+	trimmed=$(echo "$content" | sed 's/^[[:space:]]*//')
+	[[ "$trimmed" =~ ^(#|//|\*|/\*) ]] && continue
+
 	findings=$((findings + 1))
 	report="$report
 [!!] localhost referansi: $file:$line -> $content"
@@ -57,12 +63,13 @@ while IFS= read -r sfile; do
 [!!] Hassas dosya web kokunde: $sfile"
 done < <(find "$docroot" -maxdepth 3 -type f \( -name "*.sql" -o -name "*.sql.gz" \
 	-o -name "*.bak" -o -name "*.old" -o -name "*.log" -o -name "*.sqlite" \
-	-o -name "*.db" -o -name ".env.bak" -o -name ".env.copy" \) 2>/dev/null)
+	-o -name "*.db" -o -name ".env.bak*" -o -name ".env.copy*" \) 2>/dev/null)
 
 # --- fix mode: rewrite SITE_URL inside .env files --------------------------
 if [ "$mode" = "fix" ]; then
 	for envfile in "$docroot"/.env "$docroot"/.env.*; do
 		[ -f "$envfile" ] || continue
+		[[ "$envfile" == *".example"* || "$envfile" == *".bak"* ]] && continue
 		grep -q "^SITE_URL=.*localhost" "$envfile" || continue
 		cp -a "$envfile" "${envfile}.bak-$(date +%Y%m%d%H%M%S)"
 		sed -i "s|^SITE_URL=.*|SITE_URL=https://$domain|" "$envfile"
@@ -72,7 +79,7 @@ if [ "$mode" = "fix" ]; then
 	done
 fi
 
-if [ "$findings" -eq 0 ]; then
+if [ "$findings" -le 0 ]; then
 	echo "[OK] $domain: yapilandirma temiz (localhost referansi / hassas dosya yok)."
 	exit 0
 fi
