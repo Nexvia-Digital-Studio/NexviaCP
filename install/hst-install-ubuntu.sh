@@ -1619,6 +1619,18 @@ write_config_value "CF_AUTO_ZONE" "yes"
 write_config_value "CF_PROXY_RECORDS_DEFAULT" "true"
 write_config_value "CF_DELETE_ZONE" "no"
 
+# NexviaCP AI Ops, Notification & Self-Healing Hub
+write_config_value "SYS_NOTIFY_EMAIL" ""
+write_config_value "SYS_NOTIFY_LEVEL" "INFO"
+write_config_value "SYS_NOTIFY_SENDER_NAME" "NexviaCP AI Healing Engine"
+write_config_value "SYS_NOTIFY_SENDER_EMAIL" ""
+write_config_value "SYS_NOTIFY_ENABLED" "yes"
+write_config_value "SYS_NOTIFY_ON_LOGIN" "yes"
+write_config_value "SYS_NOTIFY_ON_USER_CREATE" "yes"
+write_config_value "SYS_NOTIFY_ON_WEB_DOMAIN" "yes"
+write_config_value "SYS_NOTIFY_ON_SECURITY" "yes"
+write_config_value "SYS_HEALING_ENABLED" "yes"
+
 # Installing hosting packages
 cp -rf $HESTIA_COMMON_DIR/packages $HESTIA/data/
 
@@ -2593,6 +2605,7 @@ echo "15 02 * * * sudo /usr/local/hestia/bin/v-update-sys-queue disk" >> /var/sp
 echo "10 00 * * * sudo /usr/local/hestia/bin/v-update-sys-queue traffic" >> /var/spool/cron/crontabs/hestiaweb
 echo "30 03 * * * sudo /usr/local/hestia/bin/v-update-sys-queue webstats" >> /var/spool/cron/crontabs/hestiaweb
 echo "*/5 * * * * sudo /usr/local/hestia/bin/v-update-sys-queue backup" >> /var/spool/cron/crontabs/hestiaweb
+echo "*/5 * * * * sudo /usr/local/hestia/bin/v-monitor-sys-healing" >> /var/spool/cron/crontabs/hestiaweb
 echo "10 05 * * * sudo /usr/local/hestia/bin/v-backup-users" >> /var/spool/cron/crontabs/hestiaweb
 echo "20 00 * * * sudo /usr/local/hestia/bin/v-update-user-stats" >> /var/spool/cron/crontabs/hestiaweb
 echo "*/5 * * * * sudo /usr/local/hestia/bin/v-update-sys-rrd" >> /var/spool/cron/crontabs/hestiaweb

@@ -293,6 +293,13 @@ fi
 # Adding jailed sftp env
 $BIN/v-add-user-sftp-jail $user
 
+# Dispatch admin notification for new user creation
+if [ "${SYS_NOTIFY_ON_USER_CREATE:-yes}" != "no" ] && [ "${SYS_NOTIFY_ENABLED:-yes}" != "no" ]; then
+	notif_msg="Sistemde yeni bir kullanıcı hesabı açıldı.\n\nKullanıcı Adı: $user\nİsim: $name\nE-posta: $email\nPaket: $package"
+	notif_extra=$(jq -nc --arg u "$user" --arg e "$email" --arg p "$package" '{"service":"User Management","status":"USER_CREATED","username":$u,"email":$e,"package":$p}')
+	$BIN/v-send-sys-notification "Yeni Kullanıcı Oluşturuldu: $user" "$notif_msg" "INFO" "" "user_create" "$notif_extra" >/dev/null 2>&1 &
+fi
+
 #----------------------------------------------------------#
 #                       Hestia                             #
 #----------------------------------------------------------#

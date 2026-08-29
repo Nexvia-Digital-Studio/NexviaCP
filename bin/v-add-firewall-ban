@@ -80,6 +80,13 @@ $iptables -I fail2ban-$chain 1 -s $ipv4_cidr \
 # Changing permissions
 chmod 660 $conf
 
+# Dispatch notification for security ban
+if [ "${SYS_NOTIFY_ON_SECURITY:-yes}" != "no" ] && [ "${SYS_NOTIFY_ENABLED:-yes}" != "no" ]; then
+	notif_msg="Sistem güvenlik duvarı şüpheli aktivite nedeniyle bir IP adresini engelledi.\n\nEngellenen IP: $ipv4_cidr\nServis / Zincir: $chain\nZaman: $time $date"
+	notif_extra=$(jq -nc --arg ip "$ipv4_cidr" --arg c "$chain" '{"service":$c,"status":"IP_BANNED","ip":$ip,"diagnosis":"Brute-force / malicious activity detected"}')
+	$BIN/v-send-sys-notification "[Güvenlik Uyarısı] IP Adresi Engellendi: $ipv4_cidr" "$notif_msg" "WARNING" "" "security" "$notif_extra" >/dev/null 2>&1 &
+fi
+
 #----------------------------------------------------------#
 #                       Hestia                             #
 #----------------------------------------------------------#

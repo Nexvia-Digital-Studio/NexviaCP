@@ -215,6 +215,122 @@
 				</div>
 			</details>
 
+			<!-- Operational & Security Notifications section -->
+			<details class="box-collapse u-mb10">
+				<summary class="box-collapse-header">
+					<i class="fas fa-bell u-mr10"></i><?= tohtml( _("System & Security Notifications")) ?>
+				</summary>
+				<div class="box-collapse-content">
+					<div class="form-check u-mb10">
+						<input
+							class="form-check-input"
+							type="checkbox"
+							name="v_sys_notify_enabled"
+							id="v_sys_notify_enabled"
+							value="yes"
+							<?= (($_SESSION["SYS_NOTIFY_ENABLED"] ?? "yes") !== "no") ? "checked" : "" ?>
+						>
+						<label class="form-check-label" for="v_sys_notify_enabled">
+							<strong><?= tohtml( _("Enable System Email Notifications")) ?></strong>
+						</label>
+					</div>
+					<div class="u-mb10">
+						<label for="v_sys_notify_email" class="form-label">
+							<?= tohtml( _("Recipient Email Address")) ?>
+							<span class="hint">(<?= tohtml( _("Admin alert destination, e.g. info@nexviastudio.com")) ?>)</span>
+						</label>
+						<input
+							type="email"
+							class="form-control"
+							name="v_sys_notify_email"
+							id="v_sys_notify_email"
+							placeholder="info@nexviastudio.com"
+							value="<?= tohtml($_SESSION["SYS_NOTIFY_EMAIL"] ?? "") ?>"
+						>
+					</div>
+					<div class="u-mb10">
+						<label for="v_sys_notify_sender_email" class="form-label">
+							<?= tohtml( _("Sender Email Address")) ?>
+							<span class="hint">(<?= tohtml( _("From address for automated alerts, e.g. noreply@nexviastudio.com")) ?>)</span>
+						</label>
+						<input
+							type="email"
+							class="form-control"
+							name="v_sys_notify_sender_email"
+							id="v_sys_notify_sender_email"
+							placeholder="noreply@nexviastudio.com"
+							value="<?= tohtml($_SESSION["SYS_NOTIFY_SENDER_EMAIL"] ?? "") ?>"
+						>
+					</div>
+					<div class="u-mb10">
+						<label for="v_sys_notify_sender_name" class="form-label">
+							<?= tohtml( _("Sender Display Name")) ?>
+						</label>
+						<input
+							type="text"
+							class="form-control"
+							name="v_sys_notify_sender_name"
+							id="v_sys_notify_sender_name"
+							placeholder="NexviaCP AI Ops & Self-Healing"
+							value="<?= tohtml($_SESSION["SYS_NOTIFY_SENDER_NAME"] ?? "NexviaCP AI Healing Engine") ?>"
+						>
+					</div>
+					<p class="u-mb5"><strong><?= tohtml( _("Notification Triggers & Events")) ?>:</strong></p>
+					<div class="form-check u-mb5">
+						<input
+							class="form-check-input"
+							type="checkbox"
+							name="v_sys_notify_on_login"
+							id="v_sys_notify_on_login"
+							value="yes"
+							<?= (($_SESSION["SYS_NOTIFY_ON_LOGIN"] ?? "yes") !== "no") ? "checked" : "" ?>
+						>
+						<label class="form-check-label" for="v_sys_notify_on_login">
+							<?= tohtml( _("Admin Panel Login (IP, user, browser info)")) ?>
+						</label>
+					</div>
+					<div class="form-check u-mb5">
+						<input
+							class="form-check-input"
+							type="checkbox"
+							name="v_sys_notify_on_user_create"
+							id="v_sys_notify_on_user_create"
+							value="yes"
+							<?= (($_SESSION["SYS_NOTIFY_ON_USER_CREATE"] ?? "yes") !== "no") ? "checked" : "" ?>
+						>
+						<label class="form-check-label" for="v_sys_notify_on_user_create">
+							<?= tohtml( _("New User Account Created")) ?>
+						</label>
+					</div>
+					<div class="form-check u-mb5">
+						<input
+							class="form-check-input"
+							type="checkbox"
+							name="v_sys_notify_on_web_domain"
+							id="v_sys_notify_on_web_domain"
+							value="yes"
+							<?= (($_SESSION["SYS_NOTIFY_ON_WEB_DOMAIN"] ?? "yes") !== "no") ? "checked" : "" ?>
+						>
+						<label class="form-check-label" for="v_sys_notify_on_web_domain">
+							<?= tohtml( _("New Web Domain / Site Connected")) ?>
+						</label>
+					</div>
+					<div class="form-check u-mb10">
+						<input
+							class="form-check-input"
+							type="checkbox"
+							name="v_sys_notify_on_security"
+							id="v_sys_notify_on_security"
+							value="yes"
+							<?= (($_SESSION["SYS_NOTIFY_ON_SECURITY"] ?? "yes") !== "no") ? "checked" : "" ?>
+						>
+						<label class="form-check-label" for="v_sys_notify_on_security">
+							<?= tohtml( _("Security Firewall & Fail2ban IP Ban Alerts")) ?>
+						</label>
+					</div>
+				</div>
+			</details>
+
 			<!-- Web Server section -->
 			<details class="box-collapse u-mb10">
 				<summary class="box-collapse-header">

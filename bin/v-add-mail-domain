@@ -219,6 +219,12 @@ check_result $? "Web restart failed" > /dev/null
 $BIN/v-restart-proxy "$restart"
 check_result $? "Proxy restart failed" > /dev/null
 
+# Cloudflare automation: provision mail DNS records (MX, SPF, DKIM, DMARC, mail A)
+if [ "$DNS_API_PROVIDER" = "cloudflare" ] && [ "${CF_AUTO_ZONE:-yes}" != "no" ]; then
+	$BIN/v-add-remote-dns-mail-cloudflare "$user" "$domain" \
+		|| $BIN/v-log-action "$user" "Warning" "DNS" "Cloudflare mail DNS sync failed for $domain"
+fi
+
 # Logging
 $BIN/v-log-action "$user" "Info" "Mail" "Added new mail domain ($domain)."
 log_event "$OK" "$ARGUMENTS"

@@ -986,6 +986,91 @@ if (!empty($_POST["save"])) {
 				$_SESSION["CF_DELETE_ZONE"] = $del_zone;
 			}
 		}
+
+		// NexviaCP Operational & Security Notifications
+		if (isset($_POST["v_sys_notify_email"])) {
+			$cur_s_email = $_SESSION["SYS_NOTIFY_EMAIL"] ?? "";
+			if ($_POST["v_sys_notify_email"] != $cur_s_email) {
+				exec(HESTIA_CMD . "v-change-sys-config-value SYS_NOTIFY_EMAIL " . quoteshellarg($_POST["v_sys_notify_email"]), $output, $return_var);
+				check_return_code($return_var, $output);
+				unset($output);
+				if (empty($_SESSION["error_msg"])) {
+					$_SESSION["SYS_NOTIFY_EMAIL"] = $_POST["v_sys_notify_email"];
+				}
+			}
+		}
+		if (isset($_POST["v_sys_notify_sender_email"])) {
+			$cur_sender_email = $_SESSION["SYS_NOTIFY_SENDER_EMAIL"] ?? "";
+			if ($_POST["v_sys_notify_sender_email"] != $cur_sender_email) {
+				exec(HESTIA_CMD . "v-change-sys-config-value SYS_NOTIFY_SENDER_EMAIL " . quoteshellarg($_POST["v_sys_notify_sender_email"]), $output, $return_var);
+				check_return_code($return_var, $output);
+				unset($output);
+				if (empty($_SESSION["error_msg"])) {
+					$_SESSION["SYS_NOTIFY_SENDER_EMAIL"] = $_POST["v_sys_notify_sender_email"];
+				}
+			}
+		}
+		if (isset($_POST["v_sys_notify_sender_name"])) {
+			$cur_sender_name = $_SESSION["SYS_NOTIFY_SENDER_NAME"] ?? "";
+			if ($_POST["v_sys_notify_sender_name"] != $cur_sender_name) {
+				exec(HESTIA_CMD . "v-change-sys-config-value SYS_NOTIFY_SENDER_NAME " . quoteshellarg($_POST["v_sys_notify_sender_name"]), $output, $return_var);
+				check_return_code($return_var, $output);
+				unset($output);
+				if (empty($_SESSION["error_msg"])) {
+					$_SESSION["SYS_NOTIFY_SENDER_NAME"] = $_POST["v_sys_notify_sender_name"];
+				}
+			}
+		}
+		$sys_notif_enabled = empty($_POST["v_sys_notify_enabled"]) ? "no" : "yes";
+		$cur_sys_notif = $_SESSION["SYS_NOTIFY_ENABLED"] ?? "yes";
+		if ($sys_notif_enabled != $cur_sys_notif) {
+			exec(HESTIA_CMD . "v-change-sys-config-value SYS_NOTIFY_ENABLED " . quoteshellarg($sys_notif_enabled), $output, $return_var);
+			check_return_code($return_var, $output);
+			unset($output);
+			if (empty($_SESSION["error_msg"])) {
+				$_SESSION["SYS_NOTIFY_ENABLED"] = $sys_notif_enabled;
+			}
+		}
+		$sys_notif_login = empty($_POST["v_sys_notify_on_login"]) ? "no" : "yes";
+		$cur_notif_login = $_SESSION["SYS_NOTIFY_ON_LOGIN"] ?? "yes";
+		if ($sys_notif_login != $cur_notif_login) {
+			exec(HESTIA_CMD . "v-change-sys-config-value SYS_NOTIFY_ON_LOGIN " . quoteshellarg($sys_notif_login), $output, $return_var);
+			check_return_code($return_var, $output);
+			unset($output);
+			if (empty($_SESSION["error_msg"])) {
+				$_SESSION["SYS_NOTIFY_ON_LOGIN"] = $sys_notif_login;
+			}
+		}
+		$sys_notif_user = empty($_POST["v_sys_notify_on_user_create"]) ? "no" : "yes";
+		$cur_notif_user = $_SESSION["SYS_NOTIFY_ON_USER_CREATE"] ?? "yes";
+		if ($sys_notif_user != $cur_notif_user) {
+			exec(HESTIA_CMD . "v-change-sys-config-value SYS_NOTIFY_ON_USER_CREATE " . quoteshellarg($sys_notif_user), $output, $return_var);
+			check_return_code($return_var, $output);
+			unset($output);
+			if (empty($_SESSION["error_msg"])) {
+				$_SESSION["SYS_NOTIFY_ON_USER_CREATE"] = $sys_notif_user;
+			}
+		}
+		$sys_notif_web = empty($_POST["v_sys_notify_on_web_domain"]) ? "no" : "yes";
+		$cur_notif_web = $_SESSION["SYS_NOTIFY_ON_WEB_DOMAIN"] ?? "yes";
+		if ($sys_notif_web != $cur_notif_web) {
+			exec(HESTIA_CMD . "v-change-sys-config-value SYS_NOTIFY_ON_WEB_DOMAIN " . quoteshellarg($sys_notif_web), $output, $return_var);
+			check_return_code($return_var, $output);
+			unset($output);
+			if (empty($_SESSION["error_msg"])) {
+				$_SESSION["SYS_NOTIFY_ON_WEB_DOMAIN"] = $sys_notif_web;
+			}
+		}
+		$sys_notif_sec = empty($_POST["v_sys_notify_on_security"]) ? "no" : "yes";
+		$cur_notif_sec = $_SESSION["SYS_NOTIFY_ON_SECURITY"] ?? "yes";
+		if ($sys_notif_sec != $cur_notif_sec) {
+			exec(HESTIA_CMD . "v-change-sys-config-value SYS_NOTIFY_ON_SECURITY " . quoteshellarg($sys_notif_sec), $output, $return_var);
+			check_return_code($return_var, $output);
+			unset($output);
+			if (empty($_SESSION["error_msg"])) {
+				$_SESSION["SYS_NOTIFY_ON_SECURITY"] = $sys_notif_sec;
+			}
+		}
 	}
 
 	// Update send notification setting

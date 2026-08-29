@@ -110,6 +110,12 @@ if [ -n "$SUSPENDED" ]; then
 	fi
 fi
 
+# Cloudflare automation: cleanup mail DNS records
+if [ "$DNS_API_PROVIDER" = "cloudflare" ]; then
+	$BIN/v-delete-remote-dns-mail-cloudflare "$user" "$domain" \
+		|| $BIN/v-log-action "$user" "Warning" "DNS" "Cloudflare mail DNS delete failed for $domain"
+fi
+
 # Logging
 $BIN/v-log-action "$user" "Info" "Mail" "Mail domain deleted (Domain: $domain)."
 log_event "$OK" "$ARGUMENTS"

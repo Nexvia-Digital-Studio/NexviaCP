@@ -334,6 +334,20 @@ function authenticate_user($user, $password, $twofa = "") {
 					$return_var,
 				);
 
+				// Dispatch notification for successful panel login if enabled
+				$notify_on_login = $_SESSION["SYS_NOTIFY_ON_LOGIN"] ?? "yes";
+				$notify_enabled = $_SESSION["SYS_NOTIFY_ENABLED"] ?? "yes";
+				if ($notify_on_login !== "no" && $notify_enabled !== "no") {
+					$notif_subject = quoteshellarg("[Güvenlik] Panel Girişi: " . $v_user);
+					$notif_msg = quoteshellarg("NexviaCP kontrol paneline başarılı bir oturum açma işlemi gerçekleştirildi.\n\nKullanıcı: " . $v_user . "\nIP Adresi: " . $ip . "\nTarayıcı / Ajan: " . $user_agent . "\nZaman: " . date("Y-m-d H:i:s"));
+					$notif_extra = quoteshellarg(json_encode([
+						"service" => "Panel Authentication",
+						"status" => "LOGIN_SUCCESS",
+						"root_cause" => "User " . $v_user . " signed in from IP " . $ip
+					]));
+					exec(HESTIA_CMD . "v-send-sys-notification " . $notif_subject . " " . $notif_msg . " INFO '' 'login' " . $notif_extra . " >/dev/null 2>&1 &");
+				}
+
 				$_SESSION["LAST_ACTIVITY"] = time();
 
 				// Define user role / context

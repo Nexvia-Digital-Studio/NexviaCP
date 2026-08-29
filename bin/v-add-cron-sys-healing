@@ -1,0 +1,62 @@
+#!/bin/bash
+# info: register cron job for AI Ops self-healing engine (v-monitor-sys-healing)
+# options: NONE
+#
+# example: v-add-cron-sys-healing
+#
+# Adds a 5-minute cron job to the "hestiaweb" crontab to run v-monitor-sys-healing:
+#   */5 * * * * sudo /usr/local/hestia/bin/v-monitor-sys-healing
+# Safe to run multiple times (idempotent).
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+CRON_TAB="/var/spool/cron/crontabs/hestiaweb"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_hestia_demo_mode
+
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "Error: Script can be run executed only by root"
+	exit 10
+fi
+
+if [ ! -f "$CRON_TAB" ]; then
+	echo "ERROR: Cron tab file $CRON_TAB not found."
+	exit 1
+fi
+
+check_healing=$(grep 'v-monitor-sys-healing' "$CRON_TAB" 2>/dev/null)
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+if [ -z "$check_healing" ]; then
+	echo "*/5 * * * * sudo $HESTIA/bin/v-monitor-sys-healing" >> "$CRON_TAB"
+	chmod 600 "$CRON_TAB"
+	chown hestiaweb:hestiaweb "$CRON_TAB" 2>/dev/null || true
+
+	# Restarting cron
+	$BIN/v-restart-cron
+	check_result $? "Cron restart failed" > /dev/null
+
+	# Logging
+	$BIN/v-log-action "system" "Info" "System" "AI Ops self-healing cron job enabled (every 5 minutes)."
+fi
+
+log_event "$OK" "$ARGUMENTS"
+
+exit 0

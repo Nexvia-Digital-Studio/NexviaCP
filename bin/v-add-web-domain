@@ -291,6 +291,13 @@ if [ "$DNS_API_PROVIDER" = "cloudflare" ] && [ "${CF_AUTO_ZONE:-yes}" != "no" ];
 		|| $BIN/v-log-action "$user" "Warning" "DNS" "Cloudflare sync failed for $domain"
 fi
 
+# Dispatch notification for web domain creation
+if [ "${SYS_NOTIFY_ON_WEB_DOMAIN:-yes}" != "no" ] && [ "${SYS_NOTIFY_ENABLED:-yes}" != "no" ]; then
+	notif_msg="Yeni bir web sitesi sisteme bağlandı.\n\nDomain: $domain\nKullanıcı: $user\nIP: $ip"
+	notif_extra=$(jq -nc --arg d "$domain" --arg u "$user" --arg ip "$ip" '{"service":"Web Domain","status":"DOMAIN_ADDED","domain":$d,"user":$u,"ip":$ip}')
+	$BIN/v-send-sys-notification "Yeni Web Domain Eklendi: $domain" "$notif_msg" "INFO" "" "web_domain" "$notif_extra" >/dev/null 2>&1 &
+fi
+
 # Logging
 $BIN/v-log-action "$user" "Info" "Web" "Added new web domain (Name: $domain)."
 log_event "$OK" "$ARGUMENTS"

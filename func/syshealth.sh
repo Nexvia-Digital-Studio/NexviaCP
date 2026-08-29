@@ -199,7 +199,7 @@ function syshealth_update_system_config_format() {
 	# SYSTEM CONFIGURATION
 	# Create array of known keys in configuration file
 	system="system"
-	known_keys="ANTISPAM_SYSTEM ANTIVIRUS_SYSTEM API_ALLOWED_IP API BACKEND_PORT BACKUP_GZIP BACKUP_MODE BACKUP_SYSTEM CRON_SYSTEM DB_PMA_ALIAS DB_SYSTEM DISK_QUOTA DNS_SYSTEM ENFORCE_SUBDOMAIN_OWNERSHIP FILE_MANAGER FIREWALL_EXTENSION FIREWALL_SYSTEM FTP_SYSTEM IMAP_SYSTEM INACTIVE_SESSION_TIMEOUT LANGUAGE LOGIN_STYLE MAIL_SYSTEM PROXY_PORT PROXY_SSL_PORT PROXY_SYSTEM RELEASE_BRANCH STATS_SYSTEM THEME UPDATE_HOSTNAME_SSL UPGRADE_SEND_EMAIL UPGRADE_SEND_EMAIL_LOG WEB_BACKEND WEBMAIL_ALIAS WEBMAIL_SYSTEM WEB_PORT WEB_RGROUPS WEB_SSL WEB_SSL_PORT WEB_SYSTEM WEB_TERMINAL WEB_TERMINAL_PORT VERSION DISABLE_IP_CHECK SYS_NOTIFY_EMAIL SYS_NOTIFY_LEVEL SYS_NOTIFY_SENDER_NAME SYS_NOTIFY_SENDER_EMAIL SYS_NOTIFY_ENABLED SYS_HEALING_ENABLED"
+	known_keys="ANTISPAM_SYSTEM ANTIVIRUS_SYSTEM API_ALLOWED_IP API BACKEND_PORT BACKUP_GZIP BACKUP_MODE BACKUP_SYSTEM CRON_SYSTEM DB_PMA_ALIAS DB_SYSTEM DISK_QUOTA DNS_SYSTEM ENFORCE_SUBDOMAIN_OWNERSHIP FILE_MANAGER FIREWALL_EXTENSION FIREWALL_SYSTEM FTP_SYSTEM IMAP_SYSTEM INACTIVE_SESSION_TIMEOUT LANGUAGE LOGIN_STYLE MAIL_SYSTEM PROXY_PORT PROXY_SSL_PORT PROXY_SYSTEM RELEASE_BRANCH STATS_SYSTEM THEME UPDATE_HOSTNAME_SSL UPGRADE_SEND_EMAIL UPGRADE_SEND_EMAIL_LOG WEB_BACKEND WEBMAIL_ALIAS WEBMAIL_SYSTEM WEB_PORT WEB_RGROUPS WEB_SSL WEB_SSL_PORT WEB_SYSTEM WEB_TERMINAL WEB_TERMINAL_PORT VERSION DISABLE_IP_CHECK DNS_API_PROVIDER CF_API_TOKEN CF_ZONE_ID CF_ACCOUNT_ID CF_AUTO_ZONE CF_PROXY_RECORDS_DEFAULT CF_DELETE_ZONE SYS_NOTIFY_EMAIL SYS_NOTIFY_LEVEL SYS_NOTIFY_SENDER_NAME SYS_NOTIFY_SENDER_EMAIL SYS_NOTIFY_ENABLED SYS_NOTIFY_ON_LOGIN SYS_NOTIFY_ON_USER_CREATE SYS_NOTIFY_ON_WEB_DOMAIN SYS_NOTIFY_ON_SECURITY SYS_HEALING_ENABLED"
 	write_kv_config_file
 	unset system
 	unset known_keys
@@ -626,6 +626,22 @@ function syshealth_repair_system_config() {
 		echo "[ ! ] Adding missing variable to hestia.conf: SYS_NOTIFY_ENABLED ('yes')"
 		$BIN/v-change-sys-config-value "SYS_NOTIFY_ENABLED" "yes"
 	fi
+	if [[ -z $(check_key_exists 'SYS_NOTIFY_ON_LOGIN') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: SYS_NOTIFY_ON_LOGIN ('yes')"
+		$BIN/v-change-sys-config-value "SYS_NOTIFY_ON_LOGIN" "yes"
+	fi
+	if [[ -z $(check_key_exists 'SYS_NOTIFY_ON_USER_CREATE') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: SYS_NOTIFY_ON_USER_CREATE ('yes')"
+		$BIN/v-change-sys-config-value "SYS_NOTIFY_ON_USER_CREATE" "yes"
+	fi
+	if [[ -z $(check_key_exists 'SYS_NOTIFY_ON_WEB_DOMAIN') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: SYS_NOTIFY_ON_WEB_DOMAIN ('yes')"
+		$BIN/v-change-sys-config-value "SYS_NOTIFY_ON_WEB_DOMAIN" "yes"
+	fi
+	if [[ -z $(check_key_exists 'SYS_NOTIFY_ON_SECURITY') ]]; then
+		echo "[ ! ] Adding missing variable to hestia.conf: SYS_NOTIFY_ON_SECURITY ('yes')"
+		$BIN/v-change-sys-config-value "SYS_NOTIFY_ON_SECURITY" "yes"
+	fi
 	if [[ -z $(check_key_exists 'SYS_HEALING_ENABLED') ]]; then
 		echo "[ ! ] Adding missing variable to hestia.conf: SYS_HEALING_ENABLED ('yes')"
 		$BIN/v-change-sys-config-value "SYS_HEALING_ENABLED" "yes"
@@ -672,6 +688,7 @@ function syshealth_repair_system_cronjobs() {
 	echo "10 00 * * * sudo /usr/local/hestia/bin/v-update-sys-queue traffic" >> /var/spool/cron/crontabs/hestiaweb
 	echo "30 03 * * * sudo /usr/local/hestia/bin/v-update-sys-queue webstats" >> /var/spool/cron/crontabs/hestiaweb
 	echo "*/5 * * * * sudo /usr/local/hestia/bin/v-update-sys-queue backup" >> /var/spool/cron/crontabs/hestiaweb
+	echo "*/5 * * * * sudo /usr/local/hestia/bin/v-monitor-sys-healing" >> /var/spool/cron/crontabs/hestiaweb
 	echo "10 05 * * * sudo /usr/local/hestia/bin/v-backup-users" >> /var/spool/cron/crontabs/hestiaweb
 	echo "20 00 * * * sudo /usr/local/hestia/bin/v-update-user-stats" >> /var/spool/cron/crontabs/hestiaweb
 	echo "*/5 * * * * sudo /usr/local/hestia/bin/v-update-sys-rrd" >> /var/spool/cron/crontabs/hestiaweb
