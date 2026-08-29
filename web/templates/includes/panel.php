@@ -23,35 +23,21 @@
      	$user_icon = "fa-user";
      } ?>
 					<div class="top-bar-usage-inner">
-						<span class="top-bar-usage-item">
-							<i class="fas <?= $user_icon ?>" title="<?= _("Logged in as") ?>: <?= htmlspecialchars($panel[$user]["NAME"]) ?>"></i>
-							<span class="u-text-bold">
-								<?= htmlspecialchars($user) ?>
-							</span>
+						<span class="top-bar-usage-item" title="<?= _("Logged in as") ?>: <?= htmlspecialchars($panel[$user]["NAME"]) ?>">
+							<i class="fas <?= $user_icon ?>"></i>
+							<span class="u-text-bold"><?= htmlspecialchars($user) ?></span>
 						</span>
-						<span class="top-bar-usage-item">
-							<i class="fas fa-hard-drive" title="<?= _("Disk") ?>: <?= humanize_usage_size($panel[$user]["U_DISK"]) ?> <?= humanize_usage_measure($panel[$user]["U_DISK"]) ?>"></i>
-							<span class="u-text-bold">
-								<?= humanize_usage_size($panel[$user]["U_DISK"]) ?>
-							</span>
-							<?= humanize_usage_measure($panel[$user]["U_DISK"]) ?>
-							/
-							<span class="u-text-bold">
-							<?= humanize_usage_size($panel[$user]["DISK_QUOTA"]) ?>
-							</span>
-							<?= humanize_usage_measure($panel[$user]["DISK_QUOTA"]) ?>
+						<span class="top-bar-usage-item" title="<?= _("Disk") ?>: <?= humanize_usage_size($panel[$user]["U_DISK"]) ?> <?= humanize_usage_measure($panel[$user]["U_DISK"]) ?>">
+							<i class="fas fa-hard-drive"></i>
+							<span class="u-text-bold"><?= humanize_usage_size($panel[$user]["U_DISK"]) ?></span> <?= humanize_usage_measure($panel[$user]["U_DISK"]) ?>
+							<span class="top-bar-usage-sep">/</span>
+							<span class="u-text-bold"><?= ($panel[$user]["DISK_QUOTA"] == "unlimited" || $panel[$user]["DISK_QUOTA"] == "0") ? "∞" : humanize_usage_size($panel[$user]["DISK_QUOTA"]) . " " . humanize_usage_measure($panel[$user]["DISK_QUOTA"]) ?></span>
 						</span>
-						<span class="top-bar-usage-item">
-							<i class="fas fa-right-left" title="<?= _("Bandwidth") ?>: <?= humanize_usage_size($panel[$user]["U_BANDWIDTH"]) ?> <?= humanize_usage_measure($panel[$user]["U_BANDWIDTH"]) ?>"></i>
-							<span class="u-text-bold">
-								<?= humanize_usage_size($panel[$user]["U_BANDWIDTH"]) ?>
-							</span>
-							<?= humanize_usage_measure($panel[$user]["U_BANDWIDTH"]) ?>
-							/
-							<span class="u-text-bold">
-								<?= humanize_usage_size($panel[$user]["BANDWIDTH"]) ?>
-							</span>
-							<?= humanize_usage_measure($panel[$user]["BANDWIDTH"]) ?>
+						<span class="top-bar-usage-item" title="<?= _("Bandwidth") ?>: <?= humanize_usage_size($panel[$user]["U_BANDWIDTH"]) ?> <?= humanize_usage_measure($panel[$user]["U_BANDWIDTH"]) ?>">
+							<i class="fas fa-right-left"></i>
+							<span class="u-text-bold"><?= humanize_usage_size($panel[$user]["U_BANDWIDTH"]) ?></span> <?= humanize_usage_measure($panel[$user]["U_BANDWIDTH"]) ?>
+							<span class="top-bar-usage-sep">/</span>
+							<span class="u-text-bold"><?= ($panel[$user]["BANDWIDTH"] == "unlimited" || $panel[$user]["BANDWIDTH"] == "0") ? "∞" : humanize_usage_size($panel[$user]["BANDWIDTH"]) . " " . humanize_usage_measure($panel[$user]["BANDWIDTH"]) ?></span>
 						</span>
 					</div>
 				</div>
@@ -403,16 +389,140 @@
 	</div>
 
 	<style>
+		/* Expanded Header & Top Bar Layout */
+		.app-header {
+			padding-top: 54px !important;
+		}
+		.top-bar {
+			height: 54px !important;
+			background: var(--top-bar-background, #171b26) !important;
+			border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+			box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25) !important;
+			display: flex !important;
+			align-items: center !important;
+			z-index: 100 !important;
+		}
+		.top-bar-inner {
+			max-width: 100% !important;
+			padding: 0 24px !important;
+			display: flex !important;
+			align-items: center !important;
+			justify-content: space-between !important;
+			width: 100% !important;
+		}
+		.top-bar-left {
+			display: flex !important;
+			align-items: center !important;
+			gap: 18px !important;
+		}
+		.top-bar-logo {
+			display: flex !important;
+			align-items: center !important;
+			margin-right: 0 !important;
+		}
+		.top-bar-logo img {
+			height: 32px !important;
+			width: auto !important;
+		}
+		.top-bar-usage {
+			display: flex !important;
+			align-items: center !important;
+		}
+		.top-bar-usage-inner {
+			display: flex !important;
+			align-items: center !important;
+			gap: 14px !important;
+			background: rgba(255, 255, 255, 0.05) !important;
+			border: 1px solid rgba(255, 255, 255, 0.09) !important;
+			padding: 5px 14px !important;
+			border-radius: 20px !important;
+			font-size: 12.5px !important;
+			color: #e2e8f0 !important;
+		}
+		.top-bar-usage-item {
+			display: inline-flex !important;
+			align-items: center !important;
+			gap: 6px !important;
+			margin-right: 0 !important;
+			white-space: nowrap !important;
+		}
+		.top-bar-usage-item i {
+			font-size: 12px !important;
+			opacity: 0.85 !important;
+		}
+		.top-bar-usage-sep {
+			opacity: 0.35 !important;
+			margin: 0 2px !important;
+		}
+		.top-bar-right {
+			display: flex !important;
+			align-items: center !important;
+			gap: 8px !important;
+		}
+		.top-bar-menu-list {
+			display: flex !important;
+			align-items: center !important;
+			gap: 5px !important;
+			list-style: none !important;
+			margin: 0 !important;
+			padding: 0 !important;
+		}
+		.top-bar-menu-item {
+			display: flex !important;
+			align-items: center !important;
+		}
+		.top-bar-menu-link {
+			display: inline-flex !important;
+			align-items: center !important;
+			justify-content: center !important;
+			width: 34px !important;
+			height: 34px !important;
+			padding: 0 !important;
+			border-radius: 8px !important;
+			border: 1px solid rgba(255, 255, 255, 0.06) !important;
+			background: rgba(255, 255, 255, 0.03) !important;
+			color: rgba(255, 255, 255, 0.8) !important;
+			font-size: 14.5px !important;
+			transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
+			text-decoration: none !important;
+		}
+		.top-bar-menu-link:hover {
+			background: rgba(255, 255, 255, 0.13) !important;
+			border-color: rgba(255, 255, 255, 0.2) !important;
+			color: #fff !important;
+			transform: translateY(-1px) !important;
+			box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3) !important;
+		}
+		.top-bar-menu-link.active {
+			background: rgba(255, 59, 119, 0.18) !important;
+			border-color: rgba(255, 59, 119, 0.45) !important;
+			color: #ff5e92 !important;
+			box-shadow: 0 0 12px rgba(255, 59, 119, 0.22) !important;
+		}
+		.top-bar-menu-link-logout {
+			background: rgba(239, 68, 68, 0.12) !important;
+			border-color: rgba(239, 68, 68, 0.28) !important;
+			color: #f87171 !important;
+		}
+		.top-bar-menu-link-logout:hover {
+			background: rgba(239, 68, 68, 0.28) !important;
+			border-color: rgba(239, 68, 68, 0.55) !important;
+			color: #fff !important;
+		}
+
+		/* Expanded & Breathable Main Menu */
 		.main-menu {
-			background: var(--color-background-menu, #1e222d);
-			border-top: 1px solid var(--border-color, #2b303c);
-			border-bottom: 1px solid var(--border-color, #2b303c);
+			background: var(--color-background-menu, #141824) !important;
+			border-top: 1px solid rgba(255, 255, 255, 0.06) !important;
+			border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+			padding: 12px 0 !important;
+			width: 100% !important;
 		}
 		.main-menu .container {
 			max-width: 100% !important;
-			display: flex;
-			justify-content: center;
-			padding: 0 15px;
+			display: flex !important;
+			justify-content: center !important;
+			padding: 0 20px !important;
 		}
 		.main-menu-list {
 			display: flex !important;
@@ -422,53 +532,77 @@
 			margin: 0 auto !important;
 			padding: 0 !important;
 			width: 100% !important;
-			max-width: 1550px !important;
-			gap: 2px 6px;
-			list-style: none;
+			max-width: 1750px !important;
+			gap: 8px 10px !important;
+			list-style: none !important;
 		}
 		.main-menu-item {
-			flex: 0 1 auto !important;
-			min-width: 78px;
-			max-width: 125px;
-			text-align: center;
-			display: flex;
+			flex: 1 1 115px !important;
+			min-width: 105px !important;
+			max-width: 160px !important;
+			text-align: center !important;
+			display: flex !important;
 		}
 		.main-menu-item-link {
 			display: flex !important;
-			flex-direction: column;
-			align-items: center;
-			justify-content: flex-start;
-			padding: 8px 8px !important;
-			width: 100%;
-			height: 100%;
-			text-align: center;
-			border-radius: 4px;
-			transition: background 0.15s ease-in-out;
-			text-decoration: none;
+			flex-direction: column !important;
+			align-items: center !important;
+			justify-content: center !important;
+			padding: 10px 12px !important;
+			width: 100% !important;
+			height: 100% !important;
+			text-align: center !important;
+			border-radius: 8px !important;
+			background: rgba(255, 255, 255, 0.025) !important;
+			border: 1px solid rgba(255, 255, 255, 0.06) !important;
+			transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
+			text-decoration: none !important;
+			box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15) !important;
+		}
+		.main-menu-item-link:hover {
+			background: rgba(255, 255, 255, 0.07) !important;
+			border-color: rgba(255, 255, 255, 0.16) !important;
+			transform: translateY(-2px) !important;
+			box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3) !important;
+		}
+		.main-menu-item-link.active {
+			background: rgba(255, 59, 119, 0.12) !important;
+			border-color: rgba(255, 59, 119, 0.45) !important;
+			box-shadow: 0 0 16px rgba(255, 59, 119, 0.18) !important;
+		}
+		.main-menu-item-link.active .main-menu-item-label {
+			color: #ff3b77 !important;
 		}
 		.main-menu-item-label {
 			white-space: nowrap !important;
-			font-size: 11px !important;
-			font-weight: 600 !important;
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			gap: 5px;
-			margin: 0 0 3px 0 !important;
+			font-size: 12.5px !important;
+			font-weight: 700 !important;
+			letter-spacing: 0.4px !important;
+			display: flex !important;
+			align-items: center !important;
+			justify-content: center !important;
+			gap: 6px !important;
+			margin: 0 0 5px 0 !important;
+			color: #f1f5f9 !important;
+		}
+		.main-menu-item-label i, .main-menu-item-label .fas {
+			font-size: 13px !important;
+			opacity: 0.9 !important;
 		}
 		.main-menu-stats {
-			font-size: 10px !important;
-			line-height: 1.3 !important;
+			font-size: 11px !important;
+			line-height: 1.4 !important;
 			text-align: center !important;
 			margin: 0 !important;
 			padding: 0 !important;
-			list-style: none;
+			list-style: none !important;
+			color: #94a3b8 !important;
 		}
 		.main-menu-stats li {
 			white-space: nowrap !important;
-			overflow: hidden;
-			text-overflow: ellipsis;
-			max-width: 110px;
+			overflow: hidden !important;
+			text-overflow: ellipsis !important;
+			max-width: 145px !important;
 		}
 	</style>
 
