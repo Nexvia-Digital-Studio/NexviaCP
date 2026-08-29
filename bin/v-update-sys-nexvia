@@ -124,7 +124,7 @@ fi
 
 # Reload panel services gracefully in background so HTTP response is returned cleanly
 echo "[*] Scheduling graceful service reload..."
-(sleep 1 && (systemctl reload hestia-php hestia-nginx 2>/dev/null || systemctl restart hestia-php hestia-nginx 2>/dev/null)) >/dev/null 2>&1 &
+(sleep 1 && (pkill -HUP -f "hestia-nginx: master process" 2>/dev/null; systemctl reload hestia 2>/dev/null || systemctl restart hestia 2>/dev/null)) >/dev/null 2>&1 &
 
 echo "[+] SUCCESS: NexviaCP updated to the latest version successfully."
 log_event "$OK" "NexviaCP core updated to latest $branch"
