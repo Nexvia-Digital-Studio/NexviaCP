@@ -5,8 +5,14 @@
 # example: v-tune-sys-resources
 # example: v-tune-sys-resources admin neredeyasanir.localhost
 #
-# Inspects traffic rates, memory pressure, and assigned priority (0-5)
-# to dynamically allocate or throttle CPU, RAM, and SSD I/O.
+# Delegates per-domain measurement and sizing to the demand engine
+# ($HESTIA/lib/nexvia-demand-engine.py), which scores real demand 0-100
+# from active visitors, dynamic request load, the site's own traffic
+# baseline and memory pressure, then decides state (idle/active/busy/
+# boosted) and computes RAM/CPU limits (per-worker memory_limit and a
+# Little's-law based peak). This script applies the resulting limits via
+# v-change-web-domain-cgroup and keeps the governance state directory
+# that the panel dashboard reads.
 
 # Argument definition
 target_user=$1
@@ -24,6 +30,11 @@ fi
 # load config file
 [ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
 
+ENGINE="$HESTIA/lib/nexvia-demand-engine.py"
+GOV_DIR="/var/lib/hestia/governance"
+mkdir -p "$GOV_DIR" 2>/dev/null || true
+chmod 700 "$GOV_DIR" 2>/dev/null || true
+
 #----------------------------------------------------------#
 #                    Verifications                         #
 #----------------------------------------------------------#
@@ -38,9 +49,19 @@ if [ -n "$target_user" ] && [ -n "$target_domain" ]; then
 	is_object_valid 'web' 'DOMAIN' "$target_domain"
 fi
 
-GOV_DIR="/var/lib/hestia/governance"
-mkdir -p "$GOV_DIR" 2>/dev/null || true
-chmod 700 "$GOV_DIR" 2>/dev/null || true
+json_field() {
+	# json_field <json> <key> — crude but dependency-free extraction of a
+	# scalar value from the single-line engine JSON.
+	echo "$1" | python3 -c "
+import json, sys
+try:
+	doc = json.load(sys.stdin)
+except Exception:
+	sys.exit(1)
+v = doc.get(sys.argv[1], '')
+print(v if not isinstance(v, list) else ','.join(v))
+" "$2" 2>/dev/null
+}
 
 # Function to tune a single domain
 tune_domain() {
@@ -51,207 +72,38 @@ tune_domain() {
 	local prio=$(get_object_value 'web' 'DOMAIN' "$d" '$RESOURCE_PRIORITY')
 	[ -z "$prio" ] && prio="0"
 
-	# Get log file to measure request activity
-	local log_file=""
-	for lpath in "/var/log/nginx/domains/$d.log" "$HOMEDIR/$u/web/$d/logs/$d.log" "/var/log/apache2/domains/$d.log" "$HOMEDIR/$u/web/$d/logs/$d.bytes.log"; do
-		if [ -f "$lpath" ] && [ -s "$lpath" ]; then
-			log_file="$lpath"
-			break
-		fi
-	done
-
-	local req_count=0
-	local last_hit_time=0
-	if [ -n "$log_file" ] && [ -f "$log_file" ]; then
-		read -r req_count last_hit_time < <(python3 - "$log_file" << 'PYEOF'
-import sys, re, time, os
-from datetime import datetime, timezone, timedelta
-
-log_file = sys.argv[1] if len(sys.argv) > 1 else ""
-now_ts = int(time.time())
-req_count_10m = 0
-last_hit_time = 0
-
-MONTHS = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,"Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
-
-if log_file and os.path.isfile(log_file):
-    try:
-        with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
-            f.seek(0, os.SEEK_END)
-            size = f.tell()
-            f.seek(max(0, size - 200000), os.SEEK_SET)
-            lines = f.readlines()
-            if size > 200000 and lines:
-                lines = lines[1:]
-            
-            for line in lines[-1000:]:
-                m = re.search(r"(\d{2})/([A-Za-z]{3})/(\d{4}):(\d{2}):(\d{2}):(\d{2})(?:\s+([+-]\d{4}))?", line)
-                if m:
-                    day, mon_str, year, hr, minu, sec, tz_str = m.groups()
-                    mon = MONTHS.get(mon_str, 1)
-                    if tz_str:
-                        tz_sign = 1 if tz_str[0] == "+" else -1
-                        tz_hrs = int(tz_str[1:3])
-                        tz_mins = int(tz_str[3:5])
-                        tz = timezone(tz_sign * timedelta(hours=tz_hrs, minutes=tz_mins))
-                        dt = datetime(int(year), mon, int(day), int(hr), int(minu), int(sec), tzinfo=tz)
-                        line_ts = int(dt.timestamp())
-                    else:
-                        dt = datetime(int(year), mon, int(day), int(hr), int(minu), int(sec))
-                        line_ts = int(dt.timestamp())
-                    
-                    if line_ts > last_hit_time:
-                        last_hit_time = line_ts
-                    
-                    if line_ts >= (now_ts - 600):
-                        req_count_10m += 1
-    except Exception:
-        pass
-
-print(f"{req_count_10m} {last_hit_time}")
-PYEOF
-		)
+	# Engine measures traffic, scores demand, decides state and writes the
+	# governance state JSON; the same JSON is echoed on stdout.
+	local out=""
+	if [ -x "$ENGINE" ] && [ -x "$(command -v python3)" ]; then
+		out=$("$ENGINE" --user "$u" --domain "$d" --priority "$prio" \
+			--gov-dir "$GOV_DIR" --homedir "$HOMEDIR" 2>/dev/null) || out=""
 	fi
-	[ -z "$req_count" ] && req_count=0
-	[ -z "$last_hit_time" ] && last_hit_time=0
 
-	# Determine memory usage
-	local cur_ram_bytes=0
-	local mem_high_bytes=0
-	local psi_pressure=0
-
-	# Find cgroup or php-fpm pool memory
-	local pool_cg=""
-	for cg in "/sys/fs/cgroup/system.slice/php*-fpm.service" "/sys/fs/cgroup/system.slice/hestia-app-${u}-${d}.service"; do
-		if [ -d "$cg" ]; then
-			pool_cg="$cg"
-			break
-		fi
-	done
-
-	if [ -n "$pool_cg" ] && [ -d "$pool_cg" ]; then
-		cur_ram_bytes=$(cat "$pool_cg/memory.current" 2>/dev/null || echo 0)
-		if [ -f "$pool_cg/memory.pressure" ]; then
-			psi_pressure=$(awk -F'[= ]' '/^some / {for(i=1;i<=NF;i++) if($i=="avg10"){print $(i+1); exit}}' "$pool_cg/memory.pressure" 2>/dev/null | awk -F. '{print $1}')
-		fi
-	fi
-	[ -z "$cur_ram_bytes" ] && cur_ram_bytes=0
-	[ -z "$psi_pressure" ] && psi_pressure=0
-
-	local cur_ram_mb=$((cur_ram_bytes / 1048576))
-
-	# Dynamic Allocation Rules based on Priority (0-5)
 	local status="active"
 	local mem_high="256M"
 	local mem_max="1G"
-	local cpu_quota="50%"
-	local io_weight="100"
+	local cpu_quota="100%"
 
-	case "$prio" in
-		0)
-			# AUTO-ADAPTIVE (Akıllı Otomatik)
-			local now_ts=$(date +%s)
-			local idle_sec=0
-			if [ "$last_hit_time" -gt 0 ]; then
-				idle_sec=$((now_ts - last_hit_time))
-			else
-				idle_sec=999999
-			fi
+	if [ -n "$out" ]; then
+		status=$(json_field "$out" STATUS)
+		mem_high=$(json_field "$out" MEMORY_HIGH)
+		mem_max=$(json_field "$out" MEMORY_MAX)
+		cpu_quota=$(json_field "$out" CPU_QUOTA)
+	fi
+	[ -z "$status" ] && status="active"
+	[ -z "$mem_high" ] && mem_high="256M"
+	[ -z "$mem_max" ] && mem_max="1G"
+	[ -z "$cpu_quota" ] && cpu_quota="100%"
 
-			if [ "$req_count" -eq 0 ] || [ "$idle_sec" -gt 600 ]; then
-				# Deep Eco-Idle: Site has been idle for >10 mins -> throttle aggressively!
-				status="idle"
-				mem_high="64M"
-				mem_max="256M"
-				cpu_quota="25%"
-				io_weight="50"
-			elif [ "$req_count" -gt 60 ] || [ "$psi_pressure" -gt 30 ]; then
-				# High Traffic Burst
-				status="boosted"
-				mem_high="512M"
-				mem_max="2G"
-				cpu_quota="200%"
-				io_weight="500"
-			else
-				# Standard Active
-				status="active"
-				mem_high="256M"
-				mem_max="1G"
-				cpu_quota="100%"
-				io_weight="100"
-			fi
-			;;
-		1)
-			# Low / Eco Throttle
-			status="throttled"
-			mem_high="64M"
-			mem_max="256M"
-			cpu_quota="25%"
-			io_weight="50"
-			;;
-		2)
-			# Normal / Standard
-			status="active"
-			mem_high="256M"
-			mem_max="1G"
-			cpu_quota="50%"
-			io_weight="100"
-			;;
-		3)
-			# High Performance
-			status="active"
-			mem_high="512M"
-			mem_max="2G"
-			cpu_quota="100%"
-			io_weight="300"
-			;;
-		4)
-			# Mission Critical
-			status="boosted"
-			mem_high="1G"
-			mem_max="4G"
-			cpu_quota="200%"
-			io_weight="700"
-			;;
-		5)
-			# VIP / Maximum Isolated
-			status="vip"
-			mem_high="2G"
-			mem_max="unlimited"
-			cpu_quota="unlimited"
-			io_weight="1000"
-			;;
-	esac
-
-	# Read current stored values
+	# Read current stored values and apply changes only if different.
 	local old_high=$(get_object_value 'web' 'DOMAIN' "$d" '$WEB_CGROUP_HIGH')
 	local old_max=$(get_object_value 'web' 'DOMAIN' "$d" '$WEB_CGROUP_MAX')
 	local old_cpu=$(get_object_value 'web' 'DOMAIN' "$d" '$WEB_CPU_QUOTA')
 
-	# Apply changes if different
 	if [ "$old_high" != "$mem_high" ] || [ "$old_max" != "$mem_max" ] || [ "$old_cpu" != "$cpu_quota" ]; then
 		$BIN/v-change-web-domain-cgroup "$u" "$d" "$mem_high" "$mem_max" "$cpu_quota" >/dev/null 2>&1 || true
 	fi
-
-	# Save governance JSON state file for fast panel dashboard reading
-	local state_file="$GOV_DIR/${u}_${d}.json"
-	cat << JSONEOF > "$state_file"
-{
-	"DOMAIN": "$d",
-	"USER": "$u",
-	"PRIORITY": $prio,
-	"STATUS": "$status",
-	"MEMORY_USAGE_MB": $cur_ram_mb,
-	"MEMORY_HIGH": "$mem_high",
-	"MEMORY_MAX": "$mem_max",
-	"CPU_QUOTA": "$cpu_quota",
-	"IO_WEIGHT": $io_weight,
-	"REQ_COUNT_10M": $req_count,
-	"PSI_PRESSURE": $psi_pressure,
-	"LAST_TUNED": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-}
-JSONEOF
-	chmod 644 "$state_file"
 }
 
 # Main Execution Loop

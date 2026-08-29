@@ -1,0 +1,2 @@
+# NexviaCP smart resource governance — demand engine every 5 minutes
+*/5 * * * * root /usr/local/hestia/bin/v-tune-sys-resources >/dev/null 2>&1

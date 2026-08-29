@@ -83,6 +83,9 @@
 			</div>
 			<div style="margin-top:10px; font-size:12px; color:var(--color-text-muted);">
 				🚀 <?= tohtml(__tr("Active spikes receiving burst RAM/CPU", "Yoğun sitelere dinamik kaynak açıldı")) ?>
+				<?php if ((int)($summary["BUSY_COUNT"] ?? 0) > 0): ?>
+					· 🟣 <?= (int)($summary["BUSY_COUNT"]) ?> <?= tohtml(__tr("busy", "yoğun")) ?>
+				<?php endif; ?>
 			</div>
 		</div>
 
@@ -117,7 +120,7 @@
 				<?= tohtml(__tr("NexviaCP integrates Linux cgroups v2, PSI (Pressure Stall Information) and Nginx traffic log telemetry to automatically scale and throttle per-site resources without manual intervention:", "NexviaCP, Linux cgroups v2, PSI (bellek baskısı) ve Nginx trafik telemetrisini birleştirerek sitelerin kaynaklarını otomatik ölçeklendirir veya kısar:")) ?>
 			</p>
 			<ul style="list-style:disc; margin-left:20px; line-height:1.6;">
-				<li><strong>0 - <?= tohtml(__tr("Auto-Adaptive (Default):", "Akıllı Otomatik (Varsayılan):")) ?></strong> <?= tohtml(__tr("If a site is idle (>10m zero traffic), it is aggressively throttled to 64M RAM / 25% CPU (Eco-Idle). When traffic arrives, resources instantly expand up to 2G peak.", "Site kullanılmıyorsa (>10 dk istek yoksa) 64M RAM ve %25 CPU'ya kısılarak uykuya alınır. Ziyaretçi geldiğinde 2G tavana kadar anında genişler.")) ?></li>
+				<li><strong>0 - <?= tohtml(__tr("Auto-Adaptive (Default):", "Akıllı Otomatik (Varsayılan):")) ?></strong> <?= tohtml(__tr("A 0-100 demand score is computed from four live signals: real visitors (unique IPs, bots excluded), dynamic request load (static assets ignored, real response times weighted), deviation from the site's own time-of-day baseline (last 7 days), and memory pressure. Idle sites sleep at 64M RAM / 25% CPU; an active site gets 128M per PHP worker plus a peak ceiling sized for expected concurrent workers. A single visitor generating 99 requests stays \"Active\"; a genuine crowd or a spike well above baseline earns \"Busy\"/\"Boosted\". Hysteresis prevents flapping.", "Son 10 dakikanın dört canlı sinyalinden 0-100 arası bir talep skoru hesaplanır: gerçek ziyaretçiler (botlar hariç eşsiz IP), dinamik istek yükü (statik dosyalar sayılmaz, gerçek yanıt süreleri ağırlıklı), sitenin kendi saat-bazlı geçmiş ortalamasına sapma (son 7 gün) ve bellek baskısı. Boşta olan site 64M RAM / %25 CPU ile uyur; aktif site PHP worker başına 128M ve beklenen eşzamanlı worker sayısına göre tavan alır. Tek ziyaretçinin 99 istek üretmesi \"Aktif\" kalmasına yeter; gerçek kalabalık veya geçmişin çok üzerindeki sıçrama \"Yoğun\"/\"Yüksek Talep\" kazandırır. Histerezis ile durum zıplaması engellenir.")) ?></li>
 				<li><strong>1 - <?= tohtml(__tr("Low (Eco-Throttled):", "Düşük (Eco-Kısılmış):")) ?></strong> <?= tohtml(__tr("Test / staging sites. Capped strictly at 64M baseline RAM, 25% CPU quota.", "Test ve geliştirme siteleri. 64M RAM ve %25 CPU ile katı şekilde sınırlandırılır.")) ?></li>
 				<li><strong>2 - <?= tohtml(__tr("Normal (Standard):", "Normal (Standart):")) ?></strong> <?= tohtml(__tr("Standard production website. 256M baseline RAM, 50% CPU quota, 100 IO weight.", "Standart web siteleri. 256M normal RAM, %50 CPU ve 100 IO ağırlığı.")) ?></li>
 				<li><strong>3 - <?= tohtml(__tr("High Priority:", "Yüksek Öncelik:")) ?></strong> <?= tohtml(__tr("High-traffic stores & portals. 512M baseline RAM, 100% CPU quota (1 core), 300 IO weight.", "Yüksek trafikli portallar. 512M RAM, %100 CPU (1 tam çekirdek) ve 300 IO önceliği.")) ?></li>
@@ -139,6 +142,7 @@
 					<option value="all"><?= tohtml(__tr("All Sites", "Tüm Siteler")) ?> (<?= count($domains) ?>)</option>
 					<option value="idle"><?= tohtml(__tr("💤 Eco-Idle (Throttled)", "💤 Uykuda / Kısılan")) ?></option>
 					<option value="active"><?= tohtml(__tr("🔵 Active (Standard)", "🔵 Aktif")) ?></option>
+					<option value="busy"><?= tohtml(__tr("🟣 Busy (Steady Traffic)", "🟣 Yoğun")) ?></option>
 					<option value="boosted"><?= tohtml(__tr("🟢 High Demand (Boosted)", "🟢 Yüksek Talep")) ?></option>
 					<option value="vip"><?= tohtml(__tr("👑 VIP Isolated", "👑 VIP")) ?></option>
 				</select>
@@ -154,7 +158,7 @@
 			<div class="units-table-cell u-text-center" style="flex: 1.2;"><?= tohtml(__tr("Dynamic State", "Dinamik Durum")) ?></div>
 			<div class="units-table-cell" style="flex: 2;"><?= tohtml(__tr("RAM Allocation (High / Peak)", "RAM Tahsisi (High / Tavan)")) ?></div>
 			<div class="units-table-cell u-text-center" style="flex: 1;"><?= tohtml(__tr("CPU Quota", "CPU Kotası")) ?></div>
-			<div class="units-table-cell u-text-center" style="flex: 1;"><?= tohtml(__tr("Traffic (10m)", "Trafik (10dk)")) ?></div>
+			<div class="units-table-cell u-text-center" style="flex: 1.5;"><?= tohtml(__tr("Traffic & Demand (10m)", "Trafik & Talep (10dk)")) ?></div>
 			<div class="units-table-cell u-text-center" style="flex: 0.8;"><?= tohtml(__tr("Actions", "İşlem")) ?></div>
 		</div>
 
@@ -170,6 +174,8 @@
 				$mem_max = $ddata["MEMORY_MAX"] ?? "1G";
 				$cpu_q = $ddata["CPU_QUOTA"] ?? "100%";
 				$reqs = (int)($ddata["REQ_COUNT_10M"] ?? 0);
+				$users = (int)($ddata["ACTIVE_USERS_10M"] ?? 0);
+				$score = (int)($ddata["DEMAND_SCORE"] ?? 0);
 				$u_owner = $ddata["USER"] ?? $user_plain;
 			?>
 				<div class="units-table-row domain-governance-row" data-domain="<?= tohtml(strtolower($dname)) ?>" data-status="<?= tohtml($status) ?>">
@@ -213,6 +219,10 @@
 							<span class="badge badge-secondary" style="font-size:11px; padding:4px 8px; background:rgba(100,116,139,0.15); color:var(--color-text-muted); border:1px solid rgba(100,116,139,0.3);">
 								💤 <?= tohtml(__tr("Eco-Idle (64M)", "Uykuda (64M)")) ?>
 							</span>
+						<?php elseif ($status === "busy"): ?>
+							<span class="badge" style="font-size:11px; padding:4px 8px; background:rgba(168,85,247,0.15); color:#7c3aed; border:1px solid rgba(168,85,247,0.4);">
+								🟣 <?= tohtml(__tr("Busy", "Yoğun")) ?>
+							</span>
 						<?php elseif ($status === "boosted"): ?>
 							<span class="badge badge-warning" style="font-size:11px; padding:4px 8px; background:rgba(249,115,22,0.15); color:#ea580c; border:1px solid rgba(249,115,22,0.4);">
 								🚀 <?= tohtml(__tr("Boosted", "Yüksek Talep")) ?>
@@ -239,12 +249,11 @@
 						</div>
 						<div style="width:100%; height:6px; background:rgba(0,0,0,0.1); border-radius:3px; overflow:hidden;">
 							<?php
-								$width_pct = 25;
-								if ($status === "boosted" || $status === "vip") $width_pct = 85;
-								elseif ($status === "idle" || $status === "throttled") $width_pct = 15;
-								elseif ($prio >= 3) $width_pct = 60;
+								if ($status === "vip") $width_pct = 95;
+								elseif ($status === "throttled") $width_pct = 15;
+								else $width_pct = max(6, $score); // bar = live demand score
 							?>
-							<div style="width:<?= $width_pct ?>%; height:100%; background:<?= ($status === 'idle') ? 'var(--icon-color-green, #22c55e)' : (($status === 'boosted') ? 'var(--icon-color-orange, #f97316)' : 'var(--icon-color-blue, #38bdf8)') ?>; border-radius:3px;"></div>
+							<div style="width:<?= $width_pct ?>%; height:100%; background:<?= ($score >= 62 || $status === 'boosted') ? 'var(--icon-color-orange, #f97316)' : (($score >= 38 || $status === 'busy') ? '#a855f7' : 'var(--icon-color-blue, #38bdf8)') ?>; border-radius:3px;"></div>
 						</div>
 					</div>
 
@@ -255,11 +264,17 @@
 						</span>
 					</div>
 
-					<!-- Traffic (10m) -->
-					<div class="units-table-cell u-text-center" style="flex: 1;">
-						<span style="font-family:monospace; font-size:12px; font-weight:bold; <?= $reqs > 0 ? 'color:var(--icon-color-green, #22c55e);' : 'color:var(--color-text-muted);' ?>">
-							<?= $reqs ?> <?= tohtml(__tr("req", "istek")) ?>
-						</span>
+					<!-- Traffic & Demand Score (10m) -->
+					<div class="units-table-cell u-text-center" style="flex: 1.5;">
+						<div style="font-family:monospace; font-size:12px; font-weight:bold; <?= $reqs > 0 ? 'color:var(--color-text);' : 'color:var(--color-text-muted);' ?>">
+							👤 <?= $users ?> <span class="u-text-muted">·</span> <?= $reqs ?> <?= tohtml(__tr("req", "istek")) ?>
+						</div>
+						<div style="margin-top:5px; display:flex; align-items:center; gap:6px;" title="<?= tohtml(__tr("Demand score 0-100 from real visitors, dynamic load, baseline deviation and memory pressure", "Gerçek ziyaretçi, dinamik yük, geçmiş sapma ve bellek baskısından üretilen 0-100 talep skoru")) ?>">
+							<div style="flex:1; height:5px; background:rgba(0,0,0,0.1); border-radius:3px; overflow:hidden;">
+								<div style="width:<?= max(4, $score) ?>%; height:100%; background:<?= $score >= 62 ? 'var(--icon-color-orange, #f97316)' : ($score >= 38 ? '#a855f7' : 'var(--icon-color-green, #22c55e)') ?>; border-radius:3px;"></div>
+							</div>
+							<span style="font-size:10px; color:var(--color-text-muted); font-weight:bold; white-space:nowrap;"><?= $score ?>/100</span>
+						</div>
 					</div>
 
 					<!-- Actions -->

@@ -47,6 +47,7 @@ summary = {
     "TOTAL_DOMAINS": 0,
     "IDLE_COUNT": 0,
     "ACTIVE_COUNT": 0,
+    "BUSY_COUNT": 0,
     "BOOSTED_COUNT": 0,
     "THROTTLED_COUNT": 0,
     "VIP_COUNT": 0,
@@ -77,6 +78,8 @@ for sfile in state_files:
                     summary["IDLE_COUNT"] += 1
                     # Idle saves ~192MB compared to standard 256MB baseline
                     summary["ESTIMATED_SAVED_RAM_MB"] += 192
+                elif status == "busy":
+                    summary["BUSY_COUNT"] += 1
                 elif status == "boosted":
                     summary["BOOSTED_COUNT"] += 1
                 elif status == "throttled":
