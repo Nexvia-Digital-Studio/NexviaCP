@@ -139,19 +139,8 @@
     ?>
 
 				<!-- Menu -->
-				<nav x-data="{ open: false }" class="top-bar-menu">
-
-					<button
-						type="button"
-						class="top-bar-menu-link u-hide-tablet"
-						x-on:click="open = !open">
-						<i class="fas fa-bars"></i>
-						<span class="u-hidden" x-text="open ? '<?= _("Close menu") ?>' : '<?= _("Open menu") ?>'">
-							<?= _("Open menu") ?>
-						</span>
-					</button>
-
-					<div x-cloak x-show="open" x-on:click.outside="open = false" class="top-bar-menu-panel">
+				<nav class="top-bar-menu">
+					<div class="top-bar-menu-panel">
 						<ul class="top-bar-menu-list">
 
 							<!-- File Manager -->
@@ -510,36 +499,38 @@
 			color: #fff !important;
 		}
 
-		/* Expanded & Breathable Main Menu */
+		/* Clean, Simple & Flat Main Menu */
 		.main-menu {
-			background: var(--color-background-menu, #141824) !important;
-			border-top: 1px solid rgba(255, 255, 255, 0.06) !important;
+			background: var(--color-background-menu, #1a1e2a) !important;
+			border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
 			border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
-			padding: 12px 0 !important;
+			padding: 0 !important;
 			width: 100% !important;
 		}
 		.main-menu .container {
 			max-width: 100% !important;
 			display: flex !important;
 			justify-content: center !important;
-			padding: 0 20px !important;
+			padding: 0 15px !important;
+		}
+		.main-menu-toggle {
+			display: none !important;
 		}
 		.main-menu-list {
 			display: flex !important;
 			justify-content: center !important;
 			align-items: stretch !important;
-			flex-wrap: wrap !important;
 			margin: 0 auto !important;
 			padding: 0 !important;
 			width: 100% !important;
-			max-width: 1750px !important;
-			gap: 8px 10px !important;
+			max-width: 1700px !important;
+			gap: 0 !important;
 			list-style: none !important;
 		}
 		.main-menu-item {
-			flex: 1 1 115px !important;
-			min-width: 105px !important;
-			max-width: 160px !important;
+			flex: 1 1 auto !important;
+			min-width: 85px !important;
+			max-width: 155px !important;
 			text-align: center !important;
 			display: flex !important;
 		}
@@ -548,50 +539,51 @@
 			flex-direction: column !important;
 			align-items: center !important;
 			justify-content: center !important;
-			padding: 10px 12px !important;
+			padding: 10px 10px !important;
 			width: 100% !important;
 			height: 100% !important;
 			text-align: center !important;
-			border-radius: 8px !important;
-			background: rgba(255, 255, 255, 0.025) !important;
-			border: 1px solid rgba(255, 255, 255, 0.06) !important;
-			transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
+			border-radius: 0 !important;
+			background: transparent !important;
+			border: none !important;
+			border-bottom: 3px solid transparent !important;
+			transition: all 0.15s ease-in-out !important;
 			text-decoration: none !important;
-			box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15) !important;
+			box-shadow: none !important;
 		}
 		.main-menu-item-link:hover {
-			background: rgba(255, 255, 255, 0.07) !important;
-			border-color: rgba(255, 255, 255, 0.16) !important;
-			transform: translateY(-2px) !important;
-			box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3) !important;
+			background: rgba(255, 255, 255, 0.04) !important;
+			border-bottom-color: rgba(255, 255, 255, 0.25) !important;
+			transform: none !important;
+			box-shadow: none !important;
 		}
 		.main-menu-item-link.active {
-			background: rgba(255, 59, 119, 0.12) !important;
-			border-color: rgba(255, 59, 119, 0.45) !important;
-			box-shadow: 0 0 16px rgba(255, 59, 119, 0.18) !important;
+			background: rgba(255, 59, 119, 0.07) !important;
+			border-bottom-color: #ff3b77 !important;
+			box-shadow: none !important;
 		}
 		.main-menu-item-link.active .main-menu-item-label {
 			color: #ff3b77 !important;
 		}
 		.main-menu-item-label {
 			white-space: nowrap !important;
-			font-size: 12.5px !important;
+			font-size: 11.5px !important;
 			font-weight: 700 !important;
 			letter-spacing: 0.4px !important;
 			display: flex !important;
 			align-items: center !important;
 			justify-content: center !important;
 			gap: 6px !important;
-			margin: 0 0 5px 0 !important;
-			color: #f1f5f9 !important;
+			margin: 0 0 3px 0 !important;
+			color: #e2e8f0 !important;
 		}
 		.main-menu-item-label i, .main-menu-item-label .fas {
-			font-size: 13px !important;
-			opacity: 0.9 !important;
+			font-size: 12px !important;
+			opacity: 0.85 !important;
 		}
 		.main-menu-stats {
-			font-size: 11px !important;
-			line-height: 1.4 !important;
+			font-size: 10.5px !important;
+			line-height: 1.35 !important;
 			text-align: center !important;
 			margin: 0 !important;
 			padding: 0 !important;
@@ -606,18 +598,9 @@
 		}
 	</style>
 
-	<nav x-data="{ open: false }" class="main-menu">
+	<nav class="main-menu">
 		<div class="container">
-			<button x-on:click="open = !open" type="button" class="main-menu-toggle">
-				<i class="fas fa-bars"></i>
-				<span
-					x-text="open ? '<?= _("Collapse main menu") ?>' : '<?= _("Expand main menu") ?>'"
-					class="main-menu-toggle-label"
-				>
-					<?= _("Expand main menu") ?>
-				</span>
-			</button>
-			<ul x-cloak x-show="open" class="main-menu-list">
+			<ul class="main-menu-list">
 
 				<!-- 1. Users tab -->
 				<?php if ($_SESSION["userContext"] == "admin" && $_SESSION["look"] === "") { ?>
