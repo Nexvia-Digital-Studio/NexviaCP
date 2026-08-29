@@ -16,6 +16,7 @@ domain=$2
 repo_input=$3
 branch=${4:-main}
 app_mode=${5:-auto}
+env_file=${6:-}
 
 # Includes
 # shellcheck source=/etc/hestiacp/hestia.conf
@@ -29,7 +30,7 @@ source_conf "$HESTIA/conf/hestia.conf"
 #                    Verifications                         #
 #----------------------------------------------------------#
 
-check_args '3' "$#" 'USER DOMAIN REPO [BRANCH] [APP_MODE]'
+check_args '3' "$#" 'USER DOMAIN REPO [BRANCH] [APP_MODE] [ENV_FILE]'
 is_format_valid 'user' 'domain'
 is_object_valid 'user' 'USER' "$user"
 
@@ -42,7 +43,10 @@ fi
 # Build full git repository URL
 repo_url="$repo_input"
 if [[ ! "$repo_input" =~ ^https?:// ]] && [[ ! "$repo_input" =~ ^git@ ]]; then
-	if [ -n "$GITHUB_ORG" ]; then
+	if [ -d "$repo_input" ]; then
+		# local repository directory (tests / pre-staged code)
+		repo_slug=$(basename "$repo_input" | sed -e 's#\.git$##')
+	elif [ -n "$GITHUB_ORG" ]; then
 		repo_url="https://github.com/${GITHUB_ORG}/${repo_input}.git"
 	else
 		check_result "$E_INVALID" "GitHub token/org not configured. Provide full git URL."
@@ -52,9 +56,12 @@ fi
 # Human-readable repo slug used for DB naming: bare repo names stay as-is,
 # full URLs (any GitHub repo, not just our org) reduce to owner_repo —
 # otherwise every URL deploy would collide on the same "https_github..." db.
-repo_slug="$repo_input"
-if [[ "$repo_input" =~ ^https?:// ]] || [[ "$repo_input" =~ ^git@ ]]; then
-	repo_slug=$(echo "$repo_input" | sed -e 's#\.git/*$##' -e 's#^\(https\{0,1\}://[^/]*/\|git@[^:]*:\)##' -e 's#/#_#g')
+# (A local-dir source may have set repo_slug already.)
+if [ -z "$repo_slug" ]; then
+	repo_slug="$repo_input"
+	if [[ "$repo_input" =~ ^https?:// ]] || [[ "$repo_input" =~ ^git@ ]]; then
+		repo_slug=$(echo "$repo_input" | sed -e 's#\.git/*$##' -e 's#^\(https\{0,1\}://[^/]*/\|git@[^:]*:\)##' -e 's#/#_#g')
+	fi
 fi
 
 #----------------------------------------------------------#
@@ -92,11 +99,18 @@ if [ -n "$GITHUB_TOKEN" ] && [[ "$repo_url" =~ ^https://github.com/ ]]; then
 		fi
 	fi
 else
-	echo "[*] Fetching branch '$branch' from $repo_input..."
-	if ! git clone --depth 1 -b "$branch" "$repo_url" "$tmp_clone" 2>/dev/null; then
-		# Fallback to default branch
-		if ! git clone --depth 1 "$repo_url" "$tmp_clone" 2>/dev/null; then
-			check_result "$E_CONNECT" "Git clone failed. Please check repository name and access."
+	if [ -d "$repo_url" ]; then
+		# local dir: silence "dubious ownership" (fixture repos owned by other users)
+		git -c safe.directory='*' clone --depth 1 -b "$branch" "$repo_url" "$tmp_clone" 2>/dev/null \
+			|| git -c safe.directory='*' clone --depth 1 "$repo_url" "$tmp_clone" 2>/dev/null \
+			|| check_result "$E_CONNECT" "Git clone failed. Check repository path/branch."
+	else
+		echo "[*] Fetching branch '$branch' from $repo_input..."
+		if ! git clone --depth 1 -b "$branch" "$repo_url" "$tmp_clone" 2>/dev/null; then
+			# Fallback to default branch
+			if ! git clone --depth 1 "$repo_url" "$tmp_clone" 2>/dev/null; then
+				check_result "$E_CONNECT" "Git clone failed. Please check repository name and access."
+			fi
 		fi
 	fi
 fi
@@ -158,6 +172,31 @@ else
 	touch "$docroot/.env"
 fi
 
+# Merge wizard-supplied environment values (KEY=VALUE lines, created by the
+# panel from the analyze-repo env template). Only well-formed keys are
+# accepted; DB credentials injected below always win, so the wizard cannot
+# corrupt auto-provisioned values.
+if [ -n "$env_file" ] && [ -f "$env_file" ]; then
+	echo "[*] Applying setup wizard .env values..."
+	merge_count=0
+	while IFS='=' read -r ek ev; do
+		case "$ek" in
+			'' | *[!A-Za-z0-9_]* | DB_HOST | DB_PORT | DB_NAME | DB_DATABASE | DB_USER | DB_USERNAME | DB_PASS | DB_PASSWORD)
+				continue
+				;;
+		esac
+		[ -z "$ek" ] && continue
+		if grep -q "^${ek}=" "$docroot/.env" 2>/dev/null; then
+			sed -i "s|^${ek}=.*|${ek}=${ev}|" "$docroot/.env"
+		else
+			echo "${ek}=${ev}" >> "$docroot/.env"
+		fi
+		merge_count=$((merge_count + 1))
+	done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=.*$' "$env_file" | head -200)
+	echo "[+] $merge_count environment value(s) applied."
+	rm -f "$env_file"
+fi
+
 # NOTE: global vault secrets are deliberately NOT injected into deployed
 # application environments — deployed code runs as the hosting user and
 # must never see the admin's global API keys. Use v-set-web-domain-env to
@@ -191,7 +230,7 @@ if [ -n "$sql_file" ]; then
 	mysql_cnf=$(mktemp /tmp/nexvia_repo_sql.XXXXXX)
 	chmod 600 "$mysql_cnf"
 	printf '[client]\nuser=%s\npassword=%s\n' "$full_db_name" "$db_pass" > "$mysql_cnf"
-	if mariadb --defaults-extra-file="$mysql_cnf" "$full_db_name" < "$sql_file" 2>/dev/null; then
+	if mariadb --defaults-file="$mysql_cnf" "$full_db_name" < "$sql_file" 2>/dev/null; then
 		echo "[+] Schema imported as dedicated database user."
 	else
 		echo "[!] Schema import failed (continuing)"
@@ -209,11 +248,40 @@ if [ -n "$sql_file" ]; then
 		fi
 	done
 
-	# Run any seed scripts under user privileges
-	if [ -f "$docroot/build/seed_provinces.php" ]; then
-		echo "[*] Running project seeders..."
-		su - "$user" -s /bin/bash -c "cd '$docroot/build' && php seed_provinces.php >/dev/null 2>&1 && php seed_districts.php >/dev/null 2>&1" || true
-	fi
+	# Import seed data (idempotent SQL), then generalized PHP seeders.
+	import_sql() {
+		local f="$1"
+		echo "[*] Importing seed data: ${f#"$docroot"/}"
+		mysql_cnf=$(mktemp /tmp/nexvia_repo_sql.XXXXXX)
+		chmod 600 "$mysql_cnf"
+		printf '[client]\nuser=%s\npassword=%s\n' "$full_db_name" "$db_pass" > "$mysql_cnf"
+		if mariadb --defaults-file="$mysql_cnf" "$full_db_name" < "$f" 2>/dev/null; then
+			echo "[+] Seed imported: ${f#"$docroot"/}"
+		else
+			echo "[!] Seed import failed: ${f#"$docroot"/} (continuing)"
+		fi
+		shred -u "$mysql_cnf" 2>/dev/null || rm -f "$mysql_cnf"
+	}
+	for seed in "$docroot/seed.sql" "$docroot/seeds.sql" "$docroot/database/seed.sql" \
+		"$docroot/database/seeds.sql" "$docroot/build/seed.sql" "$docroot/db/seed.sql" \
+		"$docroot/db/seeds.sql" "$docroot/data/seed.sql"; do
+		[ -f "$seed" ] && import_sql "$seed"
+	done
+	for seed_dir in "$docroot/seeds" "$docroot/database/seeds" "$docroot/build/seeds" "$docroot/db/seeds"; do
+		for seed in "$seed_dir"/*.sql; do
+			[ -f "$seed" ] && import_sql "$seed"
+		done
+	done
+	# PHP seeders under build/ run as the hosting user (seed_provinces.php etc.)
+	for seeder in "$docroot"/build/seed*.php; do
+		[ -f "$seeder" ] || continue
+		echo "[*] Running seeder: ${seeder#"$docroot"/}"
+		su - "$user" -s /bin/bash -c "cd '$docroot/build' && php '$(basename "$seeder")'" >/dev/null 2>&1 \
+			|| echo "[!] Seeder failed: $(basename "$seeder") (continuing)"
+	done
+elif ls "$docroot"/seed.sql "$docroot"/seeds.sql "$docroot"/database/seed.sql "$docroot"/build/seed.sql &>/dev/null; then
+	echo "[i] Seed data found but no schema.sql — database not provisioned, seeds skipped."
+	echo "    (Add schema.sql so the panel can auto-create the database, or create the DB manually and re-deploy.)"
 fi
 
 chmod 600 "$docroot/.env" 2>/dev/null || true

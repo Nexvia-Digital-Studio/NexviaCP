@@ -33,6 +33,33 @@ olmayan bir runtime'a muhtaçsa Kanal 2.
 Her iki kanalda da ortak olan bir şey: **repo GitHub'da olmalı** (private olabilir) ve
 **deploy edilebilir dal** (branch) main/master gibi net olmalı.
 
+### 🪄 Akıllı Kurulum Sihirbazı (otomatik analiz)
+
+Paneldeki "GitHub'dan Site Kur" modalında **"Repoyu Analiz Et"** butonu, repoyu geçici
+klonlayıp tarar (`v-analyze-repo`) ve size kurulumdan önce şunları gösterir:
+
+- **Platform tespiti** — PHP/Laravel/React/Node/.NET/Docker Compose + güven düzeyi
+- **Bileşen envanteri** — kaç servis var, hangisi web/API/DB, giriş noktaları, portlar,
+  compose servislerinde healthcheck durumu (monorepo'lar için alt dizin taraması dahil)
+- **İletişim haritası** — servisler birbirine nasıl bağlanıyor (`depends_on`, servis adı
+  DNS'leri, `.env.example` içindeki `http://api:8080` gibi işaretler)
+- **`.env` sihirbazı** — repodaki `.env.example` parse edilir; zorunlu alanlar (\*)
+  işaretli inputlara dönüşür, secret/url/port türleri uygun input tipiyle gelir, DB
+  değişkenleri "otomatik doldurulacak" olarak gri gösterilir. Doldurduğunuz değerler
+  deploy'da gerçek `.env`'e yazılır (DB kimlik bilgileri her zaman otomatiğinkidir).
+- **Veritabanı + seed planı** — `schema.sql` görürse DB otomatik açılır; `seed.sql`,
+  `seeds/*.sql`, `build/seed*.php` ve Laravel `db:seed` otomatik uygulanır
+- **Risk uyarıları** — repodaki gerçek `.env`, commit'lenmiş `node_modules/vendor/dist`,
+  kökteki SQL dökümleri, >20 MB dosyalar, compose'da `latest` etiketi / privileged /
+  docker.sock gibi tehlikeler; her uyarı nedeniyle birlikte açıklanır
+
+Analiz **compose yığını** tespit ederse form otomatik Docker kanalına döner (uygulama adı
+sorulur, `v-add-docker-app` ile kurulur, sihirbaz değerleri uygulamanın `.env`'ine yazılır,
+sonunda detay sayfasına yönlendirilirsiniz). Analiz başarısız olsa da manuel kurulum her
+zaman mümkündür — sihirbaz sadece yol gösterir.
+
+CLI'dan aynı analiz: `v-analyze-repo https://github.com/kullanici/proje.git [DAL]`
+
 ---
 
 ## 📐 1. Tüm Projeler İçin Ortak Kurallar

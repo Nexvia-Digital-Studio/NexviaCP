@@ -1,0 +1,90 @@
+#!/bin/bash
+# info: analyze a git repository structure and emit a JSON deploy plan
+# options: REPO [BRANCH]
+# example: v-analyze-repo https://github.com/user/project.git
+# example: v-analyze-repo user/project dev
+#
+# Detects platform (PHP/Laravel/React/Node/.NET/Docker Compose), components
+# (web/api/db), inter-service communication, .env.example variables for the
+# setup wizard, database/seeds provisioning and repo hygiene risks.
+# REPO may also be a local directory (used by tests).
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+repo_input=$1
+branch=${2:-main}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+check_args '1' "$#" 'REPO [BRANCH]'
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+scanner="$HESTIA/lib/nexvia-repo-scan.py"
+if [ ! -f "$scanner" ]; then
+	check_result "$E_NOTEXIST" "scanner missing: $scanner"
+fi
+
+# Local directory mode (tests / pre-cloned repos)
+if [ -d "$repo_input" ]; then
+	python3 "$scanner" "$repo_input" "$branch"
+	exit $?
+fi
+
+# Build full git repository URL (same convention as v-deploy-github-repo)
+repo_url="$repo_input"
+if [[ ! "$repo_input" =~ ^https?:// ]] && [[ ! "$repo_input" =~ ^git@ ]]; then
+	if [ -n "$GITHUB_ORG" ]; then
+		repo_url="https://github.com/${GITHUB_ORG}/${repo_input}.git"
+	else
+		check_result "$E_INVALID" "GitHub token/org not configured. Provide full git URL."
+	fi
+fi
+
+# Secure temporary directory with auto-cleanup
+tmp_dir=$(mktemp -d -t nexvia_analyze_XXXXXX)
+trap 'rm -rf "$tmp_dir"' EXIT
+clone_dir="$tmp_dir/clone"
+
+# Token-authenticated clone without embedding the PAT in the URL
+if [ -n "$GITHUB_TOKEN" ] && [[ "$repo_url" =~ ^https://github.com/ ]]; then
+	askpass="$tmp_dir/askpass.sh"
+	printf '#!/bin/sh\nprintf "%%s\\n" "$NEXVIA_GIT_TOKEN"\n' > "$askpass"
+	chmod 700 "$askpass"
+	if ! NEXVIA_GIT_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
+		git -c credential.helper= clone --depth 1 -b "$branch" "$repo_url" "$clone_dir" 2>/dev/null; then
+		if ! NEXVIA_GIT_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
+			git -c credential.helper= clone --depth 1 "$repo_url" "$clone_dir" 2>/dev/null; then
+			check_result "$E_CONNECT" "Git clone failed. Check repository URL/branch and token permissions."
+		fi
+	fi
+else
+	if ! git clone --depth 1 -b "$branch" "$repo_url" "$clone_dir" 2>/dev/null; then
+		if ! git clone --depth 1 "$repo_url" "$clone_dir" 2>/dev/null; then
+			check_result "$E_CONNECT" "Git clone failed. Check repository URL and access."
+		fi
+	fi
+fi
+
+# Fall back to the repository's default branch name when -b clone failed
+detected_branch=$(git -C "$clone_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "$branch")
+
+python3 "$scanner" "$clone_dir" "$detected_branch"
+exit $?

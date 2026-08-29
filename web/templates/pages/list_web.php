@@ -414,7 +414,7 @@
 			<?= tohtml(__tr("Select a repository from your GitHub organization, or pick the last option to deploy any public open-source GitHub repository by pasting its link (PHP, HTML, React, Node.js, .NET).", "GitHub organizasyonunuzdan bir site seçin ya da son seçenekle istediğiniz açık kaynak GitHub reposunun linkini girin (PHP, HTML, React, Node.js, .NET). Otomatik olarak kurulup yayına alınacaktır.")) ?>
 		</p>
 
-		<form method="post" action="/list/web/" onsubmit="const b = this.querySelector('button[type=submit]'); b.disabled=true; b.innerHTML='<i class=\'fas fa-spinner fa-spin\'></i> ' + ('<?= (($_SESSION['language'] ?? '') === 'tr') ? "Kuruluyor..." : "Deploying..." ?>');">
+		<form method="post" action="/list/web/" onsubmit="if(!wzPrepare(this)) return false; const b = this.querySelector('button[type=submit]'); b.disabled=true; b.innerHTML='<i class=\'fas fa-spinner fa-spin\'></i> ' + ('<?= (($_SESSION['language'] ?? '') === 'tr') ? "Kuruluyor..." : "Deploying..." ?>');">
 			<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
 			<input type="hidden" name="deploy_repo" value="1">
 
@@ -443,28 +443,57 @@
 				</small>
 			</div>
 
-			<div class="u-mb15">
-				<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("Domain Name", "Alan Adı (Domain)")) ?></label>
-				<input type="text" name="deploy_domain" placeholder="neredeyasanir.localhost" required class="form-control" style="width:100%;">
+			<div class="u-mb15" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; align-items:end;">
+				<div>
+					<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("Branch (optional)", "Dal (opsiyonel)")) ?></label>
+					<input type="text" name="deploy_branch" id="deploy-branch" placeholder="main" class="form-control" style="width:100%;">
+				</div>
+				<div>
+					<button type="button" class="button button-secondary" id="wz-analyze-btn" onclick="wzAnalyze()" style="width:100%;">
+						<i class="fas fa-magic"></i> <?= tohtml(__tr("Analyze Repository", "Repoyu Analiz Et")) ?>
+					</button>
+				</div>
+			</div>
+
+			<div id="wz-result" class="u-mb15" style="display:none;"></div>
+			<div id="wz-env-form" class="u-mb15" style="display:none;"></div>
+
+			<input type="hidden" name="deploy_channel" id="deploy-channel" value="git">
+			<input type="hidden" name="deploy_compose" id="deploy-compose" value="docker-compose.yml">
+			<input type="hidden" name="deploy_env" id="deploy-env" value="">
+
+			<div class="u-mb15" id="wz-docker-name" style="display:none;">
+				<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("Docker App Name", "Docker Uygulama Adı")) ?></label>
+				<input type="text" name="deploy_app_name" id="deploy-app-name" class="form-control" placeholder="proje-adi" style="width:100%;">
 				<small class="u-text-muted" style="display:block; margin-top:4px;">
-					💡 <?= tohtml(__tr("For local testing, you can use domain.localhost (e.g. site.localhost:9080).", "Yerel test için alanadı.localhost (örn: neredeyasanir.localhost) yazabilirsiniz. Tarayıcınızda doğrudan http://neredeyasanir.localhost:9080 üzerinden açılır!")) ?>
+					🐳 <?= tohtml(__tr("This project is a Docker Compose stack. It will be deployed as a multi-service Docker app; you will map domains to its services right after install.", "Bu proje bir Docker Compose yığını. Çoklu servisli Docker uygulaması olarak kurulacak; kurulumdan hemen sonra servislerine domain eşleyeceksiniz.")) ?>
 				</small>
 			</div>
 
-			<div class="u-mb15" style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
-				<div>
-					<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("User", "Kullanıcı")) ?></label>
-					<input type="text" name="deploy_user" value="<?= tohtml($user_plain) ?>" class="form-control" style="width:100%;" readonly>
+			<div id="wz-git-fields">
+				<div class="u-mb15">
+					<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("Domain Name", "Alan Adı (Domain)")) ?></label>
+					<input type="text" name="deploy_domain" id="deploy-domain" placeholder="neredeyasanir.localhost" required class="form-control" style="width:100%;">
+					<small class="u-text-muted" style="display:block; margin-top:4px;">
+						💡 <?= tohtml(__tr("For local testing, you can use domain.localhost (e.g. site.localhost:9080).", "Yerel test için alanadı.localhost (örn: neredeyasanir.localhost) yazabilirsiniz. Tarayıcınızda doğrudan http://neredeyasanir.localhost:9080 üzerinden açılır!")) ?>
+					</small>
 				</div>
-				<div>
-					<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("App Mode", "Uygulama Modu")) ?></label>
-					<select name="deploy_mode" class="form-select" style="width:100%;">
-						<option value="auto"><?= tohtml(__tr("⚡ Auto-Detect (Smart)", "⚡ Otomatik Algıla (Akıllı)")) ?></option>
-						<option value="php"><?= tohtml(__tr("🐘 PHP / HTML / Laravel", "🐘 PHP / HTML / Laravel")) ?></option>
-						<option value="react"><?= tohtml(__tr("⚛️ React / Vite (SPA Dist)", "⚛️ React / Vite (SPA Dist)")) ?></option>
-						<option value="node"><?= tohtml(__tr("🟢 Node.js / Next.js", "🟢 Node.js / Next.js")) ?></option>
-						<option value="dotnet"><?= tohtml(__tr("🟣 .NET Core Web API / MVC", "🟣 .NET Core Web API / MVC")) ?></option>
-					</select>
+
+				<div class="u-mb15" style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
+					<div>
+						<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("User", "Kullanıcı")) ?></label>
+						<input type="text" name="deploy_user" value="<?= tohtml($user_plain) ?>" class="form-control" style="width:100%;" readonly>
+					</div>
+					<div>
+						<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("App Mode", "Uygulama Modu")) ?></label>
+						<select name="deploy_mode" id="deploy-mode" class="form-select" style="width:100%;">
+							<option value="auto"><?= tohtml(__tr("⚡ Auto-Detect (Smart)", "⚡ Otomatik Algıla (Akıllı)")) ?></option>
+							<option value="php"><?= tohtml(__tr("🐘 PHP / HTML / Laravel", "🐘 PHP / HTML / Laravel")) ?></option>
+							<option value="react"><?= tohtml(__tr("⚛️ React / Vite (SPA Dist)", "⚛️ React / Vite (SPA Dist)")) ?></option>
+							<option value="node"><?= tohtml(__tr("🟢 Node.js / Next.js", "🟢 Node.js / Next.js")) ?></option>
+							<option value="dotnet"><?= tohtml(__tr("🟣 .NET Core Web API / MVC", "🟣 .NET Core Web API / MVC")) ?></option>
+						</select>
+					</div>
 				</div>
 			</div>
 
@@ -499,5 +528,159 @@ document.addEventListener('keydown', function(e) {
 	sel.addEventListener('change', toggleCustomRepoUrl);
 	toggleCustomRepoUrl();
 })();
+
+/* ---- smart wizard: analyze repo, render plan + .env form ---- */
+let wzAnalysis = null;
+function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+function wzCurrentRepo() {
+	const sel = document.getElementById('deploy-repo-select');
+	if (!sel) return '';
+	return sel.value === '__custom__'
+		? document.getElementById('deploy-repo-url').value.trim()
+		: sel.value;
+}
+function wzAnalyze() {
+	const repo = wzCurrentRepo();
+	const branch = (document.getElementById('deploy-branch').value || '').trim();
+	const result = document.getElementById('wz-result');
+	const btn = document.getElementById('wz-analyze-btn');
+	if (!repo || repo === '') {
+		result.style.display = '';
+		result.innerHTML = '<div class="u-text-muted">⚠️ <?= tohtml(__tr("Select or paste a repository first.", "Önce bir repo seçin ya da linkini girin.")) ?></div>';
+		return;
+	}
+	btn.disabled = true;
+	btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <?= tohtml(__tr("Analyzing…", "Analiz ediliyor…")) ?>';
+	result.style.display = '';
+	result.innerHTML = '<div class="u-text-muted"><i class="fas fa-spinner fa-spin"></i> <?= tohtml(__tr("Cloning & scanning repository…", "Repo klonlanıp taranıyor…")) ?></div>';
+	fetch('/list/web/?ajax=analyze_repo&token=' + encodeURIComponent(document.querySelector('#github-web-modal input[name=token]').value) +
+		'&repo=' + encodeURIComponent(repo) + '&branch=' + encodeURIComponent(branch || 'main'))
+		.then(r => r.json())
+		.then(d => {
+			btn.disabled = false;
+			btn.innerHTML = '<i class="fas fa-magic"></i> <?= tohtml(__tr("Analyze Repository", "Repoyu Analiz Et")) ?>';
+			if (!d || d.ok !== true) {
+				wzAnalysis = null;
+				result.innerHTML = '<div class="u-text-muted">⚠️ <?= tohtml(__tr("Analysis failed. You can still deploy without it.", "Analiz başarısız. Yine de kuruluma devam edebilirsiniz.")) ?></div>';
+				return;
+			}
+			wzAnalysis = d;
+			wzRender(d);
+		})
+		.catch(() => {
+			btn.disabled = false;
+			btn.innerHTML = '<i class="fas fa-magic"></i> <?= tohtml(__tr("Analyze Repository", "Repoyu Analiz Et")) ?>';
+			result.innerHTML = '<div class="u-text-muted">⚠️ <?= tohtml(__tr("Analysis failed. You can still deploy without it.", "Analiz başarısız. Yine de dağıtıma devam edebilirsiniz.")) ?></div>';
+		});
+}
+function wzRender(d) {
+	const result = document.getElementById('wz-result');
+	const plat = d.platform || {};
+	const isDocker = plat.channel === 'docker';
+	let h = '<div style="border:1px solid #d8dee9; border-radius:8px; padding:12px 14px; background:rgba(0,0,0,0.02);">';
+	h += '<div style="font-size:1.05rem; font-weight:600; margin-bottom:6px;">' + esc(plat.icon || '📦') + ' ' + esc(plat.name) +
+		' <span class="u-text-muted" style="font-weight:400; font-size:0.85rem;">· ' + esc(d.summary_tr || '') + '</span></div>';
+	/* components */
+	(d.components || []).forEach(c => {
+		const ports = (c.ports || []).map(p => ':' + p.published).join('');
+		h += '<div style="margin:3px 0;">' + esc(c.icon || '•') + ' <b>' + esc(c.name) + '</b>' +
+			' <span class="u-text-muted">(' + esc(c.type) + (c.tech ? ' · ' + esc(String(c.tech).split(' / ')[0]) : '') + (c.entry && c.entry !== 'index.php' ? ' · giriş: ' + esc(c.entry) : '') + (ports ? ' · port ' + esc(ports) : '') + ')</span>' +
+			(c.healthcheck ? ' <span title="healthcheck var" style="color:#43a047;">✔</span>' : '') + '</div>';
+	});
+	/* communication map */
+	if ((d.communication || []).length) {
+		h += '<div style="margin-top:8px; font-size:0.88rem;"><b>🔗 <?= tohtml(__tr("Communication", "İletişim")) ?></b>';
+		d.communication.slice(0, 12).forEach(e => {
+			h += '<div class="u-text-muted">' + esc(e.from) + ' → <b>' + esc(e.to) + '</b> <span style="opacity:.75;">(' + esc(e.via) + ')</span></div>';
+		});
+		h += '</div>';
+	}
+	/* database + seeds */
+	if (d.database && d.database.needed) {
+		h += '<div style="margin-top:8px;">🗄️ <b><?= tohtml(__tr("Database", "Veritabanı")) ?>:</b> ' + esc(d.database.engine) +
+			' — ' + esc(d.database.provision) + (d.database.auto ? ' <span style="color:#43a047;">(<?= tohtml(__tr("automatic", "otomatik")) ?>)</span>' : '') + '</div>';
+	}
+	if ((d.seeds || []).length) {
+		h += '<div>🌱 <b><?= tohtml(__tr("Seed data", "Seed verisi")) ?>:</b> ' + d.seeds.map(s => esc(s)).join(', ') + '</div>';
+	}
+	/* warnings */
+	(d.warnings || []).slice(0, 10).forEach(w => {
+		const colors = { error: ['#ffebee', '#c62828'], warn: ['#fff8e1', '#ef6c00'], info: ['#eceff1', '#546e7a'] };
+		const c = colors[w.level] || colors.info;
+		h += '<div style="margin-top:6px; padding:6px 10px; border-radius:6px; background:' + c[0] + '; color:' + c[1] + '; font-size:0.85rem;">' +
+			(w.level === 'error' ? '⛔' : w.level === 'warn' ? '⚠️' : 'ℹ️') + ' <b>' + esc(w.message) + '</b>' +
+			(w.hint ? '<br><span style="opacity:.85;">' + esc(w.hint) + '</span>' : '') + '</div>';
+	});
+	h += '</div>';
+	result.innerHTML = h;
+	/* channel switch */
+	document.getElementById('deploy-channel').value = isDocker ? 'docker' : 'git';
+	document.getElementById('wz-git-fields').style.display = isDocker ? 'none' : '';
+	document.getElementById('wz-docker-name').style.display = isDocker ? '' : 'none';
+	document.getElementById('deploy-domain').required = !isDocker;
+	if (isDocker && plat.compose) document.getElementById('deploy-compose').value = plat.compose;
+	if (isDocker && !document.getElementById('deploy-app-name').value) {
+		const m = wzCurrentRepo().match(/([A-Za-z0-9_.-]+)(?:\.git)?\/?$/);
+		if (m) document.getElementById('deploy-app-name').value = m[1].toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+	}
+	if (!isDocker && plat.mode && plat.mode !== 'python-unsupported') {
+		document.getElementById('deploy-mode').value = plat.mode;
+	}
+	wzRenderEnv(d.env_template || {});
+}
+function wzRenderEnv(tpl) {
+	const box = document.getElementById('wz-env-form');
+	const vars = (tpl.vars || []).filter(v => !v.auto);
+	const autos = (tpl.vars || []).filter(v => v.auto);
+	if (!vars.length && !autos.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+	let h = '';
+	if (tpl.file) {
+		h += '<label class="form-label u-mb5 u-text-bold">🔑 <?= tohtml(__tr("Environment Variables", "Ortam Değişkenleri")) ?> <span class="u-text-muted" style="font-weight:400;">(' + esc(tpl.file) + ')</span></label>' +
+			'<small class="u-text-muted" style="display:block; margin-bottom:8px;"><?= tohtml(__tr("The repository ships an .env template — fill in the values below and they will be written to the real .env on deploy.", "Repoda .env şablonu bulundu — aşağıdaki değerleri doldurun, deploy sırasında gerçek .env'e yazılacak.")) ?></small>';
+	}
+	let shown = 0;
+	vars.forEach(v => {
+		if (v.required) shown++;
+		h += wzEnvInput(v, v.required);
+	});
+	const optional = vars.filter(v => !v.required);
+	if (optional.length) {
+		h += '<details style="margin-top:8px;"><summary class="u-text-muted" style="cursor:pointer;"><?= tohtml(__tr("Optional variables", "Opsiyonel değişkenler")) ?> (' + optional.length + ')</summary>' +
+			optional.map(v => wzEnvInput(v, false)).join('') + '</details>';
+	}
+	autos.forEach(v => {
+		h += '<div class="u-text-muted" style="font-size:0.85rem; margin-top:4px;">✅ <b>' + esc(v.key) + '</b> — ' + esc(v.auto) + '</div>';
+	});
+	box.innerHTML = h;
+	box.style.display = '';
+	const firstReq = box.querySelector('input[data-required="1"]');
+	if (firstReq && !firstReq.value) firstReq.focus();
+}
+function wzEnvInput(v, req) {
+	const type = v.kind === 'secret' || v.kind === 'password' ? 'password' : 'text';
+	return '<div style="margin-bottom:8px;">' +
+		'<label style="font-size:0.85rem;">' + (req ? '<b>' : '') + esc(v.key) + (req ? ' <span style="color:#c62828;">*</span></b>' : '') +
+		(v.kind === 'secret' ? ' 🔑' : '') + (v.description ? ' <span class="u-text-muted">— ' + esc(v.description) + '</span>' : '') + '</label>' +
+		'<input type="' + type + '" data-envkey="' + esc(v.key) + '" data-required="' + (req ? '1' : '0') + '" class="form-control" style="width:100%;"' +
+		(v.example ? ' placeholder="' + esc(v.example) + '"' : '') + (req ? ' required' : '') + '></div>';
+}
+function wzPrepare(form) {
+	/* collect wizard env inputs into deploy_env KEY=VALUE lines */
+	const lines = [];
+	document.querySelectorAll('#wz-env-form input[data-envkey]').forEach(inp => {
+		if (inp.value.trim() !== '') lines.push(inp.dataset.envkey + '=' + inp.value.trim());
+	});
+	document.getElementById('deploy-env').value = lines.join('\n');
+	/* if docker channel was detected but user left app name empty, block */
+	if (document.getElementById('deploy-channel').value === 'docker') {
+		const name = document.getElementById('deploy-app-name').value.trim();
+		if (!name) { alert('<?= tohtml(__tr("Docker app name required", "Docker uygulama adı gerekli")) ?>'); return false; }
+		if (!document.getElementById('deploy-app-name').value.match(/^[a-zA-Z0-9-]{1,32}$/)) {
+			alert('<?= tohtml(__tr("App name: letters, digits and dashes only", "Uygulama adı: sadece harf, rakam ve tire")) ?>');
+			return false;
+		}
+	}
+	return true;
+}
 </script>
 <?php endif; ?>
