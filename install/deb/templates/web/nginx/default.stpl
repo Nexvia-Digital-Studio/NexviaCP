@@ -26,6 +26,11 @@ server {
 		return 404;
 	}
 
+	location ~* \.(sql|bak|old|log|ini|env|sqlite|db)$ {
+		deny all;
+		return 404;
+	}
+
 	location / {
 		proxy_ssl_server_name on;
 		proxy_ssl_name $host;
@@ -54,5 +59,7 @@ server {
 
 	proxy_hide_header Upgrade;
 
+	include /etc/nginx/conf.d/phpmyadmin.inc*;
+	include /etc/nginx/conf.d/phppgadmin.inc*;
 	include %home%/%user%/conf/web/%domain%/nginx.ssl.conf_*;
 }

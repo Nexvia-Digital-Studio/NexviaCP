@@ -16,6 +16,11 @@ server {
 		return 404;
 	}
 
+	location ~* \.(sql|bak|old|log|ini|env|sqlite|db)$ {
+		deny all;
+		return 404;
+	}
+
 	location / {
 		proxy_pass http://%ip%:%web_port%;
 
@@ -38,5 +43,7 @@ server {
 		alias %home%/%user%/web/%domain%/document_errors/;
 	}
 
+	include /etc/nginx/conf.d/phpmyadmin.inc*;
+	include /etc/nginx/conf.d/phppgadmin.inc*;
 	include %home%/%user%/conf/web/%domain%/nginx.conf_*;
 }

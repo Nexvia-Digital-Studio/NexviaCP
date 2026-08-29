@@ -1846,7 +1846,10 @@ if [ "$apache" = 'yes' ]; then
 
 	echo "# Powered by hestia" > /etc/apache2/sites-available/default
 	echo "# Powered by hestia" > /etc/apache2/sites-available/default-ssl
-	echo "# Powered by hestia" > /etc/apache2/ports.conf
+	cat > /etc/apache2/ports.conf <<'EOF'
+Listen 8080
+Listen 8443 https
+EOF
 	echo -e "/home\npublic_html/cgi-bin" > /etc/apache2/suexec/www-data
 	touch /var/log/apache2/access.log /var/log/apache2/error.log
 	mkdir -p /var/log/apache2/domains
