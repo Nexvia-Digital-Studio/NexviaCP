@@ -65,33 +65,37 @@ if (empty($repo_name) || !preg_match('/^[a-zA-Z0-9_\-\.]+$/', $repo_name)) {
 
 // 3. Replay protection: reject already-seen delivery ids (24h window)
 $delivery_id = $_SERVER["HTTP_X_GITHUB_DELIVERY"] ?? "";
-if (!empty($delivery_id) && preg_match('/^[a-zA-Z0-9\-]{8,64}$/', $delivery_id)) {
-	$cache_dir = sys_get_temp_dir() . "/nexvia_webhook_deliveries";
-	if (!is_dir($cache_dir)) {
-		@mkdir($cache_dir, 0700, true);
-	}
-	$marker = $cache_dir . "/" . md5($delivery_id);
-	if (file_exists($marker)) {
-		http_response_code(429);
-		echo json_encode(["status" => "error", "message" => "Duplicate delivery rejected"]);
-		exit();
-	}
-	@touch($marker);
-	// Opportunistic prune of markers older than 24h
-	$now = time();
-	foreach (glob($cache_dir . "/*") ?: [] as $old) {
-		if (is_file($old) && ($now - filemtime($old)) > 86400) {
-			@unlink($old);
-		}
+if (empty($delivery_id) || !preg_match('/^[a-zA-Z0-9\-]{8,64}$/', $delivery_id)) {
+	http_response_code(400);
+	echo json_encode(["status" => "error", "message" => "Missing or invalid X-GitHub-Delivery header"]);
+	exit();
+}
+
+$cache_dir = is_writable("/var/log/hestia") ? "/var/log/hestia/webhook_deliveries" : (sys_get_temp_dir() . "/hestia_webhook_deliveries");
+if (!is_dir($cache_dir)) {
+	@mkdir($cache_dir, 0700, true);
+}
+$marker = $cache_dir . "/" . hash('sha256', $delivery_id);
+if (file_exists($marker)) {
+	http_response_code(429);
+	echo json_encode(["status" => "error", "message" => "Duplicate delivery rejected"]);
+	exit();
+}
+@touch($marker);
+// Opportunistic prune of markers older than 24h
+$now = time();
+foreach (glob($cache_dir . "/*") ?: [] as $old) {
+	if (is_file($old) && !is_link($old) && ($now - filemtime($old)) > 86400) {
+		@unlink($old);
 	}
 }
 
 // 4. Rate Limit / Cooldown per repository (prevents flood DoS attacks)
-$lock_dir = sys_get_temp_dir() . "/nexvia_webhook_locks";
+$lock_dir = is_writable("/var/log/hestia") ? "/var/log/hestia/webhook_locks" : (sys_get_temp_dir() . "/hestia_webhook_locks");
 if (!is_dir($lock_dir)) {
 	@mkdir($lock_dir, 0700, true);
 }
-$lock_file = $lock_dir . "/lock_" . md5($repo_name);
+$lock_file = $lock_dir . "/lock_" . hash('sha256', $repo_name);
 
 if (file_exists($lock_file) && (time() - filemtime($lock_file) < 15)) {
 	http_response_code(429);

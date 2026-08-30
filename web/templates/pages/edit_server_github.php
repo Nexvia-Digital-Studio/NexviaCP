@@ -163,9 +163,14 @@
 								</span>
 							</div>
 							<div class="units-table-cell u-text-center">
-								<a class="button button-danger button-small" href="/edit/server/github/?delete_vault=1&key=<?= urlencode($vname) ?>&token=<?= tohtml($_SESSION["token"]) ?>" title="<?= tohtml(__tr("Delete Secret", "Secret'ı Sil")) ?>" onclick="return confirm('<?= tohtml(__tr("Are you sure you want to delete this secret?", "Bu secret anahtarını silmek istediğinize emin misiniz?")) ?>');" style="padding: 3px 8px; font-size:11px;">
-									<i class="fas fa-trash-can"></i>
-								</a>
+								<form method="post" action="/edit/server/github/" style="margin:0; display:inline;" onsubmit="return confirm('<?= tohtml(__tr("Are you sure you want to delete this secret?", "Bu secret anahtarını silmek istediğinize emin misiniz?")) ?>');">
+									<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
+									<input type="hidden" name="delete_vault" value="1">
+									<input type="hidden" name="key" value="<?= tohtml($vname) ?>">
+									<button type="submit" class="button button-danger button-small" title="<?= tohtml(__tr("Delete Secret", "Secret'ı Sil")) ?>" style="padding: 3px 8px; font-size:11px;">
+										<i class="fas fa-trash-can"></i>
+									</button>
+								</form>
 							</div>
 						</div>
 					<?php endforeach; ?>

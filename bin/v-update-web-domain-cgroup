@@ -76,6 +76,19 @@ cpu_quota=$(get_object_value 'web' 'DOMAIN' "$domain" '$WEB_CPU_QUOTA')
 [ -z "$mem_max" ] && mem_max="unlimited"
 [ -z "$cpu_quota" ] && cpu_quota="unlimited"
 
+# Input hardening: validate memory and CPU quota values strictly
+for val in "$mem_high" "$mem_max"; do
+	if [ "$val" != "unlimited" ] && ! echo "$val" | grep -qE '^[0-9]+[KMGTkmgt]?[Bb]?$'; then
+		echo "Error: Invalid memory format: $val" >&2
+		exit 1
+	fi
+done
+
+if [ "$cpu_quota" != "unlimited" ] && ! echo "$cpu_quota" | grep -qE '^[1-9][0-9]*%$'; then
+	echo "Error: Invalid CPU quota format: $cpu_quota" >&2
+	exit 1
+fi
+
 # Locate the domain's PHP-FPM pool configuration file.
 # The stored BACKEND is the backend TEMPLATE name (e.g. PHP-7_4), or the
 # literal "default" for domains that never switched away from the install

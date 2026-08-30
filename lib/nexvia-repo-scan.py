@@ -861,8 +861,12 @@ def compose_config(root, compose_rel, workdir):
     compose_dir = os.path.dirname(os.path.join(root, compose_rel))
     text = read_text(os.path.join(root, compose_rel))
     created = []
+    root_abs = os.path.abspath(root)
     for m in re.finditer(r"^\s+(?:-\s+)?env_file:\s*([^\s#]+)", text, re.M):
-        target = os.path.join(compose_dir, m.group(1).strip("'\""))
+        env_val = m.group(1).strip("'\"")
+        target = os.path.abspath(os.path.join(compose_dir, env_val))
+        if not (target == root_abs or target.startswith(root_abs + os.sep)):
+            continue
         if not os.path.exists(target):
             try:
                 open(target, "w").close()

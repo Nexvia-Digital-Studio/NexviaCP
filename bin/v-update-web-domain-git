@@ -55,8 +55,8 @@ fi
 chown -R "$user:$user" "$docroot"
 find "$docroot" -type d -exec chmod 755 {} + 2>/dev/null || true
 find "$docroot" -type f -exec chmod 644 {} + 2>/dev/null || true
-[ -f "$docroot/.env" ] && chmod 600 "$docroot/.env"
-[ -d "$docroot/.git" ] && chmod -R 700 "$docroot/.git"
+[ -f "$docroot/.env" ] && [ ! -L "$docroot/.env" ] && chmod 600 "$docroot/.env"
+[ -d "$docroot/.git" ] && [ ! -L "$docroot/.git" ] && chmod -R 700 "$docroot/.git"
 
 # Restart isolated app service if configured
 unit_name="hestia-app-${user}-${domain}"

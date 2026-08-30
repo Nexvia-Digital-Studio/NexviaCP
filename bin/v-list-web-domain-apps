@@ -175,27 +175,31 @@ for u in "${users[@]}"; do
 done
 
 if [ "$format" = "json" ]; then
-	echo "{"
-	i=0
-	for key in "${!app_list[@]}"; do
-		IFS='|' read -r u d t p s m up svc <<< "${app_list[$key]}"
-		echo "    \"$d\": {"
-		echo "        \"USER\": \"$u\","
-		echo "        \"DOMAIN\": \"$d\","
-		echo "        \"TYPE\": \"$t\","
-		echo "        \"PORT\": \"$p\","
-		echo "        \"STATUS\": \"$s\","
-		echo "        \"MEMORY\": \"$m\","
-		echo "        \"UPTIME\": \"$up\","
-		echo "        \"SERVICE\": \"$svc\""
-		if [ $((i + 1)) -lt "$count" ]; then
-			echo "    },"
-		else
-			echo "    }"
-		fi
-		((i++))
-	done
-	echo "}"
+	python3 -c '
+import sys, json
+out = {}
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    parts = line.split("|")
+    if len(parts) < 8:
+        continue
+    u, d, t, p, s, m, up, svc = parts[:8]
+    out[d] = {
+        "USER": u,
+        "DOMAIN": d,
+        "TYPE": t,
+        "PORT": p,
+        "STATUS": s,
+        "MEMORY": m,
+        "UPTIME": up,
+        "SERVICE": svc
+    }
+print(json.dumps(out, indent=4))
+' << EOF
+$(for key in "${!app_list[@]}"; do echo "${app_list[$key]}"; done)
+EOF
 else
 	echo "DOMAIN                   USER       TYPE     PORT   STATUS    MEMORY    SERVICE"
 	echo "-----------------------  ---------  -------  -----  --------  --------  -------------------------"

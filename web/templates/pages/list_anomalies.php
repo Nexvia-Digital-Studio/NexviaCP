@@ -374,7 +374,7 @@ $metrics = $anomaly_data["metrics"] ?? [];
 
 <script>
 // Store anomaly data for detail modal
-var anomalyData = <?= json_encode($anomalies, JSON_UNESCAPED_UNICODE) ?>;
+var anomalyData = <?= json_encode($anomalies, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) ?>;
 
 function esc(s) {
 	return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {

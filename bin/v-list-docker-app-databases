@@ -34,6 +34,7 @@ source_conf "$HESTIA/conf/hestia.conf"
 CACHE_DIR="/var/lib/hestia"
 CACHE="$CACHE_DIR/nexvia-docker-db-cache.json"
 LOCK="$CACHE_DIR/nexvia-docker-db-cache.lock"
+mkdir -p "$CACHE_DIR"
 
 #----------------------------------------------------------#
 #                       Action                             #
@@ -120,6 +121,10 @@ for line in open(sys.argv[1]):
 out = {}
 for app, svc, cname, dbname, dbtype, dbbytes, dbpretty, owners in rows:
     key = f"{app}:{dbname}"
+    try:
+        disk_mb = int(int(dbbytes) / 1024 / 1024)
+    except (ValueError, TypeError):
+        disk_mb = 0
     out[key] = {
         "APP": app,
         "SERVICE": svc,
@@ -127,7 +132,7 @@ for app, svc, cname, dbname, dbtype, dbbytes, dbpretty, owners in rows:
         "DATABASE": dbname,
         "TYPE": dbtype,
         "DISK": dbpretty,
-        "DISK_MB": int(int(dbbytes) / 1024 / 1024),
+        "DISK_MB": disk_mb,
         "OWNER": owners,
     }
 

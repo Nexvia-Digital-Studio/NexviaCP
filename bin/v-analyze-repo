@@ -104,6 +104,10 @@ tmp_dir=$(mktemp -d -t nexvia_analyze_XXXXXX)
 trap 'rm -rf "$tmp_dir"' EXIT
 clone_dir="$tmp_dir/clone"
 
+if ! [[ "$branch" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+	branch="main"
+fi
+
 # Token-authenticated clone without embedding the PAT in the URL
 clone_success=0
 if [ -n "$GITHUB_TOKEN" ] && [[ "$repo_url" =~ ^https://github.com/ ]]; then
@@ -111,16 +115,16 @@ if [ -n "$GITHUB_TOKEN" ] && [[ "$repo_url" =~ ^https://github.com/ ]]; then
 	printf '#!/bin/sh\nprintf "%%s\\n" "$NEXVIA_GIT_TOKEN"\n' > "$askpass"
 	chmod 700 "$askpass"
 	if NEXVIA_GIT_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
-		git -c credential.helper= clone --depth 1 -b "$branch" "$repo_url" "$clone_dir" 2>/dev/null; then
+		git -c credential.helper= clone --depth 1 -b "$branch" -- "$repo_url" "$clone_dir" 2>/dev/null; then
 		clone_success=1
 	elif NEXVIA_GIT_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
-		git -c credential.helper= clone --depth 1 "$repo_url" "$clone_dir" 2>/dev/null; then
+		git -c credential.helper= clone --depth 1 -- "$repo_url" "$clone_dir" 2>/dev/null; then
 		clone_success=1
 	fi
 else
-	if git clone --depth 1 -b "$branch" "$repo_url" "$clone_dir" 2>/dev/null; then
+	if git clone --depth 1 -b "$branch" -- "$repo_url" "$clone_dir" 2>/dev/null; then
 		clone_success=1
-	elif git clone --depth 1 "$repo_url" "$clone_dir" 2>/dev/null; then
+	elif git clone --depth 1 -- "$repo_url" "$clone_dir" 2>/dev/null; then
 		clone_success=1
 	fi
 fi

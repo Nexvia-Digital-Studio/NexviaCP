@@ -138,10 +138,16 @@ def interp(x, pts):
 
 
 def is_private_ip(ip):
-    return (ip.startswith("10.") or ip.startswith("192.168.")
+    if not ip or not isinstance(ip, str):
+        return False
+    if (ip.startswith("10.") or ip.startswith("192.168.")
             or ip.startswith("127.") or ip.startswith("169.254.")
-            or ip.startswith("172.") and 15 < int(ip.split(".")[1]) < 32
-            or ip == "::1")
+            or ip == "::1"):
+        return True
+    parts = ip.split(".")
+    if len(parts) >= 2 and parts[0] == "172" and parts[1].isdigit():
+        return 16 <= int(parts[1]) <= 31
+    return False
 
 
 def first_public_ip(candidate):
@@ -343,8 +349,8 @@ def read_docker_mem(app, service):
                         }
                 snap.setdefault("_complete_apps", {})[app] = complete
                 os.makedirs(os.path.dirname(DOCKER_SNAPSHOT), exist_ok=True)
-                tmp = DOCKER_SNAPSHOT + ".tmp"
-                with open(tmp, "w") as f:
+                fd, tmp = tempfile.mkstemp(dir=os.path.dirname(DOCKER_SNAPSHOT), prefix="docker-snap-", suffix=".tmp")
+                with os.fdopen(fd, "w") as f:
                     json.dump(snap, f)
                 os.replace(tmp, DOCKER_SNAPSHOT)
         except Exception:
@@ -405,23 +411,25 @@ def _rec_newer(ln, cutoff):
 def append_history(path, now_ts, req10, dyn10, users, rt):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     try:
-        with open(path, "a") as f:
+        lock_path = path + ".lock"
+        with open(lock_path, "a") as lock_file:
             if fcntl:
-                fcntl.flock(f, fcntl.LOCK_EX)
-            f.write(json.dumps({"t": int(now_ts), "req": req10, "dyn": dyn10,
-                                "usr": users, "rt": round(rt, 4) if rt else 0}) + "\n")
-            if fcntl:
-                fcntl.flock(f, fcntl.LOCK_UN)
-        cutoff = now_ts - 8 * 86400
-        with open(path) as f:
-            lines = [ln for ln in f if _rec_newer(ln, cutoff)]
-        if len(lines) < 1500:  # only rewrite while the file is still small
-            with open(path, "w") as f:
+                fcntl.flock(lock_file, fcntl.LOCK_EX)
+            try:
+                with open(path, "a") as f:
+                    f.write(json.dumps({"t": int(now_ts), "req": req10, "dyn": dyn10,
+                                        "usr": users, "rt": round(rt, 4) if rt else 0}) + "\n")
+                cutoff = now_ts - 8 * 86400
+                with open(path, "r") as f:
+                    lines = [ln for ln in f if _rec_newer(ln, cutoff)]
+                if len(lines) < 1500:  # only rewrite while the file is still small
+                    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path), prefix="hist-", suffix=".tmp")
+                    with os.fdopen(fd, "w") as tmp_f:
+                        tmp_f.writelines(lines)
+                    os.replace(tmp_path, path)
+            finally:
                 if fcntl:
-                    fcntl.flock(f, fcntl.LOCK_EX)
-                f.writelines(lines)
-                if fcntl:
-                    fcntl.flock(f, fcntl.LOCK_UN)
+                    fcntl.flock(lock_file, fcntl.LOCK_UN)
     except Exception:
         pass
 

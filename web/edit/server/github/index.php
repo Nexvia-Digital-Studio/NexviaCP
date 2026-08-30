@@ -55,14 +55,13 @@ if (!empty($_POST["save_vault"])) {
 }
 
 // Action 3: Delete Global Vault Secret
-if (!empty($_GET["delete_vault"]) && !empty($_GET["key"])) {
-	if (verify_csrf($_GET)) {
-		$v_key = quoteshellarg(trim($_GET["key"]));
-		exec(HESTIA_CMD . "v-delete-sys-global-vault " . $v_key, $output, $return_var);
-		$_SESSION["ok_msg"] = $is_tr ? "Global Secret başarıyla silindi." : _("Global secret deleted.");
-		header("Location: /edit/server/github/");
-		exit();
-	}
+if (!empty($_POST["delete_vault"]) && !empty($_POST["key"])) {
+	verify_csrf($_POST);
+	$v_key = quoteshellarg(trim($_POST["key"]));
+	exec(HESTIA_CMD . "v-delete-sys-global-vault " . $v_key, $output, $return_var);
+	$_SESSION["ok_msg"] = $is_tr ? "Global Secret başarıyla silindi." : _("Global secret deleted.");
+	header("Location: /edit/server/github/");
+	exit();
 }
 
 // Action 4: Generate or Save GitHub Webhook Secret
@@ -89,7 +88,7 @@ exec(HESTIA_CMD . "v-list-sys-config json", $sys_output, $sys_return_var);
 $sys_config = json_decode(implode("", $sys_output), true)["config"] ?? [];
 
 $v_github_org = $sys_config["GITHUB_ORG"] ?? $_SESSION["GITHUB_ORG"] ?? "";
-$v_github_token = $sys_config["GITHUB_TOKEN"] ?? $_SESSION["GITHUB_TOKEN"] ?? "";
+$v_github_token = $sys_config["GITHUB_TOKEN"] ?? "";
 
 $gh_status = "unconfigured";
 $gh_repos = [];
@@ -107,6 +106,8 @@ if (!empty($v_github_token)) {
 		$gh_error_detail = $gh_data["message"] ?? $gh_raw;
 	}
 }
+
+$is_connected = ($gh_status === "connected");
 
 // Fetch Global Vault Secrets (Masked)
 $global_vault = json_decode(shell_exec(HESTIA_CMD . "v-list-sys-global-vault json"), true) ?: [];

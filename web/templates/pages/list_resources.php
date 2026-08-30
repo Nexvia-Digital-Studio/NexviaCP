@@ -307,7 +307,14 @@
 									<i class="fas fa-bolt" style="color:var(--icon-color-orange, #f97316);"></i>
 								</button>
 							</form>
-							<button type="button" class="button button-secondary button-small" onclick="openCustomTuneModal('<?= tohtml($u_owner) ?>', '<?= tohtml($dname) ?>', '<?= tohtml($mem_high) ?>', '<?= tohtml($mem_max) ?>', '<?= tohtml($cpu_q) ?>');" title="<?= tohtml(__tr("Fine-Tune Limits", "İnce Limit Ayarı")) ?>" style="padding:4px 8px; font-size:11px;">
+							<button type="button" class="button button-secondary button-small"
+								data-user="<?= tohtml($u_owner) ?>"
+								data-domain="<?= tohtml($dname) ?>"
+								data-high="<?= tohtml($mem_high) ?>"
+								data-max="<?= tohtml($mem_max) ?>"
+								data-cpu="<?= tohtml($cpu_q) ?>"
+								onclick="openCustomTuneModal(this.dataset.user, this.dataset.domain, this.dataset.high, this.dataset.max, this.dataset.cpu);"
+								title="<?= tohtml(__tr("Fine-Tune Limits", "İnce Limit Ayarı")) ?>" style="padding:4px 8px; font-size:11px;">
 								<i class="fas fa-sliders"></i>
 							</button>
 						</div>

@@ -92,27 +92,31 @@ trap 'rm -rf "$tmp_dir"' EXIT
 tmp_clone="$tmp_dir/clone"
 mkdir -p "$tmp_clone"
 
+if ! [[ "$branch" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+	branch="main"
+fi
+
 if [ -n "$GITHUB_TOKEN" ] && [[ "$repo_url" =~ ^https://github.com/ ]]; then
 	askpass="$tmp_dir/askpass.sh"
 	printf '#!/bin/sh\nprintf "%%s\\n" "$NEXVIA_GIT_TOKEN"\n' > "$askpass"
 	chmod 700 "$askpass"
 	echo "[*] Fetching branch '$branch' from $repo_input (authenticated)..."
-	if ! NEXVIA_GIT_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 git -c credential.helper= clone --depth 1 -b "$branch" "$repo_url" "$tmp_clone" 2>/dev/null; then
-		if ! NEXVIA_GIT_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 git -c credential.helper= clone --depth 1 "$repo_url" "$tmp_clone" 2>/dev/null; then
+	if ! NEXVIA_GIT_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 git -c credential.helper= clone --depth 1 -b "$branch" -- "$repo_url" "$tmp_clone" 2>/dev/null; then
+		if ! NEXVIA_GIT_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 git -c credential.helper= clone --depth 1 -- "$repo_url" "$tmp_clone" 2>/dev/null; then
 			check_result "$E_CONNECT" "Git clone failed. Please check repository name and GitHub Token permissions."
 		fi
 	fi
 else
 	if [ -d "$repo_url" ]; then
 		# local dir: silence "dubious ownership" (fixture repos owned by other users)
-		git -c safe.directory='*' clone --depth 1 -b "$branch" "$repo_url" "$tmp_clone" 2>/dev/null \
-			|| git -c safe.directory='*' clone --depth 1 "$repo_url" "$tmp_clone" 2>/dev/null \
+		git -c safe.directory='*' clone --depth 1 -b "$branch" -- "$repo_url" "$tmp_clone" 2>/dev/null \
+			|| git -c safe.directory='*' clone --depth 1 -- "$repo_url" "$tmp_clone" 2>/dev/null \
 			|| check_result "$E_CONNECT" "Git clone failed. Check repository path/branch."
 	else
 		echo "[*] Fetching branch '$branch' from $repo_input..."
-		if ! git clone --depth 1 -b "$branch" "$repo_url" "$tmp_clone" 2>/dev/null; then
+		if ! git clone --depth 1 -b "$branch" -- "$repo_url" "$tmp_clone" 2>/dev/null; then
 			# Fallback to default branch
-			if ! git clone --depth 1 "$repo_url" "$tmp_clone" 2>/dev/null; then
+			if ! git clone --depth 1 -- "$repo_url" "$tmp_clone" 2>/dev/null; then
 				check_result "$E_CONNECT" "Git clone failed. Please check repository name and access."
 			fi
 		fi
@@ -190,8 +194,9 @@ if [ -n "$env_file" ] && [ -f "$env_file" ]; then
 				;;
 		esac
 		[ -z "$ek" ] && continue
+		ev_sed=$(printf '%s' "$ev" | sed -e 's/[\\/|&]/\\&/g')
 		if grep -q "^${ek}=" "$docroot/.env" 2>/dev/null; then
-			sed -i "s|^${ek}=.*|${ek}=${ev}|" "$docroot/.env"
+			sed -i "s|^${ek}=.*|${ek}=${ev_sed}|" "$docroot/.env"
 		else
 			echo "${ek}=${ev}" >> "$docroot/.env"
 		fi
@@ -218,8 +223,18 @@ if [ -f "$scanner" ] && command -v python3 &>/dev/null; then
 	echo "[*] Analyzing repository metadata with scanner..."
 	scan_json=$(python3 "$scanner" "$docroot" "$branch" 2>/dev/null || echo "{}")
 	if [ -n "$scan_json" ]; then
-		eval "$(python3 -c '
-import json, sys
+		while IFS='=' read -r var_name var_val; do
+			case "$var_name" in
+				detected_type)      detected_type="$var_val" ;;
+				pkg_mgr)            pkg_mgr="$var_val" ;;
+				out_dir)            out_dir="$var_val" ;;
+				detected_target_fw) detected_target_fw="$var_val" ;;
+				detected_orm)       detected_orm="$var_val" ;;
+			esac
+		done < <(python3 -c '
+import json, sys, re
+def sanitize(s):
+    return re.sub(r"[^a-zA-Z0-9_./-]", "", str(s or "")).strip()
 try:
     data = json.load(sys.stdin)
     if data.get("ok"):
@@ -234,14 +249,14 @@ try:
         tfw = data.get("target_framework") or plat.get("target_framework") or primary.get("target_framework") or primary.get("runtime_version") or ""
         orm = data.get("orm") or db.get("orm") or ""
 
-        print(f"detected_type={json.dumps(str(mode))}")
-        print(f"pkg_mgr={json.dumps(str(pm))}")
-        print(f"out_dir={json.dumps(str(od))}")
-        print(f"detected_target_fw={json.dumps(str(tfw))}")
-        print(f"detected_orm={json.dumps(str(orm))}")
+        print(f"detected_type={sanitize(mode)}")
+        print(f"pkg_mgr={sanitize(pm)}")
+        print(f"out_dir={sanitize(od)}")
+        print(f"detected_target_fw={sanitize(tfw)}")
+        print(f"detected_orm={sanitize(orm)}")
 except Exception:
     pass
-' <<< "$scan_json" 2>/dev/null || true)"
+' <<< "$scan_json" 2>/dev/null)
 	fi
 fi
 
@@ -318,9 +333,14 @@ if [ -n "$sql_file" ]; then
 	# PHP seeders under build/ run as the hosting user (seed_provinces.php etc.)
 	for seeder in "$docroot"/build/seed*.php; do
 		[ -f "$seeder" ] || continue
-		echo "[*] Running seeder: ${seeder#"$docroot"/}"
-		su - "$user" -s /bin/bash -c "cd '$docroot/build' && php '$(basename "$seeder")'" >/dev/null 2>&1 \
-			|| echo "[!] Seeder failed: $(basename "$seeder") (continuing)"
+		seeder_base=$(basename "$seeder")
+		if [[ ! "$seeder_base" =~ ^seed[A-Za-z0-9_-]*\.php$ ]]; then
+			echo "[!] Skipping invalid seeder filename: $seeder_base"
+			continue
+		fi
+		echo "[*] Running seeder: build/$seeder_base"
+		su - "$user" -s /bin/bash -c "cd '$docroot/build' && php '$seeder_base'" >/dev/null 2>&1 \
+			|| echo "[!] Seeder failed: $seeder_base (continuing)"
 	done
 elif [ -f "$docroot/prisma/schema.prisma" ] || [ -f "$docroot/schema.prisma" ] || [ "$detected_orm" = "prisma" ]; then
 	# If DATABASE_URL is not configured, provision MySQL DB for Prisma
@@ -515,6 +535,7 @@ case "$detected_type" in
 		echo "[*] Configuring .NET Kestrel backend..."
 		$BIN/v-change-web-domain-tpl "$user" "$domain" "dotnet"
 		if (ls "$docroot"/*.csproj &>/dev/null || ls "$docroot"/*.sln &>/dev/null) && command -v dotnet &>/dev/null; then
+			detected_target_fw=$(echo "$detected_target_fw" | sed 's/[^a-zA-Z0-9._-]//g')
 			if [ -n "$detected_target_fw" ]; then
 				echo "[*] Building .NET project (framework: $detected_target_fw)..."
 				su - "$user" -s /bin/bash -c "cd '$docroot' && dotnet publish -c Release -f '$detected_target_fw' -o '$docroot/publish'" 2>/dev/null \
@@ -569,8 +590,13 @@ case "$detected_type" in
 		target_out=""
 		for cand in "$out_dir" "out" "dist" "build" "publish"; do
 			[ -z "$cand" ] && continue
-			if [ -d "$docroot/$cand" ] && [ "$cand" != "." ] && [ "$cand" != "public_html" ]; then
-				target_out="$docroot/$cand"
+			[[ "$cand" == *".."* ]] && continue
+			[[ "$cand" == /* ]] && continue
+			cand_clean=$(echo "$cand" | sed 's/[^a-zA-Z0-9._-]//g')
+			[ -z "$cand_clean" ] && continue
+			cand_path="$docroot/$cand_clean"
+			if [ -d "$cand_path" ] && [ "$cand_clean" != "." ] && [ "$cand_clean" != "public_html" ]; then
+				target_out="$cand_path"
 				break
 			fi
 		done

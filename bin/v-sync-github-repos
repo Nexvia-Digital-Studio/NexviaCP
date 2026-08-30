@@ -21,6 +21,8 @@ target_repo=$(echo "$1" | sed 's/[^a-zA-Z0-9._-]//g')
 echo "[*] [$(date +'%Y-%m-%d %H:%M:%S')] Scanning domains for GitHub sync (Target: ${target_repo:-all})..."
 
 sync_pids=()
+max_jobs=4
+running_jobs=0
 
 for u_dir in "$HOMEDIR"/*; do
 	[ ! -d "$u_dir/web" ] && continue
@@ -30,8 +32,8 @@ for u_dir in "$HOMEDIR"/*; do
 		[ ! -d "$d_dir/public_html/.git" ] && continue
 		domain=$(basename "$d_dir")
 
-		# Check remote origin URL
-		remote_url=$(git -C "$d_dir/public_html" config --get remote.origin.url 2>/dev/null)
+		# Check remote origin URL (dropped to user to avoid dubious ownership)
+		remote_url=$(su - "$user" -s /bin/bash -c "git -C '$d_dir/public_html' config --get remote.origin.url 2>/dev/null")
 		repo_base=$(basename "$remote_url" .git)
 
 		if [ -n "$target_repo" ]; then
@@ -40,14 +42,20 @@ for u_dir in "$HOMEDIR"/*; do
 			fi
 		fi
 
-		echo "[*] Triggering parallel update for domain: $domain (User: $user)..."
+		echo "[*] Triggering update for domain: $domain (User: $user)..."
 		# Run update in parallel subshell
 		($BIN/v-update-web-domain-git "$user" "$domain" >/dev/null 2>&1) &
 		sync_pids+=($!)
+		running_jobs=$((running_jobs + 1))
+
+		if [ "$running_jobs" -ge "$max_jobs" ]; then
+			wait -n 2>/dev/null || wait "${sync_pids[0]}" 2>/dev/null || true
+			running_jobs=$((running_jobs - 1))
+		fi
 	done
 done
 
-# Wait for all parallel domain updates to complete
+# Wait for all remaining domain updates to complete
 if [ ${#sync_pids[@]} -gt 0 ]; then
 	for pid in "${sync_pids[@]}"; do
 		wait "$pid" 2>/dev/null || true
