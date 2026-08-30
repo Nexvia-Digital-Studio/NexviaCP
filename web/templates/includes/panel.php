@@ -541,7 +541,7 @@
 			max-width: 100% !important;
 			display: flex !important;
 			justify-content: center !important;
-			padding: 0 15px !important;
+			padding: 0 10px !important;
 		}
 		.main-menu-toggle {
 			display: none !important;
@@ -558,9 +558,9 @@
 			list-style: none !important;
 		}
 		.main-menu-item {
-			flex: 1 1 auto !important;
-			min-width: 85px !important;
-			max-width: 155px !important;
+			flex: 1 1 0 !important;
+			min-width: 65px !important;
+			max-width: 140px !important;
 			text-align: center !important;
 			display: flex !important;
 		}
@@ -569,7 +569,7 @@
 			flex-direction: column !important;
 			align-items: center !important;
 			justify-content: center !important;
-			padding: 10px 10px !important;
+			padding: 8px 4px !important;
 			width: 100% !important;
 			height: 100% !important;
 			text-align: center !important;
@@ -597,23 +597,23 @@
 		}
 		.main-menu-item-label {
 			white-space: nowrap !important;
-			font-size: 11.5px !important;
+			font-size: 11px !important;
 			font-weight: 700 !important;
-			letter-spacing: 0.4px !important;
+			letter-spacing: 0.3px !important;
 			display: flex !important;
 			align-items: center !important;
 			justify-content: center !important;
-			gap: 6px !important;
-			margin: 0 0 3px 0 !important;
+			gap: 4px !important;
+			margin: 0 0 2px 0 !important;
 			color: #e2e8f0 !important;
 		}
 		.main-menu-item-label i, .main-menu-item-label .fas {
-			font-size: 12px !important;
+			font-size: 11px !important;
 			opacity: 0.85 !important;
 		}
 		.main-menu-stats {
-			font-size: 10.5px !important;
-			line-height: 1.35 !important;
+			font-size: 10px !important;
+			line-height: 1.25 !important;
 			text-align: center !important;
 			margin: 0 !important;
 			padding: 0 !important;
@@ -624,7 +624,7 @@
 			white-space: nowrap !important;
 			overflow: hidden !important;
 			text-overflow: ellipsis !important;
-			max-width: 145px !important;
+			max-width: 130px !important;
 		}
 	</style>
 

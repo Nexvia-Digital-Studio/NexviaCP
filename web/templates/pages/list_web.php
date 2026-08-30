@@ -4,18 +4,18 @@
 	<div class="toolbar-inner">
 		<div class="toolbar-buttons">
 			<?php if ($read_only !== "true") { ?>
-				<a href="/add/web/" class="button button-secondary js-button-create">
-					<i class="fas fa-circle-plus icon-green"></i><?= tohtml( _("Add Web Domain")) ?>
+				<a href="/add/web/" class="button button-secondary js-button-create" title="<?= tohtml( _("Add Web Domain")) ?>">
+					<i class="fas fa-circle-plus icon-green"></i><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Domain Ekle" : _("Add Domain")) ?>
 				</a>
 				<?php if (($_SESSION["userContext"] ?? "") === "admin") { ?>
-					<button type="button" class="button button-secondary" onclick="document.getElementById('github-web-modal').style.display='flex'">
-						<i class="fab fa-github icon-blue"></i><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "GitHub'dan Site Kur" : _("Deploy from GitHub")) ?>
+					<button type="button" class="button button-secondary" onclick="document.getElementById('github-web-modal').style.display='flex'" title="<?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "GitHub'dan Site Kur" : _("Deploy from GitHub")) ?>">
+						<i class="fab fa-github icon-blue"></i><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "GitHub Kur" : "GitHub Deploy") ?>
 					</button>
-					<a href="/list/waf/" class="button button-secondary">
-						<i class="fas fa-shield-halved icon-blue"></i><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Tehdit Kalkanı & WAF" : _("Threat Shield & WAF")) ?>
+					<a href="/list/waf/" class="button button-secondary" title="<?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Tehdit Kalkanı & WAF" : _("Threat Shield & WAF")) ?>">
+						<i class="fas fa-shield-halved icon-blue"></i><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "WAF & Kalkan" : "WAF") ?>
 					</a>
-					<a href="/list/domain-expiry/" class="button button-secondary">
-						<i class="fas fa-hourglass-half icon-yellow"></i><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Domain Süreleri" : _("Domain Expirations")) ?>
+					<a href="/list/domain-expiry/" class="button button-secondary" title="<?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Domain Süreleri ve Lisans Takip Paneli" : _("Domain Expirations")) ?>">
+						<i class="fas fa-hourglass-half icon-yellow"></i><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Süre Takip" : "Expirations") ?>
 					</a>
 				<?php } ?>
 			<?php } ?>
@@ -114,7 +114,7 @@
 		body.nx-sub-view .nx-is-sub { display: revert !important; }
 		body.nx-sub-view .nx-is-main { display: none !important; }
 	</style>
-	<div class="u-mb10" style="display:flex; gap:8px; align-items:center;">
+	<div style="display:flex; gap:8px; align-items:center; margin: 16px 0 14px 0;">
 		<button type="button" class="button button-primary js-nx-subtab" data-target="main">
 			<i class="fas fa-globe"></i> <?= tohtml(__tr("Main Domains", "Ana Domainler")) ?> (<?= $nx_main_count ?>)
 		</button>
