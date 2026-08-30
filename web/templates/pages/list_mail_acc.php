@@ -241,7 +241,7 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 										type="button"
 										class="units-table-row-action-link"
 										style="background:none; border:none; padding:0 8px; cursor:pointer; display:inline-flex; align-items:center;"
-										x-on:click="openModal('<?= tohtml($key) ?>')"
+										x-on:click="openModal('<?= tohtml($key) ?>'); $refs.dialog.showModal()"
 										title="<?= tohtml( _("Şifre Değiştir & SMTP Bilgileri")) ?>"
 									>
 										<i class="fas fa-key icon-blue"></i>
@@ -326,169 +326,134 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 		</p>
 	</div>
 
-	<!-- Interactive Mail & SMTP Connection Modal with Direct Password Change -->
-	<div
-		x-cloak
-		x-show="modalOpen"
-		x-transition:enter="transition ease-out duration-200"
-		x-transition:enter-start="opacity-0"
-		x-transition:enter-end="opacity-100"
-		x-transition:leave="transition ease-in duration-150"
-		x-transition:leave-start="opacity-100"
-		x-transition:leave-end="opacity-0"
-		style="position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(15,23,42,0.65); backdrop-filter:blur(4px); z-index:9999; display:flex; align-items:center; justify-content:center; padding:20px;"
-		x-on:click.self="modalOpen = false"
-		x-on:keydown.escape.window="modalOpen = false"
-	>
-		<div
-			style="background:#ffffff; width:100%; max-width:620px; border-radius:16px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25); border:1px solid #e2e8f0; overflow:hidden; font-family:inherit; color:#1e293b;"
-			x-transition:enter="transition ease-out duration-200"
-			x-transition:enter-start="opacity-0 transform scale-95"
-			x-transition:enter-end="opacity-100 transform scale-100"
-		>
-			<!-- Header -->
-			<div style="background:#0f172a; color:#ffffff; padding:20px 24px; display:flex; align-items:center; justify-content:space-between; border-bottom:3px solid #3b82f6;">
-				<div style="display:flex; align-items:center; gap:12px;">
-					<div style="background:rgba(59,130,246,0.2); width:42px; height:42px; border-radius:10px; display:flex; align-items:center; justify-content:center; color:#60a5fa; font-size:20px;">
-						<i class="fas fa-envelope"></i>
-					</div>
-					<div>
-						<h3 style="margin:0; font-size:18px; font-weight:700; color:#ffffff;" x-text="selectedAccount + '@' + selectedDomain"></h3>
-						<span style="font-size:12px; color:#94a3b8;">E-Posta Yönetimi, Şifre Değiştirme &amp; SMTP</span>
-					</div>
-				</div>
-				<button type="button" x-on:click="modalOpen = false" style="background:none; border:none; color:#94a3b8; font-size:20px; cursor:pointer; padding:4px;" title="Kapat">
-					<i class="fas fa-xmark"></i>
-				</button>
+	<!-- Native Mail & SMTP Connection Dialog -->
+	<dialog x-ref="dialog" class="shortcuts" style="max-width: 600px; width: 92%; padding: 0;">
+		<div class="shortcuts-header">
+			<div class="shortcuts-title" style="display: flex; align-items: center; gap: 8px;">
+				<i class="fas fa-envelope icon-lightblue"></i>
+				<span x-text="selectedAccount + '@' + selectedDomain"></span>
 			</div>
+			<div
+				x-on:click="$refs.dialog.close()"
+				class="shortcuts-close"
+				style="cursor: pointer;"
+			>
+				<i class="fas fa-xmark"></i>
+			</div>
+		</div>
 
-			<!-- Body -->
-			<div style="padding:24px; max-height:75vh; overflow-y:auto;">
-				
-				<!-- Şifre Değiştirme Formu (Doğrudan Bu Ekranda) -->
-				<form method="post" :action="'/edit/mail/?domain=' + encodeURIComponent(selectedDomain) + '&account=' + encodeURIComponent(selectedAccount)">
-					<input type="hidden" name="token" :value="token">
-					<input type="hidden" name="save" value="save">
-					<input type="hidden" name="v_account" :value="selectedAccount">
-					<input type="hidden" name="v_domain" :value="selectedDomain">
+		<div class="shortcuts-inner" style="padding: 24px;">
+			<!-- Şifre Değiştirme -->
+			<form method="post" :action="'/edit/mail/?domain=' + encodeURIComponent(selectedDomain) + '&account=' + encodeURIComponent(selectedAccount)" class="u-mb20">
+				<input type="hidden" name="token" :value="token">
+				<input type="hidden" name="save" value="save">
+				<input type="hidden" name="v_account" :value="selectedAccount">
+				<input type="hidden" name="v_domain" :value="selectedDomain">
 
-					<div style="background:#eff6ff; border:1.5px solid #bfdbfe; border-radius:12px; padding:16px; margin-bottom:20px;">
-						<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-							<label style="font-weight:700; font-size:13px; color:#1e40af;">
-								<i class="fas fa-key" style="color:#2563eb;"></i> Şifremi Unuttum / Yeni Şifre Belirle
-							</label>
-							<button type="button" x-on:click="generatePass()" style="background:#ffffff; border:1px solid #bfdbfe; border-radius:6px; padding:4px 10px; font-size:11px; font-weight:700; cursor:pointer; color:#2563eb;">
-								<i class="fas fa-arrows-rotate"></i> Rastgele Şifre Üret
-							</button>
+				<h2 class="u-text-H3 u-mb10"><?= _("Change Password") ?></h2>
+				<div class="u-mb10">
+					<label class="form-label" for="modal_v_password"><?= _("New Password") ?></label>
+					<div style="display: flex; gap: 8px;">
+						<div class="u-pos-relative" style="flex: 1;">
+							<input
+								:type="showPassword ? 'text' : 'password'"
+								name="v_password"
+								id="modal_v_password"
+								x-model="newPassword"
+								class="form-control"
+								placeholder="<?= _("Enter new password") ?>"
+								required
+							>
 						</div>
-						<div style="display:flex; gap:8px;">
-							<div style="position:relative; flex:1;">
-								<input
-									:type="showPassword ? 'text' : 'password'"
-									name="v_password"
-									x-model="newPassword"
-									placeholder="Yeni şifrenizi buraya yazın..."
-									class="form-control"
-									style="width:100%; box-sizing:border-box; padding-right:36px; font-family:monospace; font-size:13px;"
-									required
-								>
-								<button type="button" x-on:click="showPassword = !showPassword" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:#64748b; cursor:pointer;">
-									<i class="fas" :class="showPassword ? 'fa-eye-slash' : 'fa-eye'"></i>
-								</button>
-							</div>
-							<button type="submit" class="button" style="background:#2563eb; color:#ffffff; border:none; padding:0 16px; font-weight:700; border-radius:8px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
-								<i class="fas fa-floppy-disk"></i> Şifreyi Kaydet
-							</button>
-						</div>
-					</div>
-				</form>
-
-				<!-- Durum Rozeti -->
-				<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px;">
-					<div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:12px 14px; display:flex; align-items:center; gap:10px;">
-						<i class="fas fa-circle-check" style="color:#16a34a; font-size:18px;"></i>
-						<div>
-							<strong style="font-size:13px; color:#15803d; display:block;">SMTP Sunucusu</strong>
-							<span style="font-size:11px; color:#475569;">Port 587 (TLS) / 465 (SSL)</span>
-						</div>
-					</div>
-					<div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:12px 14px; display:flex; align-items:center; gap:10px;">
-						<i class="fas fa-circle-check" style="color:#16a34a; font-size:18px;"></i>
-						<div>
-							<strong style="font-size:13px; color:#15803d; display:block;">IMAP / POP3</strong>
-							<span style="font-size:11px; color:#475569;">Port 993 (IMAP) / 995 (POP3)</span>
-						</div>
-					</div>
-				</div>
-
-				<!-- Parametre Tablosu -->
-				<div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:16px; margin-bottom:20px; font-size:13px;">
-					<div style="display:flex; justify-content:space-between; align-items:center; padding-bottom:10px; border-bottom:1px solid #e2e8f0; margin-bottom:10px;">
-						<span style="color:#64748b; font-weight:600;">SMTP Host (Sunucu):</span>
-						<div style="display:flex; align-items:center; gap:8px;">
-							<code style="background:#ffffff; padding:4px 8px; border-radius:6px; border:1px solid #cbd5e1; font-weight:700; color:#0f172a;" x-text="'mail.' + selectedDomain"></code>
-							<button type="button" x-on:click="copyText('mail.' + selectedDomain)" style="background:#ffffff; border:1px solid #cbd5e1; border-radius:6px; padding:4px 8px; cursor:pointer;" title="Kopyala">
-								<i class="fas fa-copy"></i>
-							</button>
-						</div>
-					</div>
-
-					<div style="display:flex; justify-content:space-between; align-items:center; padding-bottom:10px; border-bottom:1px solid #e2e8f0; margin-bottom:10px;">
-						<span style="color:#64748b; font-weight:600;">Kullanıcı Adı:</span>
-						<div style="display:flex; align-items:center; gap:8px;">
-							<code style="background:#ffffff; padding:4px 8px; border-radius:6px; border:1px solid #cbd5e1; font-weight:700; color:#0f172a;" x-text="selectedAccount + '@' + selectedDomain"></code>
-							<button type="button" x-on:click="copyText(selectedAccount + '@' + selectedDomain)" style="background:#ffffff; border:1px solid #cbd5e1; border-radius:6px; padding:4px 8px; cursor:pointer;" title="Kopyala">
-								<i class="fas fa-copy"></i>
-							</button>
-						</div>
-					</div>
-
-					<div style="display:flex; justify-content:space-between; align-items:center;">
-						<span style="color:#64748b; font-weight:600;">Şifreleme &amp; Port:</span>
-						<strong style="color:#0f172a;">STARTTLS (Port 587) / SSL (Port 465)</strong>
-					</div>
-				</div>
-
-				<!-- Hızlı Kod Kopyalama (.env) -->
-				<div>
-					<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-						<label style="font-weight:700; font-size:13px; color:#1e293b;"><i class="fas fa-code"></i> Siteniz İçin .env / Config Satırları</label>
-						<span x-show="copied" x-cloak style="font-size:12px; color:#16a34a; font-weight:700;"><i class="fas fa-check"></i> Kopyalandı!</span>
-					</div>
-					<div style="position:relative;">
-						<textarea
-							rows="4"
-							readonly
-							style="width:100%; font-family:monospace; font-size:11px; background:#1e293b; color:#93c5fd; padding:12px; border-radius:8px; border:none; resize:none; line-height:1.5; box-sizing:border-box;"
-							x-text="'SMTP_HOST=mail.' + selectedDomain + '\nSMTP_PORT=587\nSMTP_USERNAME=' + selectedAccount + '@' + selectedDomain + '\nSMTP_SECURE=tls\nSMTP_FROM_EMAIL=' + selectedAccount + '@' + selectedDomain"
-						></textarea>
 						<button
 							type="button"
-							x-on:click="copyText('SMTP_HOST=mail.' + selectedDomain + '\nSMTP_PORT=587\nSMTP_USERNAME=' + selectedAccount + '@' + selectedDomain + '\nSMTP_SECURE=tls\nSMTP_FROM_EMAIL=' + selectedAccount + '@' + selectedDomain)"
-							style="position:absolute; top:8px; right:8px; background:#3b82f6; color:#ffffff; border:none; border-radius:6px; padding:6px 12px; font-size:12px; font-weight:700; cursor:pointer;"
+							x-on:click="generatePass()"
+							class="button button-secondary"
+							title="<?= _("Generate") ?>"
 						>
-							<i class="fas fa-copy"></i> Kopyala
+							<i class="fas fa-arrows-rotate icon-green"></i>
+						</button>
+						<button type="submit" class="button">
+							<i class="fas fa-floppy-disk icon-purple"></i> <?= _("Save") ?>
 						</button>
 					</div>
 				</div>
+			</form>
 
+			<h2 class="u-text-H3 u-mb10"><?= _("Common Account Settings") ?></h2>
+			<div class="u-mb10">
+				<label class="form-label"><?= _("Username") ?></label>
+				<div class="clipboard">
+					<input type="text" class="form-control clipboard-input js-copy-input" :value="selectedAccount + '@' + selectedDomain" readonly>
+					<button type="button" class="clipboard-button" x-on:click="copyText(selectedAccount + '@' + selectedDomain)" title="<?= _("Copy to clipboard") ?>">
+						<i class="fas fa-copy"></i>
+					</button>
+				</div>
 			</div>
 
-			<!-- Footer -->
-			<div style="background:#f8fafc; padding:16px 24px; border-top:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
+			<div class="u-mb20">
+				<label class="form-label"><?= _("Hostname") ?></label>
+				<div class="clipboard">
+					<input type="text" class="form-control clipboard-input js-copy-input" :value="'mail.' + selectedDomain" readonly>
+					<button type="button" class="clipboard-button" x-on:click="copyText('mail.' + selectedDomain)" title="<?= _("Copy to clipboard") ?>">
+						<i class="fas fa-copy"></i>
+					</button>
+				</div>
+			</div>
+
+			<h2 class="u-text-H3 u-mb10"><?= _("SMTP Settings") ?></h2>
+			<ul class="values-list u-mb20">
+				<li class="values-list-item">
+					<span class="values-list-label"><?= _("Authentication") ?></span>
+					<span class="values-list-value"><?= _("Normal password") ?></span>
+				</li>
+				<li class="values-list-item">
+					<span class="values-list-label">STARTTLS</span>
+					<span class="values-list-value"><?= _("Port") ?> 587</span>
+				</li>
+				<li class="values-list-item">
+					<span class="values-list-label">SSL/TLS</span>
+					<span class="values-list-value"><?= _("Port") ?> 465</span>
+				</li>
+			</ul>
+
+			<h2 class="u-text-H3 u-mb10"><?= _("App Configuration (.env)") ?></h2>
+			<div class="clipboard u-mb20">
+				<textarea
+					class="form-control clipboard-input js-copy-input"
+					rows="4"
+					readonly
+					style="font-family: monospace; font-size: 11px; resize: none;"
+					x-text="'SMTP_HOST=mail.' + selectedDomain + '\nSMTP_PORT=587\nSMTP_USERNAME=' + selectedAccount + '@' + selectedDomain + '\nSMTP_SECURE=tls\nSMTP_FROM_EMAIL=' + selectedAccount + '@' + selectedDomain"
+				></textarea>
+				<button
+					type="button"
+					class="clipboard-button"
+					x-on:click="copyText('SMTP_HOST=mail.' + selectedDomain + '\nSMTP_PORT=587\nSMTP_USERNAME=' + selectedAccount + '@' + selectedDomain + '\nSMTP_SECURE=tls\nSMTP_FROM_EMAIL=' + selectedAccount + '@' + selectedDomain)"
+					title="<?= _("Copy to clipboard") ?>"
+				>
+					<i class="fas fa-copy"></i>
+				</button>
+			</div>
+
+			<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 20px;">
 				<a
+					class="button button-secondary"
 					:href="'https://' + (webmailAlias || 'webmail') + '.' + selectedDomain + '/?_user=' + encodeURIComponent(selectedAccount + '@' + selectedDomain) + '&email=' + encodeURIComponent(selectedAccount + '@' + selectedDomain)"
 					target="_blank"
-					style="background:#d97706; color:#ffffff; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:700; text-decoration:none; display:inline-flex; align-items:center; gap:8px;"
 				>
-					<i class="fas fa-envelope-open-text"></i> Webmail'e Git (Otomatik Kullanıcı Adı)
+					<i class="fas fa-envelope-open-text icon-maroon"></i> <?= _("Open Webmail") ?>
 				</a>
-				<button type="button" x-on:click="modalOpen = false" class="button button-secondary" style="padding:8px 18px;">
-					Kapat
+				<button
+					type="button"
+					class="button button-secondary"
+					x-on:click="$refs.dialog.close()"
+				>
+					<?= _("Close") ?>
 				</button>
 			</div>
 		</div>
-	</div>
+	</dialog>
 
 </div>
 
