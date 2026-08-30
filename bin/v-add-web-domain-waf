@@ -229,9 +229,15 @@ add_object_key 'web' 'DOMAIN' "$domain" 'WAF_UPDATED' 'TIME'
 update_object_value 'web' 'DOMAIN' "$domain" '$WAF' "$mode"
 update_object_value 'web' 'DOMAIN' "$domain" '$WAF_UPDATED' "$cur_date"
 
-# Restart web server if requested
-$BIN/v-restart-web "$restart"
-check_result $? "Web server restart failed" > /dev/null
+# Apply the web server config change with zero downtime: a WAF include
+# only needs a reload. A hard restart drops the listeners for a moment,
+# which Cloudflare surfaces as 521 — including for the panel itself,
+# since panel traffic is proxied through nginx.
+if [ "$restart" = "yes" ] && [ -n "$WEB_SYSTEM" ]; then
+	systemctl reload "$WEB_SYSTEM" >/dev/null 2>&1 || $BIN/v-restart-web "$restart"
+else
+	$BIN/v-restart-web "$restart"
+fi
 
 # Logging
 $BIN/v-log-action "$user" "Info" "Web" "WAF mode set to $mode (Domain: $domain)."
