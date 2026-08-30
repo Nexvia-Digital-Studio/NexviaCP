@@ -17,17 +17,27 @@ $is_tr = (($_SESSION['language'] ?? '') === 'tr' || ($_SESSION['LANGUAGE'] ?? ''
 // Action 1: Save GitHub Account
 if (!empty($_POST["save"])) {
 	verify_csrf($_POST);
-	
+
 	$v_org_val = trim($_POST["v_github_org"] ?? "");
 	$v_token_val = trim($_POST["v_github_token"] ?? "");
+	// Empty input or a re-submitted mask (bullets) means "keep the stored
+	// token" — writing it through v-set-sys-github-token would clobber the
+	// real PAT with the placeholder string.
+	$token_unchanged = ($v_token_val === "" || preg_match('/^•+$/', $v_token_val));
 
 	$v_org = quoteshellarg($v_org_val);
-	$v_token = quoteshellarg($v_token_val);
 
-	exec(HESTIA_CMD . "v-set-sys-github-token " . $v_org . " " . $v_token, $output, $return_var);
+	if ($token_unchanged) {
+		exec(HESTIA_CMD . "v-change-sys-config-value GITHUB_ORG " . $v_org, $output, $return_var);
+	} else {
+		$v_token = quoteshellarg($v_token_val);
+		exec(HESTIA_CMD . "v-set-sys-github-token " . $v_org . " " . $v_token, $output, $return_var);
+	}
 	if ($return_var == 0) {
 		$_SESSION["GITHUB_ORG"] = $v_org_val;
-		$_SESSION["GITHUB_TOKEN"] = $v_token_val;
+		if (!$token_unchanged) {
+			$_SESSION["GITHUB_TOKEN_SET"] = true;
+		}
 		$_SESSION["ok_msg"] = $is_tr ? "GitHub entegrasyon ayarları başarıyla kaydedildi." : _("GitHub integration settings saved successfully.");
 	} else {
 		$_SESSION["error_msg"] = $is_tr ? "GitHub ayarları kaydedilirken hata oluştu." : _("Error saving GitHub settings.");

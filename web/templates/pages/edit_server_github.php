@@ -89,12 +89,11 @@
 							class="form-control"
 							name="v_github_token"
 							id="v_github_token"
-							value="<?= (!empty($v_github_token) || !empty($_SESSION["GITHUB_TOKEN_SET"])) ? '••••••••••••••••••••••••••••••••' : '' ?>"
-							placeholder="github_pat_xxxx..."
-							required
+							value=""
+							placeholder="<?= (!empty($v_github_token) || !empty($_SESSION["GITHUB_TOKEN_SET"])) ? tohtml(__tr("Token saved — enter a new one only to replace it", "Kayıtlı — yalnızca değiştirmek isterseniz yeni token girin")) : 'github_pat_xxxx...' ?>"
 						>
 						<small class="u-text-muted" style="display:block; margin-top:4px;">
-							<?= tohtml(__tr("Generate a token on GitHub (Settings -> Developer Settings -> Personal Access Tokens) with 'Repository: Read-only' permissions.", "GitHub profilinizden (Settings -> Developer Settings -> Personal Access Tokens) 'Contents: Read' yetkisine sahip bir belirteç üretin.")) ?>
+							<?= tohtml(__tr("Leave empty to keep the current token. Generate a token on GitHub (Settings -> Developer Settings -> Personal Access Tokens) with 'Contents: Read' permissions.", "Mevcut token'ı korumak için boş bırakın. GitHub profilinizden (Settings -> Developer Settings -> Personal Access Tokens) 'Contents: Read' yetkisine sahip bir belirteç üretin.")) ?>
 						</small>
 					</div>
 				</div>
