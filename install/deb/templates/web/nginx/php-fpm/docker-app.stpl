@@ -8,6 +8,8 @@
 server {
 	listen      %ip%:%web_ssl_port% ssl http2;
 	server_name %domain_idn% %alias_idn%;
+	access_log /var/log/%web_system%/domains/%domain%.log main;
+	access_log /var/log/%web_system%/domains/%domain%.bytes bytes;
 	error_log   /var/log/%web_system%/domains/%domain%.error.log error;
 
 	ssl_certificate      %ssl_pem%;
