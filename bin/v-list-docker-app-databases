@@ -33,19 +33,24 @@ source_conf "$HESTIA/conf/hestia.conf"
 
 CACHE_DIR="/var/lib/hestia"
 CACHE="$CACHE_DIR/nexvia-docker-db-cache.json"
+LOCK="$CACHE_DIR/nexvia-docker-db-cache.lock"
 
 #----------------------------------------------------------#
 #                       Action                             #
 #----------------------------------------------------------#
 
-if [ "$refresh" -eq 0 ] && [ -f "$CACHE" ]; then
+# serialize concurrent invocations (sidebar + pages fire these together)
+exec 8>"$LOCK"
+flock 8
+
+if [ "$refresh" -eq 0 ] && [ -s "$CACHE" ]; then
 	age=$(( $(date +%s) - $(stat -c %Y "$CACHE" 2>/dev/null || echo 0) ))
-	if [ "$age" -lt 45 ]; then
+	if [ "$age" -lt 45 ] && python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$CACHE" 2>/dev/null; then
 		if [ "$format" = "json" ]; then
 			cat "$CACHE"
 		else
 			python3 - "$CACHE" <<'PYEOF'
-import json, sys
+import json, os, sys
 d = json.load(open(sys.argv[1]))
 print("APP            DATABASE                    TYPE     DISK      OWNERS")
 print("-------------  --------------------------  -------  --------  ---------")
@@ -102,7 +107,7 @@ done
 
 mkdir -p "$CACHE_DIR"
 python3 - "$tmp_rows" "$CACHE" "$format" <<'PYEOF'
-import json, sys
+import json, os, sys
 
 rows = []
 for line in open(sys.argv[1]):
@@ -126,8 +131,10 @@ for app, svc, cname, dbname, dbtype, dbbytes, dbpretty, owners in rows:
         "OWNER": owners,
     }
 
-with open(sys.argv[2], "w") as f:
+tmp = sys.argv[2] + ".tmp"
+with open(tmp, "w") as f:
     json.dump(out, f)
+os.replace(tmp, sys.argv[2])
 
 if sys.argv[3] == "json":
     print(json.dumps(out, indent=4))
