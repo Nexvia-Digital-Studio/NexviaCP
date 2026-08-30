@@ -33,7 +33,10 @@ CLI:
                           [--dry-run] [--self-test]
 """
 import argparse
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 import glob
 import json
 import math
@@ -51,6 +54,7 @@ STATIC_EXT = {
     "webm", "mp3", "ogg", "wav", "txt", "pdf", "zip", "rar", "7z", "gz",
 }
 STATIC_PREFIX = ("/cdn-cgi/", "/static/", "/assets/", "/.well-known/")
+STREAMING_PREFIX = ("/ws", "/socket.io", "/events", "/stream", "/hub", "/sse")
 BOT_UA = re.compile(
     r"bot|crawl|spider|slurp|scrap|monitor|uptime|pingdom|httrack|headless|"
     r"phantomjs|python-requests|python-urllib|curl/|wget|go-http-client|"
@@ -81,6 +85,8 @@ CURVE_LAT_ABS = [(0.15, 0), (0.40, 10), (0.80, 30), (1.50, 60),
                  (2.50, 85), (4.00, 100)]
 # latency, relative to the domain's own learned baseline (ratio)
 CURVE_LAT_REL = [(1.00, 0), (1.20, 15), (1.50, 40), (2.00, 70), (3.00, 100)]
+# 5xx availability distress (ratio of 5xx errors to total requests)
+CURVE_5XX = [(0.02, 0), (0.05, 30), (0.10, 65), (0.25, 90), (0.50, 100)]
 CURVE_PSI = [(0, 0), (5, 5), (15, 20), (30, 45), (60, 80), (90, 100)]
 CURVE_RAM = [(0.50, 0), (0.70, 15), (0.85, 45), (0.95, 80), (1.00, 100)]
 # load context (secondary): dynamic request load + spike vs baseline
@@ -159,7 +165,7 @@ def parse_ts(ts):
 
 def analyze_log(log_file, now_ts):
     """Count traffic + dynamic-request latency over the last 10/1 minutes."""
-    res = dict(req10=0, dyn10=0, static10=0, bot10=0, users=set(),
+    res = dict(req10=0, dyn10=0, static10=0, bot10=0, err5xx10=0, users=set(),
                req1=0, rt_sum=0.0, rt_n=0, last_hit=0)
     if not log_file or not os.path.isfile(log_file):
         return res
@@ -196,15 +202,21 @@ def analyze_log(log_file, now_ts):
             ext = uri.rsplit(".", 1)[-1] if "." in uri else ""
             is_static = ext in STATIC_EXT or uri.startswith(tuple(STATIC_PREFIX)) \
                 or status == "304" or req.startswith("HEAD ")
+            is_stream = status == "101" or uri.startswith(tuple(STREAMING_PREFIX))
+            is_5xx = bool(status and status.startswith("5"))
             if age <= 600:
                 res["req10"] += 1
+                if is_5xx:
+                    res["err5xx10"] += 1
                 if is_bot:
                     res["bot10"] += 1
                 elif is_static:
                     res["static10"] += 1
                 else:
                     res["dyn10"] += 1
-                    if rt:
+                    # Streaming/WebSocket connections stay open for minutes;
+                    # exclude them from request latency math so they don't look like slow requests
+                    if rt and not is_stream:
                         try:
                             res["rt_sum"] += float(rt)
                             res["rt_n"] += 1
@@ -282,11 +294,11 @@ def _parse_mem_str(s):
 
 
 def read_docker_mem(app, service):
-    """(usage_mb, mem_ratio 0..1) for a docker-app service. Uses a shared,
+    """(usage_mb, mem_ratio 0..1, cpu_ratio 0..1) for a docker-app service. Uses a shared,
     60s-cached snapshot of `docker ps` labels + `docker stats`."""
     key = "%s/%s" % (app, service)
     if not key or key == "/":
-        return 0.0, 0.0
+        return 0.0, 0.0, 0.0
     snap = {}
     fresh = False
     try:
@@ -310,14 +322,16 @@ def read_docker_mem(app, service):
             if ids:
                 stats = subprocess.run(
                     ["docker", "stats", "--no-stream", "--format",
-                     "{{.Name}}|{{.MemUsage}}|{{.MemPerc}}"] + ids,
+                     "{{.Name}}|{{.MemUsage}}|{{.MemPerc}}|{{.CPUPerc}}"] + ids,
                     capture_output=True, text=True, timeout=30).stdout
-                mem_by_name, pct_by_name = {}, {}
+                mem_by_name, pct_by_name, cpu_by_name = {}, {}, {}
                 for ln in stats.splitlines():
                     p = ln.split("|")
-                    if len(p) == 3:
+                    if len(p) >= 3:
                         mem_by_name[p[0]] = p[1]
                         pct_by_name[p[0]] = p[2]
+                        if len(p) >= 4:
+                            cpu_by_name[p[0]] = p[3]
                 complete = bool(mapping.strip())
                 for ln in mapping.splitlines():
                     p = ln.split("|")
@@ -325,6 +339,7 @@ def read_docker_mem(app, service):
                         snap["%s/%s" % (app, p[0])] = {
                             "usage": mem_by_name.get(p[1], ""),
                             "pct": pct_by_name.get(p[1], ""),
+                            "cpu": cpu_by_name.get(p[1], ""),
                         }
                 snap.setdefault("_complete_apps", {})[app] = complete
                 os.makedirs(os.path.dirname(DOCKER_SNAPSHOT), exist_ok=True)
@@ -340,8 +355,13 @@ def read_docker_mem(app, service):
         pct = float((ent.get("pct") or "0").replace("%", "").strip() or 0)
     except ValueError:
         pass
+    cpu_pct = 0.0
+    try:
+        cpu_pct = float((ent.get("cpu") or "0").replace("%", "").strip() or 0)
+    except ValueError:
+        pass
     usage = _parse_mem_str((ent.get("usage") or "").split("/")[0])
-    return usage, clamp(pct / 100.0, 0.0, 1.0)
+    return usage, clamp(pct / 100.0, 0.0, 1.0), clamp(cpu_pct / 100.0, 0.0, 10.0)
 
 
 def load_history(path, now_ts):
@@ -386,18 +406,22 @@ def append_history(path, now_ts, req10, dyn10, users, rt):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     try:
         with open(path, "a") as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
+            if fcntl:
+                fcntl.flock(f, fcntl.LOCK_EX)
             f.write(json.dumps({"t": int(now_ts), "req": req10, "dyn": dyn10,
                                 "usr": users, "rt": round(rt, 4) if rt else 0}) + "\n")
-            fcntl.flock(f, fcntl.LOCK_UN)
+            if fcntl:
+                fcntl.flock(f, fcntl.LOCK_UN)
         cutoff = now_ts - 8 * 86400
         with open(path) as f:
             lines = [ln for ln in f if _rec_newer(ln, cutoff)]
         if len(lines) < 1500:  # only rewrite while the file is still small
             with open(path, "w") as f:
-                fcntl.flock(f, fcntl.LOCK_EX)
+                if fcntl:
+                    fcntl.flock(f, fcntl.LOCK_EX)
                 f.writelines(lines)
-                fcntl.flock(f, fcntl.LOCK_UN)
+                if fcntl:
+                    fcntl.flock(f, fcntl.LOCK_UN)
     except Exception:
         pass
 
@@ -530,12 +554,18 @@ def run(args):
         lat_rel = interp(dyn_rt / base_rt, CURVE_LAT_REL)
     lat_dist = max(lat_abs, lat_rel)
 
-    # memory: docker containers report real usage; PHP falls back to cgroup/PSI
-    docker_mem_mb, docker_ratio = (None, 0.0)
+    # 5xx availability distress: fast-failing APIs with high error rates
+    err5xx_ratio = (tr["err5xx10"] / tr["req10"]) if tr["req10"] >= 10 else 0.0
+    err_dist = interp(err5xx_ratio, CURVE_5XX)
+    effective_lat = max(lat_dist, err_dist)
+
+    # memory & cpu: docker containers report real usage; PHP falls back to cgroup/PSI
+    docker_mem_mb, docker_ratio, docker_cpu_ratio = (None, 0.0, 0.0)
     if docker_app:
-        docker_mem_mb, docker_ratio = read_docker_mem(docker_app, docker_service)
+        docker_mem_mb, docker_ratio, docker_cpu_ratio = read_docker_mem(docker_app, docker_service)
         mem_dist = interp(docker_ratio, CURVE_RAM)
-        psi, cpu_psi = 0.0, 0.0
+        psi, cpu_psi = 0.0, docker_cpu_ratio * 100.0
+        cpu_dist = interp(cpu_psi, CURVE_PSI)
         ram_b = int(docker_mem_mb * 1048576)
         per_domain = True
     else:
@@ -543,30 +573,33 @@ def run(args):
             args.user, args.domain)
         ram_ratio = (ram_b / limit_b) if (per_domain and limit_b) else 0.0
         mem_dist = max(interp(psi, CURVE_PSI), interp(ram_ratio, CURVE_RAM))
-
-    cpu_dist = interp(cpu_psi, CURVE_PSI)
+        cpu_dist = interp(cpu_psi, CURVE_PSI)
 
     # traffic context (secondary): steady load + spike, for headroom context
     l_pts = interp(tr["dyn10"], CURVE_LOAD)
     s_pts = interp(spike_ratio, CURVE_SPIKE) if not learning else LEARNING_SPIKE_PTS
     ctx = 0.6 * l_pts + 0.4 * s_pts
 
-    score = int(round(W_LAT * lat_dist + W_MEM * mem_dist
+    score = int(round(W_LAT * effective_lat + W_MEM * mem_dist
                       + W_CPU * cpu_dist + W_CTX * ctx))
-    # acute saturation overrides: a domain at >=90% memory or >=3s average
-    # response time is struggling regardless of what the blend says
+    # acute saturation overrides: a domain at >=90% memory, >=3s average
+    # response time, or >=15% 5xx error rate is struggling regardless of what the blend says
     mem_ratio_now = docker_ratio if docker_app else (
         (ram_b / limit_b) if (per_domain and limit_b) else 0.0)
     if mem_ratio_now >= 0.90:
         score = max(score, TH_UP["busy"])
     if dyn_rt and dyn_rt >= 3.0:
         score = max(score, 55)
+    if err5xx_ratio >= 0.15 and tr["req10"] >= 10:
+        score = max(score, TH_UP["busy"])
     score = clamp(score, 0, 100)
 
     idle_sec = (now_ts - tr["last_hit"]) if tr["last_hit"] else None
     status, last_change, reasons = decide(prev_state, score, tr["req10"],
                                           idle_sec, last_change, now_ts,
                                           learning, api_mode=api_mode)
+    if err5xx_ratio >= 0.10 and tr["req10"] >= 10:
+        reasons.append("high_5xx_errors")
     mem_high, mem_max, cpu, io, workers = size_resources(
         status, users, tr["dyn10"], avg_rt, score)
 
@@ -592,6 +625,10 @@ def run(args):
     )
     if docker_mem_mb is not None:
         out["CONTAINER_MEM_MB"] = int(docker_mem_mb)
+        out["CONTAINER_CPU_PCT"] = round(docker_cpu_ratio * 100.0, 1)
+    if tr["err5xx10"] > 0:
+        out["ERR_5XX_10M"] = tr["err5xx10"]
+        out["SCORE_ERROR"] = round(err_dist)
     if not args.dry_run:
         _atomic_json(out, state_file)
     return out, status != prev_state
@@ -743,10 +780,36 @@ def self_test():
     finally:
         DOCKER_SNAPSHOT = real_snap
 
-    # 6) curve anchors
+    # 6) websocket/streaming connection duration must NOT inflate latency
+    ws_lines = [("203.0.113.1", 1.0, "/ws/feed", ua_human, 60.0), # 60s websocket
+                ("203.0.113.2", 2.0, "/api/data", ua_human, 0.05), # 50ms api
+                ("203.0.113.3", 3.0, "/api/users", ua_human, 0.04)] # 40ms api
+    res, _ = run(Args(user="t6", domain="ws.test", gov_dir=gov, dry_run=True,
+                      log=mklog("f.log", ws_lines, fmt="main"), app_type="node-js"))
+    check("ws-latency-filtered",
+          res["AVG_RT_MS"] < 100 and res["SCORE_LATENCY"] == 0, res)
+
+    # 7) 5xx error surge -> availability distress even when errors fail fast
+    err_lines = [("203.0.113.%d" % (i % 5 + 1), (i % 500) / 60.0 + 0.1,
+                  "/api/checkout", ua_human, 0.01) for i in range(50)]
+    # Write custom log with 502 Bad Gateway status
+    err_log_p = os.path.join(d, "err.log")
+    with open(err_log_p, "w") as f:
+        for ip, mins_ago, uri, ua, rt in err_lines:
+            ts = datetime.fromtimestamp(now - mins_ago * 60, tz=timezone.utc)\
+                .strftime("%d/%b/%Y:%H:%M:%S +0000")
+            # 502 Bad Gateway
+            f.write('%s - - [%s] "POST %s HTTP/2.0" 502 123 "-" "%s" "-" %.3f\n'
+                    % (ip, ts, uri, ua, rt))
+    res, _ = run(Args(user="t7", domain="err502.test", gov_dir=gov, dry_run=True,
+                      log=err_log_p, app_type="docker"))
+    check("5xx-error-distress",
+          res.get("SCORE_ERROR", 0) >= 80 and res["STATUS"] in ("busy", "boosted"), res)
+
+    # 8) curve anchors
     c = (interp(0.15, CURVE_LAT_ABS) == 0 and interp(4.0, CURVE_LAT_ABS) == 100
          and interp(3.0, CURVE_LAT_REL) == 100 and interp(0.95, CURVE_RAM) == 80
-         and interp(600, CURVE_LOAD) > 60)
+         and interp(0.25, CURVE_5XX) == 90 and interp(600, CURVE_LOAD) > 60)
     print("%-26s -> %s" % ("curve-anchors", "OK" if c else "FAIL"))
     ok = ok and c
 

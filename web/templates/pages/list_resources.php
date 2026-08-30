@@ -179,7 +179,11 @@
 				$u_owner = $ddata["USER"] ?? $user_plain;
 				$is_api_domain = !empty($ddata["APP_TYPE"]);
 				$container_mem = (int)($ddata["CONTAINER_MEM_MB"] ?? 0);
+				$container_cpu = (float)($ddata["CONTAINER_CPU_PCT"] ?? 0);
+				$err_5xx = (int)($ddata["ERR_5XX_10M"] ?? 0);
 				$rt_ms = (int)($ddata["AVG_RT_MS"] ?? 0);
+				$reasons_list = (array)($ddata["REASONS"] ?? []);
+				$reasons_str = !empty($reasons_list) ? implode(", ", $reasons_list) : "";
 			?>
 				<div class="units-table-row domain-governance-row" data-domain="<?= tohtml(strtolower($dname)) ?>" data-status="<?= tohtml($status) ?>">
 					<!-- Domain Name -->
@@ -191,7 +195,7 @@
 									<?= tohtml($dname) ?>
 								</a>
 								<small class="u-text-muted" style="display:block; font-size:11px;">
-									<?= tohtml($u_owner) ?><?php if ($is_api_domain): ?><span class="badge badge-info" style="font-size:9px; margin-left:4px; padding:1px 5px;" title="<?= tohtml(__tr("API / backend service - never idled, scaled by distress (latency, memory, CPU)", "API / arka plan servisi - asla uyutulmaz; gecikme, bellek, CPU sikismasina gore olceklenir")) ?>">API</span><?php if ($container_mem > 0): ?><span style="font-size:9px; color:var(--icon-color-blue, #38bdf8);" title="Container memory">🐳 <?= $container_mem ?> MB</span><?php endif; ?><?php endif; ?><?php if ($rt_ms > 0): ?><span style="font-size:9px; margin-left:6px;" title="<?= tohtml(__tr("Avg response time", "Ortalama cevap suresi")) ?>">⏱ <?= $rt_ms ?> ms</span><?php endif; ?>
+									<?= tohtml($u_owner) ?><?php if ($is_api_domain): ?><span class="badge badge-info" style="font-size:9px; margin-left:4px; padding:1px 5px;" title="<?= tohtml(__tr("API / backend service - never idled, scaled by distress (latency, memory, CPU)", "API / arka plan servisi - asla uyutulmaz; gecikme, bellek, CPU sikismasina gore olceklenir")) ?>">API</span><?php if ($container_mem > 0): ?><span style="font-size:9px; color:var(--icon-color-blue, #38bdf8);" title="Container memory">🐳 <?= $container_mem ?> MB</span><?php endif; ?><?php if ($container_cpu > 0): ?><span style="font-size:9px; margin-left:3px; color:var(--icon-color-orange, #f97316);" title="Container CPU">⚡ <?= $container_cpu ?>%</span><?php endif; ?><?php endif; ?><?php if ($rt_ms > 0): ?><span style="font-size:9px; margin-left:6px;" title="<?= tohtml(__tr("Avg response time", "Ortalama cevap suresi")) ?>">⏱ <?= $rt_ms ?> ms</span><?php endif; ?><?php if ($err_5xx > 0): ?><span class="badge badge-danger" style="font-size:9px; margin-left:4px; padding:1px 5px;" title="<?= tohtml(__tr("5xx Server Errors in last 10m", "Son 10 dakikadaki 5xx Sunucu Hataları")) ?>">⚠️ <?= $err_5xx ?> err</span><?php endif; ?>
 								</small>
 							</div>
 						</div>
@@ -217,7 +221,7 @@
 					</div>
 
 					<!-- Dynamic State Badge -->
-					<div class="units-table-cell u-text-center" style="flex: 1.2;">
+					<div class="units-table-cell u-text-center" style="flex: 1.2;" title="<?= tohtml($reasons_str ? __tr("Reasons: ", "Nedenler: ") . $reasons_str : "") ?>">
 						<?php if ($status === "idle"): ?>
 							<span class="badge badge-secondary" style="font-size:11px; padding:4px 8px; background:rgba(100,116,139,0.15); color:var(--color-text-muted); border:1px solid rgba(100,116,139,0.3);">
 								💤 <?= tohtml(__tr("Eco-Idle (64M)", "Uykuda (64M)")) ?>
