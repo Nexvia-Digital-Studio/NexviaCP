@@ -17,6 +17,14 @@
 
 user_filter="$1"
 format="${2:-json}"
+fast=0
+
+if [ "$1" = "--fast" ]; then
+	fast=1
+	shift
+	user_filter="$1"
+	format="${2:-json}"
+fi
 
 if [ "$user_filter" = "json" ] || [ "$user_filter" = "shell" ] || [ "$user_filter" = "plain" ]; then
 	format="$user_filter"
@@ -38,6 +46,24 @@ source_conf "$HESTIA/conf/hestia.conf"
 # --- Preload docker app registry: domain -> state/service/memory/uptime ---
 declare -A dck_state dck_svc dck_mem dck_up
 if [ -d "$HESTIA/data/docker-apps" ] && command -v docker >/dev/null 2>&1; then
+	# --fast: registry only (no docker calls) — safe for sidebar counters
+	if [ "$fast" -eq 1 ]; then
+		for acf in "$HESTIA/data/docker-apps"/*/app.conf; do
+			[ -f "$acf" ] || continue
+			dapp=$(basename "$(dirname "$acf")")
+			dapp_state=$(grep -m1 '^STATE=' "$acf" | cut -d"'" -f2)
+			for dent in $(grep -m1 '^DOMAINS=' "$acf" | cut -d"'" -f2); do
+				[ -n "$dent" ] || continue
+				dd="${dent#*@}"; dd="${dd%%:*}"
+				dsvc="${dent#*:}"; dsvc="${dsvc%%:*}"
+				[ -n "$dd" ] || continue
+				dck_state["$dd"]="${dapp_state:-unknown}"
+				dck_svc["$dd"]="nexvia-${dapp}/${dsvc}"
+				dck_mem["$dd"]="-"
+				dck_up["$dd"]="-"
+			done
+		done
+	else
 	# Single docker stats call for every container: "name|mem"
 	declare -A mem_by_name
 	while IFS='|' read -r cname cmem; do
@@ -74,6 +100,7 @@ if [ -d "$HESTIA/data/docker-apps" ] && command -v docker >/dev/null 2>&1; then
 		done
 		unset name_by_svc stat_by_svc
 	done
+	fi
 fi
 
 users=()
