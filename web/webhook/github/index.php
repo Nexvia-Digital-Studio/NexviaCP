@@ -104,11 +104,12 @@ if (file_exists($lock_file) && (time() - filemtime($lock_file) < 15)) {
 }
 @touch($lock_file);
 
-// 5. Log and Execute Background Sync (sudo: bin scripts require root)
-$log_msg = date("[Y-m-d H:i:s]") . " GitHub Webhook triggered for repository: " . $repo_name . "\n";
-@file_put_contents("/var/log/hestia/github-webhook.log", $log_msg, FILE_APPEND);
-
-$cmd = "/usr/bin/sudo /usr/local/hestia/bin/v-sync-github-repos " . escapeshellarg($repo_name) . " >> /var/log/hestia/github-webhook.log 2>&1 &";
+// 5. Execute Background Sync (sudo: bin scripts require root)
+// NOTE: do NOT redirect output to /var/log/hestia/ here — this endpoint runs as
+// the unprivileged panel user (hestiaweb) which cannot traverse that directory,
+// so the shell would fail to open the redirect and silently never spawn the
+// sync command. v-sync-github-repos does its own root-side logging instead.
+$cmd = "/usr/bin/sudo /usr/local/hestia/bin/v-sync-github-repos " . escapeshellarg($repo_name) . " >/dev/null 2>&1 &";
 exec($cmd);
 
 echo json_encode([

@@ -16,6 +16,12 @@ if [ "x$(id -u)" != 'x0' ]; then
 	exit 10
 fi
 
+# Root-side logging: the webhook endpoint (running as hestiaweb) cannot write
+# to /var/log/hestia itself, so all output is captured here instead.
+mkdir -p /var/log/hestia
+exec >> /var/log/hestia/github-webhook.log 2>&1
+echo "[*] [$(date +'%Y-%m-%d %H:%M:%S')] Invoked (Target: ${1:-all})"
+
 target_repo=$(echo "$1" | sed 's/[^a-zA-Z0-9._-]//g')
 
 echo "[*] [$(date +'%Y-%m-%d %H:%M:%S')] Scanning domains for GitHub sync (Target: ${target_repo:-all})..."
