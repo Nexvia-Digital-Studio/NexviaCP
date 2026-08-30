@@ -186,6 +186,36 @@ if systemctl cat "$app_unit" >/dev/null 2>&1; then
 	fi
 fi
 
+# --- 2b. Docker Container backends: REAL kernel limits via docker update ---
+if command -v docker >/dev/null 2>&1; then
+	for acf in "$HESTIA"/data/docker-apps/*/app.conf; do
+		[ -f "$acf" ] || continue
+		for dent in $(grep -m1 '^DOMAINS=' "$acf" | cut -d"'" -f2); do
+			if [ "${dent%%:*}" = "$user@$domain" ]; then
+				dapp=$(basename "$(dirname "$acf")")
+				c_ids=$(docker ps -q --filter "label=com.docker.compose.project=nexvia-$dapp" 2>/dev/null)
+				if [ -n "$c_ids" ]; then
+					docker_args=()
+					if [ "$mem_max" != "unlimited" ]; then
+						docker_args+=(-m "$(echo "$mem_max" | tr '[:upper:]' '[:lower:]')" --memory-swap "$(echo "$mem_max" | tr '[:upper:]' '[:lower:]')")
+					elif [ "$mem_high" != "unlimited" ]; then
+						docker_args+=(-m "$(echo "$mem_high" | tr '[:upper:]' '[:lower:]')" --memory-swap "$(echo "$mem_high" | tr '[:upper:]' '[:lower:]')")
+					fi
+					if [ "$cpu_quota" != "unlimited" ]; then
+						cpu_num=$(echo "$cpu_quota" | tr -d '%')
+						cpu_val=$(awk "BEGIN {print $cpu_num / 100}")
+						docker_args+=(--cpus "$cpu_val")
+					fi
+					if [ ${#docker_args[@]} -gt 0 ]; then
+						docker update "${docker_args[@]}" $c_ids >/dev/null 2>&1 || true
+					fi
+				fi
+				break 2
+			fi
+		done
+	done
+fi
+
 # --- 3. PHP CPU quota: applied at the USER level, not the PHP version service ---
 # NOTE: per-domain CPU isolation via systemd is structurally impossible for PHP
 # because all pools of a given PHP version share ONE master (php<X.Y>-fpm.service).
