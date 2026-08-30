@@ -1,8 +1,9 @@
 #!/bin/bash
 # info: analyze a git repository structure and emit a JSON deploy plan
-# options: REPO [BRANCH]
+# options: REPO [BRANCH] [--json|--summary]
 # example: v-analyze-repo https://github.com/user/project.git
-# example: v-analyze-repo user/project dev
+# example: v-analyze-repo user/project dev --json
+# example: v-analyze-repo user/project main --summary
 #
 # Detects platform (PHP/Laravel/React/Node/.NET/Docker Compose), components
 # (web/api/db), inter-service communication, .env.example variables for the
@@ -13,60 +14,79 @@
 #                Variables & Functions                     #
 #----------------------------------------------------------#
 
-# Argument definition
-repo_input=$1
-branch=${2:-main}
-format=${3:-json}
-
-# Support flags in args
-if [ "$repo_input" = "--summary" ] || [ "$repo_input" = "-s" ]; then
-	format="summary"
-	repo_input=$2
-	branch=${3:-main}
-elif [ "$branch" = "summary" ] || [ "$branch" = "--summary" ]; then
-	format="summary"
-	branch="main"
-fi
-
 # Includes
-# shellcheck source=/etc/hestiacp/hestia.conf
-source /etc/hestiacp/hestia.conf
-# shellcheck source=/usr/local/hestia/func/main.sh
-source $HESTIA/func/main.sh
-# load config file
-source_conf "$HESTIA/conf/hestia.conf"
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
 
-check_args '1' "$#" 'REPO [BRANCH] [FORMAT]'
+json_error() {
+	local msg="$1"
+	local clean_msg
+	clean_msg=$(printf '%s' "$msg" | tr '\n' ' ' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+	printf '{"ok": false, "error": "%s"}\n' "$clean_msg"
+	exit 0
+}
 
 # Ensure root
 if [ "x$(id -u)" != 'x0' ]; then
-	echo "ERROR: Script can be executed only by root user"
-	exit 10
+	json_error "Script can be executed only by root user"
 fi
 
-#----------------------------------------------------------#
-#                       Action                             #
-#----------------------------------------------------------#
+# Parse positional arguments and flags
+args=()
+scanner_flags=()
+format="json"
+
+for arg in "$@"; do
+	case "$arg" in
+		--summary | -s | summary)
+			format="summary"
+			scanner_flags+=("--summary")
+			;;
+		--json | json)
+			format="json"
+			scanner_flags+=("--json")
+			;;
+		-h | --help)
+			echo "Usage: v-analyze-repo REPO [BRANCH] [--json|--summary]"
+			exit 0
+			;;
+		--*)
+			scanner_flags+=("$arg")
+			;;
+		*)
+			args+=("$arg")
+			;;
+	esac
+done
+
+repo_input="${args[0]:-}"
+branch="${args[1]:-main}"
+
+if [ -z "$repo_input" ]; then
+	json_error "Missing repository parameter. Usage: v-analyze-repo REPO [BRANCH] [--json|--summary]"
+fi
 
 scanner="$HESTIA/lib/nexvia-repo-scan.py"
 if [ ! -f "$scanner" ]; then
-	check_result "$E_NOTEXIST" "scanner missing: $scanner"
+	json_error "scanner missing: $scanner"
 fi
-
-run_scan() {
-	local target_dir="$1"
-	local target_br="$2"
-	if [ "$format" = "summary" ]; then
-		python3 "$scanner" "$target_dir" "$target_br" | python3 -c 'import sys, json; data=json.load(sys.stdin); print(data.get("summary_tr", ""))'
-	else
-		python3 "$scanner" "$target_dir" "$target_br"
-	fi
-}
 
 # Local directory mode (tests / pre-cloned repos)
 if [ -d "$repo_input" ]; then
-	run_scan "$repo_input" "$branch"
-	exit $?
+	if ! python3 "$scanner" "${scanner_flags[@]}" "$repo_input" "$branch"; then
+		json_error "Failed to scan local repository directory: $repo_input"
+	fi
+	exit 0
+fi
+
+# If repo_input looks like a local path (starts with / or . or ~) but directory doesn't exist
+if [[ "$repo_input" == /* ]] || [[ "$repo_input" == ./* ]] || [[ "$repo_input" == ../* ]]; then
+	json_error "Repository directory not found: $repo_input"
 fi
 
 # Build full git repository URL (same convention as v-deploy-github-repo)
@@ -75,7 +95,7 @@ if [[ ! "$repo_input" =~ ^https?:// ]] && [[ ! "$repo_input" =~ ^git@ ]]; then
 	if [ -n "$GITHUB_ORG" ]; then
 		repo_url="https://github.com/${GITHUB_ORG}/${repo_input}.git"
 	else
-		check_result "$E_INVALID" "GitHub token/org not configured. Provide full git URL."
+		json_error "GitHub token/org not configured. Provide full git URL."
 	fi
 fi
 
@@ -85,27 +105,34 @@ trap 'rm -rf "$tmp_dir"' EXIT
 clone_dir="$tmp_dir/clone"
 
 # Token-authenticated clone without embedding the PAT in the URL
+clone_success=0
 if [ -n "$GITHUB_TOKEN" ] && [[ "$repo_url" =~ ^https://github.com/ ]]; then
 	askpass="$tmp_dir/askpass.sh"
 	printf '#!/bin/sh\nprintf "%%s\\n" "$NEXVIA_GIT_TOKEN"\n' > "$askpass"
 	chmod 700 "$askpass"
-	if ! NEXVIA_GIT_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
+	if NEXVIA_GIT_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
 		git -c credential.helper= clone --depth 1 -b "$branch" "$repo_url" "$clone_dir" 2>/dev/null; then
-		if ! NEXVIA_GIT_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
-			git -c credential.helper= clone --depth 1 "$repo_url" "$clone_dir" 2>/dev/null; then
-			check_result "$E_CONNECT" "Git clone failed. Check repository URL/branch and token permissions."
-		fi
+		clone_success=1
+	elif NEXVIA_GIT_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
+		git -c credential.helper= clone --depth 1 "$repo_url" "$clone_dir" 2>/dev/null; then
+		clone_success=1
 	fi
 else
-	if ! git clone --depth 1 -b "$branch" "$repo_url" "$clone_dir" 2>/dev/null; then
-		if ! git clone --depth 1 "$repo_url" "$clone_dir" 2>/dev/null; then
-			check_result "$E_CONNECT" "Git clone failed. Check repository URL and access."
-		fi
+	if git clone --depth 1 -b "$branch" "$repo_url" "$clone_dir" 2>/dev/null; then
+		clone_success=1
+	elif git clone --depth 1 "$repo_url" "$clone_dir" 2>/dev/null; then
+		clone_success=1
 	fi
 fi
 
-# Fall back to the repository's default branch name when -b clone failed
+if [ "$clone_success" -ne 1 ] || [ ! -d "$clone_dir" ]; then
+	json_error "Git clone failed. Check repository URL ($repo_url), branch ($branch), and access permissions."
+fi
+
+# Fall back to the repository's default branch name when -b clone fell back
 detected_branch=$(git -C "$clone_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "$branch")
 
-run_scan "$clone_dir" "$detected_branch"
-exit $?
+if ! python3 "$scanner" "${scanner_flags[@]}" "$clone_dir" "$detected_branch"; then
+	json_error "Repository scan analysis failed"
+fi
+exit 0
