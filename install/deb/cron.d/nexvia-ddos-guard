@@ -1,0 +1,2 @@
+# NexviaCP — automatic Cloudflare Under Attack escalation (distress-first)
+*/1 * * * * root /usr/local/hestia/bin/v-ddos-guard --run >/dev/null 2>&1

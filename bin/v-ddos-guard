@@ -1,0 +1,11 @@
+#!/bin/bash
+# info: distress-first DDoS guard with automatic Cloudflare Under Attack escalation
+# options: --run | --status | --force-on | --force-off | --auto | --self-test
+#
+# Measures request waves, client concentration, system distress and error
+# bursts against the server's own learned hour-of-day baseline; escalates all
+# Cloudflare zones to under_attack when the composite score crosses the
+# hysteretic threshold and restores the previous levels once calm returns.
+
+exec python3 /usr/local/hestia/lib/nexvia-ddos-guard.py "$@"
+exit $?
