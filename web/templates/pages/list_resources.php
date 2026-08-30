@@ -177,6 +177,9 @@
 				$users = (int)($ddata["ACTIVE_USERS_10M"] ?? 0);
 				$score = (int)($ddata["DEMAND_SCORE"] ?? 0);
 				$u_owner = $ddata["USER"] ?? $user_plain;
+				$is_api_domain = !empty($ddata["APP_TYPE"]);
+				$container_mem = (int)($ddata["CONTAINER_MEM_MB"] ?? 0);
+				$rt_ms = (int)($ddata["AVG_RT_MS"] ?? 0);
 			?>
 				<div class="units-table-row domain-governance-row" data-domain="<?= tohtml(strtolower($dname)) ?>" data-status="<?= tohtml($status) ?>">
 					<!-- Domain Name -->
@@ -188,7 +191,7 @@
 									<?= tohtml($dname) ?>
 								</a>
 								<small class="u-text-muted" style="display:block; font-size:11px;">
-									<?= tohtml($u_owner) ?>
+									<?= tohtml($u_owner) ?><?php if ($is_api_domain): ?><span class="badge badge-info" style="font-size:9px; margin-left:4px; padding:1px 5px;" title="<?= tohtml(__tr("API / backend service - never idled, scaled by distress (latency, memory, CPU)", "API / arka plan servisi - asla uyutulmaz; gecikme, bellek, CPU sikismasina gore olceklenir")) ?>">API</span><?php if ($container_mem > 0): ?><span style="font-size:9px; color:var(--icon-color-blue, #38bdf8);" title="Container memory">🐳 <?= $container_mem ?> MB</span><?php endif; ?><?php endif; ?><?php if ($rt_ms > 0): ?><span style="font-size:9px; margin-left:6px;" title="<?= tohtml(__tr("Avg response time", "Ortalama cevap suresi")) ?>">⏱ <?= $rt_ms ?> ms</span><?php endif; ?>
 								</small>
 							</div>
 						</div>
