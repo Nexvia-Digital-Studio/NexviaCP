@@ -154,34 +154,30 @@ done
 #----------------------------------------------------------#
 
 # Save domain metadata in web.conf.
-# NOTE: the add_object_key guards must check the value STORED IN web.conf
-# ($config), not the shell variables — REDIS_HOST/REDIS_PORT are defaulted
-# earlier in this script, so `[ -z "$REDIS_HOST" ]` is never true and the
-# keys were silently never persisted.
-cur_redis_db=$(get_object_value 'web' 'DOMAIN' "$domain" '$REDIS_DB')
-if [ -z "$cur_redis_db" ]; then
-	add_object_key "web" 'DOMAIN' "$domain" 'REDIS_DB' 'ALIAS'
-fi
-update_object_value 'web' 'DOMAIN' "$domain" '$REDIS_DB' "$redis_db"
+# NOTE: guards must check the value STORED in web.conf, not shell variables —
+# get_object_value resolves through the shell environment (REDIS_HOST is
+# defaulted earlier in this script, so it always looks "already present") and
+# REDIS_HOST/REDIS_PORT were therefore never persisted. Read the file directly.
+redis_conf="$USER_DATA/web.conf"
+out_host="$REDIS_HOST"
+out_port="$REDIS_PORT"
+out_db="$redis_db"
+persist_redis_key() {
+	key="$1"    # e.g. REDIS_HOST
+	val="$2"    # value to store
+	cur=$(sed -n "s/^DOMAIN='$domain' .*$key='\([^']*\)'.*$/\1/p" "$redis_conf" | head -1)
+	if [ -z "$cur" ]; then
+		add_object_key "web" 'DOMAIN' "$domain" "$key" 'ALIAS'
+	fi
+	update_object_value 'web' 'DOMAIN' "$domain" "\$$key" "$val"
+}
 
-cur_redis_host=$(get_object_value 'web' 'DOMAIN' "$domain" '$REDIS_HOST')
-if [ -z "$cur_redis_host" ]; then
-	add_object_key "web" 'DOMAIN' "$domain" 'REDIS_HOST' 'ALIAS'
-fi
-update_object_value 'web' 'DOMAIN' "$domain" '$REDIS_HOST' "$REDIS_HOST"
-
-cur_redis_port=$(get_object_value 'web' 'DOMAIN' "$domain" '$REDIS_PORT')
-if [ -z "$cur_redis_port" ]; then
-	add_object_key "web" 'DOMAIN' "$domain" 'REDIS_PORT' 'ALIAS'
-fi
-update_object_value 'web' 'DOMAIN' "$domain" '$REDIS_PORT' "$REDIS_PORT"
+persist_redis_key REDIS_DB "$redis_db"
+persist_redis_key REDIS_HOST "$REDIS_HOST"
+persist_redis_key REDIS_PORT "$REDIS_PORT"
 
 if [ -n "$REDIS_SOCKET" ]; then
-	cur_redis_socket=$(get_object_value 'web' 'DOMAIN' "$domain" '$REDIS_SOCKET')
-	if [ -z "$cur_redis_socket" ]; then
-		add_object_key "web" 'DOMAIN' "$domain" 'REDIS_SOCKET' 'ALIAS'
-	fi
-	update_object_value 'web' 'DOMAIN' "$domain" '$REDIS_SOCKET' "$REDIS_SOCKET"
+	persist_redis_key REDIS_SOCKET "$REDIS_SOCKET"
 fi
 
 # Optional restart if requested
@@ -194,5 +190,5 @@ $BIN/v-log-action "$user" "Info" "Web" "Redis DB $redis_db assigned to domain $d
 log_event "$OK" "$ARGUMENTS"
 
 echo "Redis DB $redis_db assigned to domain $domain."
-echo "Injected REDIS_HOST=$REDIS_HOST, REDIS_PORT=$REDIS_PORT, REDIS_DB=$redis_db into $docroot/.env (chmod 600)."
+echo "Injected REDIS_HOST=$out_host, REDIS_PORT=$out_port, REDIS_DB=$out_db into $docroot/.env (chmod 600)."
 exit 0
