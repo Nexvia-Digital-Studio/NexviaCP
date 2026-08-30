@@ -258,12 +258,16 @@ $is_tr = (($_SESSION['language'] ?? '') === 'tr' || ($_SESSION['LANGUAGE'] ?? ''
 							<?php } ?>
 						</div>
 
-						<!-- Website Live/Suspended Status -->
-						<div class="units-table-cell u-text-center" style="flex: 1.1; min-width: 100px;">
+						<!-- Website Live/Suspended Status & Direct Open/Close Toggle -->
+						<div class="units-table-cell u-text-center" style="flex: 1.4; min-width: 130px;">
 							<?php if ($d_suspended === 'yes') { ?>
-								<span style="color: var(--color-danger, #ef4444); font-weight: 700; font-size: 11.5px;"><i class="fas fa-ban u-mr5"></i><?= tohtml($is_tr ? "Askıda" : "Suspended") ?></span>
+								<button type="button" onclick="toggleSiteStatus('<?= tohtml($d_user) ?>', '<?= tohtml($d_name) ?>', 'unsuspend')" class="button button-secondary" style="font-size: 11px; padding: 3px 8px; color: var(--icon-color-green, #22c55e); border-color: rgba(34, 197, 94, 0.4);" title="<?= tohtml($is_tr ? "Siteyi ve Yönlendirmeyi Aç / Yayına Al" : "Open / Unsuspend Site") ?>">
+									<i class="fas fa-play u-mr5"></i><?= tohtml($is_tr ? "Siteyi Aç" : "Open Site") ?>
+								</button>
 							<?php } else { ?>
-								<span style="color: var(--icon-color-green, #22c55e); font-weight: 700; font-size: 11.5px;"><i class="fas fa-circle-check u-mr5"></i><?= tohtml($is_tr ? "Yayında" : "Live") ?></span>
+								<button type="button" onclick="if(confirm('<?= tohtml($is_tr ? "Siteyi ve yönlendirmeyi durdurup kapatmak istediğinize emin misiniz?" : "Are you sure you want to stop/suspend this site?") ?>')) toggleSiteStatus('<?= tohtml($d_user) ?>', '<?= tohtml($d_name) ?>', 'suspend')" class="button button-secondary" style="font-size: 11px; padding: 3px 8px; color: var(--color-danger, #ef4444); border-color: rgba(239, 68, 68, 0.4);" title="<?= tohtml($is_tr ? "Siteyi ve Yönlendirmeyi Kapat / Askıya Al" : "Stop / Suspend Site") ?>">
+									<i class="fas fa-pause u-mr5"></i><?= tohtml($is_tr ? "Siteyi Kapat" : "Close Site") ?>
+								</button>
 							<?php } ?>
 						</div>
 
@@ -308,6 +312,8 @@ $is_tr = (($_SESSION['language'] ?? '') === 'tr' || ($_SESSION['LANGUAGE'] ?? ''
 						<option value="5y">📅 <?= tohtml($is_tr ? "Seçilenleri +5 Yıl Uzat" : "+5 Years") ?></option>
 						<option value="unlimited">♾️ <?= tohtml($is_tr ? "Seçilenleri Sınırsız Yap" : "Set Unlimited") ?></option>
 						<option value="custom">✏️ <?= tohtml($is_tr ? "Özel Tarihe Ayarla…" : "Set Custom Date…") ?></option>
+						<option value="unsuspend">🟢 <?= tohtml($is_tr ? "Seçilen Siteleri Aç (Yayına Al)" : "Open Selected Sites") ?></option>
+						<option value="suspend">🔴 <?= tohtml($is_tr ? "Seçilen Siteleri Kapat (Durdur)" : "Close Selected Sites") ?></option>
 					</select>
 					<div id="bulk-date-wrap" style="display: none;">
 						<input type="date" name="bulk_custom_date" min="<?= date('Y-m-d') ?>" value="<?= date('Y-m-d', strtotime('+1 year')) ?>" class="form-control" style="font-size: 12px; height: 32px; max-width: 140px;">
@@ -322,6 +328,15 @@ $is_tr = (($_SESSION['language'] ?? '') === 'tr' || ($_SESSION['LANGUAGE'] ?? ''
 	</form>
 
 </div>
+
+<!-- Hidden Standalone Site Status Toggle Form -->
+<form id="single-toggle-form" method="post" action="/list/domain-expiry/" style="display:none;">
+	<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
+	<input type="hidden" name="toggle_domain_status" value="1">
+	<input type="hidden" name="toggle_user" id="st-user" value="">
+	<input type="hidden" name="toggle_domain" id="st-domain" value="">
+	<input type="hidden" name="toggle_action" id="st-action" value="">
+</form>
 
 <!-- Hidden Standalone Single Extend Form -->
 <form id="single-extend-form" method="post" action="/list/domain-expiry/" style="display:none;">
@@ -357,6 +372,13 @@ $is_tr = (($_SESSION['language'] ?? '') === 'tr' || ($_SESSION['LANGUAGE'] ?? ''
 <script>
 let activeModalUser = '';
 let activeModalDomain = '';
+
+function toggleSiteStatus(user, domain, action) {
+	document.getElementById('st-user').value = user;
+	document.getElementById('st-domain').value = domain;
+	document.getElementById('st-action').value = action;
+	document.getElementById('single-toggle-form').submit();
+}
 
 function quickExtend(user, domain, value) {
 	document.getElementById('se-user').value = user;

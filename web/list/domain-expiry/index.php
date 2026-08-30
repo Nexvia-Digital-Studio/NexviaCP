@@ -50,7 +50,35 @@ if (!empty($_POST["update_single_expiry"])) {
 	exit();
 }
 
-// Action 3: Bulk Duration Update
+// Action 3: Toggle Single Domain Status (Open / Close Site)
+if (!empty($_POST["toggle_domain_status"])) {
+	verify_csrf($_POST);
+	$target_user = quoteshellarg($_POST["toggle_user"] ?? $user_plain);
+	$target_domain = quoteshellarg($_POST["toggle_domain"] ?? "");
+	$target_action = trim($_POST["toggle_action"] ?? "");
+
+	if (!empty($_POST["toggle_domain"])) {
+		if ($target_action === "suspend") {
+			exec(HESTIA_CMD . "v-suspend-web-domain " . $target_user . " " . $target_domain . " 'yes'", $out, $rc);
+			if ($rc == 0) {
+				$_SESSION["ok_msg"] = ($is_tr ? "Site yayını ve yönlendirmesi durduruldu / kapatıldı: " : _("Web domain suspended: ")) . htmlspecialchars($_POST["toggle_domain"]);
+			} else {
+				$_SESSION["error_msg"] = ($is_tr ? "Site kapatılırken hata: " : _("Error suspending domain: ")) . implode(" ", $out);
+			}
+		} elseif ($target_action === "unsuspend") {
+			exec(HESTIA_CMD . "v-unsuspend-web-domain " . $target_user . " " . $target_domain . " 'yes'", $out, $rc);
+			if ($rc == 0) {
+				$_SESSION["ok_msg"] = ($is_tr ? "Site yayını ve yönlendirmesi başarıyla açıldı: " : _("Web domain opened & unsuspended: ")) . htmlspecialchars($_POST["toggle_domain"]);
+			} else {
+				$_SESSION["error_msg"] = ($is_tr ? "Site açılırken hata: " : _("Error opening domain: ")) . implode(" ", $out);
+			}
+		}
+	}
+	header("Location: /list/domain-expiry/");
+	exit();
+}
+
+// Action 4: Bulk Action (Duration Update, Suspend, Unsuspend)
 if (!empty($_POST["bulk_expiry_action"]) && !empty($_POST["domains"])) {
 	verify_csrf($_POST);
 	$bulk_action = $_POST["bulk_action_type"] ?? "1y";
@@ -72,7 +100,13 @@ if (!empty($_POST["bulk_expiry_action"]) && !empty($_POST["domains"])) {
 		}
 
 		if (!empty($d)) {
-			exec(HESTIA_CMD . "v-set-web-domain-expiry " . quoteshellarg($u) . " " . quoteshellarg($d) . " " . quoteshellarg($bulk_action) . " 'yes'", $out, $rc);
+			if ($bulk_action === "suspend") {
+				exec(HESTIA_CMD . "v-suspend-web-domain " . quoteshellarg($u) . " " . quoteshellarg($d) . " 'yes'", $out, $rc);
+			} elseif ($bulk_action === "unsuspend") {
+				exec(HESTIA_CMD . "v-unsuspend-web-domain " . quoteshellarg($u) . " " . quoteshellarg($d) . " 'yes'", $out, $rc);
+			} else {
+				exec(HESTIA_CMD . "v-set-web-domain-expiry " . quoteshellarg($u) . " " . quoteshellarg($d) . " " . quoteshellarg($bulk_action) . " 'yes'", $out, $rc);
+			}
 			if ($rc == 0) {
 				$success_count++;
 			}
@@ -80,7 +114,7 @@ if (!empty($_POST["bulk_expiry_action"]) && !empty($_POST["domains"])) {
 		}
 	}
 
-	$_SESSION["ok_msg"] = sprintf($is_tr ? "%d domainin süresi başarıyla güncellendi." : _("%d domains updated successfully."), $success_count);
+	$_SESSION["ok_msg"] = sprintf($is_tr ? "%d domain için işlem başarıyla tamamlandı." : _("%d domains processed successfully."), $success_count);
 	header("Location: /list/domain-expiry/");
 	exit();
 }
