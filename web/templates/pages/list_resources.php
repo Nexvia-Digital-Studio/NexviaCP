@@ -180,16 +180,17 @@ if (!empty($services)) {
 						<tr style="background: rgba(0, 0, 0, 0.25); border-bottom: 2px solid var(--border-color, #334155);">
 							<th style="padding: 12px 14px; color: var(--color-text-muted, #94a3b8); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;"><?= tohtml($is_tr ? "Domain Adı & Sahibi" : "Domain & Owner") ?></th>
 							<th style="padding: 12px 14px; width: 140px; color: var(--color-text-muted, #94a3b8); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;"><?= tohtml($is_tr ? "Anlık RAM Tüketimi" : "Live RAM Usage") ?></th>
-							<th style="padding: 12px 14px; width: 130px; color: var(--color-text-muted, #94a3b8); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;"><?= tohtml($is_tr ? "CPU / Limit" : "CPU Quota") ?></th>
+							<th style="padding: 12px 14px; width: 110px; color: var(--color-text-muted, #94a3b8); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;"><?= tohtml($is_tr ? "CPU / Limit" : "CPU Quota") ?></th>
+							<th style="padding: 12px 14px; width: 160px; color: var(--color-text-muted, #94a3b8); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;"><?= tohtml($is_tr ? "İstek (Son 1 Saat)" : "Requests (Last 1h)") ?></th>
 							<th style="padding: 12px 14px; width: 140px; color: var(--color-text-muted, #94a3b8); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;"><?= tohtml($is_tr ? "Talep / Durum" : "Demand State") ?></th>
-							<th style="padding: 12px 14px; width: 150px; color: var(--color-text-muted, #94a3b8); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;"><?= tohtml($is_tr ? "Öncelik Kademe" : "Priority Tier") ?></th>
+							<th style="padding: 12px 14px; width: 140px; color: var(--color-text-muted, #94a3b8); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;"><?= tohtml($is_tr ? "Öncelik Kademe" : "Priority Tier") ?></th>
 							<th style="padding: 12px 16px; width: 230px; text-align: right; color: var(--color-text-muted, #94a3b8); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;"><?= tohtml($is_tr ? "Süreç Kontrolleri" : "Actions") ?></th>
 						</tr>
 					</thead>
 					<tbody>
 						<?php if (empty($domains)): ?>
 							<tr>
-								<td colspan="6" style="padding: 40px; text-align: center; color: var(--color-text-muted, #94a3b8);">
+								<td colspan="7" style="padding: 40px; text-align: center; color: var(--color-text-muted, #94a3b8);">
 									<?= tohtml($is_tr ? "Henüz kayıtlı web sitesi bulunamadı." : "No web domains found.") ?>
 								</td>
 							</tr>
@@ -206,6 +207,11 @@ if (!empty($services)) {
 								$d_suspended = $d_val["SUSPENDED"] ?? "no";
 								$d_app_type = $d_val["APP_TYPE"] ?? "";
 								$is_standalone = in_array($d_app_type, ["dotnet", "node-js", "python", "docker", "api"]) || ($d_mem >= 200);
+
+								$d_req_1h = (int)($d_val["REQ_COUNT_1H"] ?? ($d_val["REQ_COUNT_10M"] ?? 0));
+								$d_dyn_1h = (int)($d_val["DYN_REQ_1H"] ?? ($d_val["DYN_REQ_10M"] ?? 0));
+								$d_users_1h = (int)($d_val["ACTIVE_USERS_1H"] ?? ($d_val["ACTIVE_USERS_10M"] ?? 0));
+								$d_avg_rt = (int)($d_val["AVG_RT_MS"] ?? 0);
 							?>
 								<tr class="res-item-row" data-name="<?= tohtml(strtolower($d_name . ' ' . $d_user . ' ' . $d_app_type)) ?>" style="border-bottom: 1px solid var(--border-color, #334155);">
 									
@@ -257,6 +263,25 @@ if (!empty($services)) {
 									<!-- CPU Quota -->
 									<td style="padding: 12px 14px; vertical-align: middle; white-space: nowrap; font-size: 12.5px; color: var(--color-text, #fff);">
 										<?= tohtml($d_cpu) ?>
+									</td>
+
+									<!-- Last 1 Hour Traffic & Requests -->
+									<td style="padding: 12px 14px; vertical-align: middle; white-space: nowrap;">
+										<div style="font-size: 13px; font-weight: 700; color: <?= $d_req_1h > 100 ? 'var(--icon-color-blue, #38bdf8)' : 'var(--color-text, #fff)' ?>;">
+											<i class="fas fa-arrow-trend-up u-mr5" style="font-size: 11px;"></i>
+											<?= number_format($d_req_1h) ?> <?= tohtml($is_tr ? "istek" : "req") ?>
+										</div>
+										<div style="font-size: 10.5px; color: var(--color-text-muted, #94a3b8); display: flex; gap: 6px;">
+											<span><i class="fas fa-bolt" style="color: var(--icon-color-orange, #f97316);"></i> <?= $d_dyn_1h ?> din/api</span>
+											<?php if ($d_users_1h > 0): ?>
+												<span>· <i class="fas fa-users"></i> <?= $d_users_1h ?> tekil</span>
+											<?php endif; ?>
+										</div>
+										<?php if ($d_avg_rt > 0): ?>
+											<div style="font-size: 10px; color: <?= $d_avg_rt > 1000 ? 'var(--color-danger, #ef4444)' : 'var(--icon-color-green, #22c55e)' ?>;">
+												⚡ Yanıt: <?= $d_avg_rt ?> ms
+											</div>
+										<?php endif; ?>
 									</td>
 
 									<!-- Demand Status -->

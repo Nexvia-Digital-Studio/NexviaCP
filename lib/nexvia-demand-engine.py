@@ -170,20 +170,24 @@ def parse_ts(ts):
 
 
 def analyze_log(log_file, now_ts):
-    """Count traffic + dynamic-request latency over the last 10/1 minutes."""
-    res = dict(req10=0, dyn10=0, static10=0, bot10=0, err5xx10=0, users=set(),
-               req1=0, rt_sum=0.0, rt_n=0, last_hit=0)
+    """Count traffic + dynamic-request latency over 1 hour, 10 minutes, and 1 minute."""
+    res = dict(
+        req1h=0, dyn1h=0, static1h=0, bot1h=0, err5xx1h=0, users1h=set(),
+        req10=0, dyn10=0, static10=0, bot10=0, err5xx10=0, users=set(),
+        req1=0, rt_sum=0.0, rt_n=0, last_hit=0
+    )
     if not log_file or not os.path.isfile(log_file):
         return res
     try:
         with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
             f.seek(0, os.SEEK_END)
             size = f.tell()
-            f.seek(max(0, size - 300000), os.SEEK_SET)
+            # Read up to ~2MB of recent log lines (sufficient for 1 hour of traffic)
+            f.seek(max(0, size - 2000000), os.SEEK_SET)
             lines = f.readlines()
-        if size > 300000 and lines:
+        if size > 2000000 and lines:
             lines = lines[1:]
-        for line in lines[-4000:]:
+        for line in lines[-15000:]:
             m = None
             for rx in LINE_RES:
                 m = rx.match(line.rstrip("\n"))
@@ -198,7 +202,7 @@ def analyze_log(log_file, now_ts):
             if t > res["last_hit"]:
                 res["last_hit"] = t
             age = now_ts - t
-            if age < 0 or age > 900:
+            if age < 0 or age > 3600:
                 continue
             ip = remote
             if xff and is_private_ip(remote):
@@ -210,6 +214,21 @@ def analyze_log(log_file, now_ts):
                 or status == "304" or req.startswith("HEAD ")
             is_stream = status == "101" or uri.startswith(tuple(STREAMING_PREFIX))
             is_5xx = bool(status and status.startswith("5"))
+
+            # 1-Hour window metrics
+            res["req1h"] += 1
+            if is_5xx:
+                res["err5xx1h"] += 1
+            if is_bot:
+                res["bot1h"] += 1
+            elif is_static:
+                res["static1h"] += 1
+            else:
+                res["dyn1h"] += 1
+            if not is_bot:
+                res["users1h"].add(ip)
+
+            # 10-Minute window metrics
             if age <= 600:
                 res["req10"] += 1
                 if is_5xx:
@@ -230,6 +249,8 @@ def analyze_log(log_file, now_ts):
                             pass
                 if not is_bot:
                     res["users"].add(ip)
+
+            # 1-Minute window metrics
             if age <= 60:
                 res["req1"] += 1
     except Exception:
@@ -238,10 +259,17 @@ def analyze_log(log_file, now_ts):
 
 
 def find_log(user, domain, homedir):
-    for p in ("/var/log/nginx/domains/%s.log" % domain,
-              "%s/%s/web/%s/logs/%s.log" % (homedir, user, domain, domain),
-              "/var/log/apache2/domains/%s.log" % domain,
-              "%s/%s/web/%s/logs/%s.bytes.log" % (homedir, user, domain, domain)):
+    candidates = [
+        "/var/log/nginx/domains/%s.log" % domain,
+        "/var/log/nginx/domains/%s.bytes.log" % domain,
+        "/var/log/apache2/domains/%s.log" % domain,
+        "/var/log/apache2/domains/%s.bytes.log" % domain,
+        "%s/%s/web/%s/logs/%s.log" % (homedir, user, domain, domain),
+        "%s/%s/web/%s/logs/%s.bytes.log" % (homedir, user, domain, domain),
+        "/var/log/nginx/%s-access.log" % domain,
+        "/var/log/nginx/%s.log" % domain,
+    ]
+    for p in candidates:
         if os.path.isfile(p) and os.path.getsize(p) > 0:
             return p
     return ""
@@ -663,6 +691,8 @@ def run(args):
         APP_TYPE=app_type,
         MEMORY_USAGE_MB=ram_usage_mb, MEMORY_HIGH=mem_high, MEMORY_MAX=mem_max,
         CPU_QUOTA=cpu, IO_WEIGHT=io,
+        REQ_COUNT_1H=tr["req1h"], DYN_REQ_1H=tr["dyn1h"],
+        ACTIVE_USERS_1H=len(tr["users1h"]),
         REQ_COUNT_10M=tr["req10"], DYN_REQ_10M=tr["dyn10"],
         STATIC_REQ_10M=tr["static10"], BOT_REQ_10M=tr["bot10"],
         ACTIVE_USERS_10M=users, REQ_COUNT_1M=tr["req1"],
