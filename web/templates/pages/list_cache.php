@@ -520,6 +520,7 @@
 			<div class="u-mb20">
 				<label class="form-label u-mb5 u-text-bold" style="font-size:12px;"><?= tohtml(__tr("Redis Database (0 - 15):", "Redis Veritabanı (0 - 15):")) ?></label>
 				<select id="modal_redis_db_select" name="redis_db" class="form-select" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--border-color, #334155); background:var(--color-background, #fff); color:var(--color-text, inherit);">
+					<option value="none" style="color:var(--color-danger, #ef4444); font-weight:bold;">❌ <?= tohtml(__tr("Unassign / Disable Redis DB (Clean .env)", "❌ DB Atamasını Kaldır (.env'yi Temizle)")) ?></option>
 					<option value="auto"><?= tohtml(__tr("⚡ Auto-Assign (Next Available DB 0-15)", "⚡ Otomatik Tahsis (İlk Boş DB 0-15)")) ?></option>
 					<?php for ($d = 0; $d <= 15; $d++) { ?>
 						<option value="<?= $d ?>">DB <?= $d ?></option>
@@ -532,7 +533,7 @@
 					<?= tohtml(__tr("Cancel", "İptal")) ?>
 				</button>
 				<button type="submit" class="button button-primary">
-					<i class="fas fa-check"></i> <?= tohtml(__tr("Save & Inject .env", "Kaydet & .env'ye Yaz")) ?>
+					<i class="fas fa-check"></i> <?= tohtml(__tr("Save & Apply", "Kaydet & Uygula")) ?>
 				</button>
 			</div>
 		</form>
@@ -545,7 +546,11 @@ function openRedisModal(user, domain, currentDb) {
 	document.getElementById('modal_domain_name').value = domain;
 	document.getElementById('modal_display_domain').value = domain + " (" + user + ")";
 	var select = document.getElementById('modal_redis_db_select');
-	select.value = currentDb;
+	if (currentDb === null || currentDb === '' || currentDb === 'null' || currentDb === 'none') {
+		select.value = 'none';
+	} else {
+		select.value = currentDb;
+	}
 	document.getElementById('redisModal').style.display = 'flex';
 }
 

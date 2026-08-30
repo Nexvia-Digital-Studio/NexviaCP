@@ -1,0 +1,90 @@
+﻿#!/bin/bash
+# info: remove dedicated Redis database assignment from domain and clean .env
+# options: USER DOMAIN [FLUSH_DB]
+#
+# example: v-delete-web-domain-redis admin mysite.com no
+
+# Argument definition
+user=$1
+domain=$2
+domain_idn=$2
+flush_db=${3:-no}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER DOMAIN [FLUSH_DB]'
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+is_object_unsuspended 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
+is_object_unsuspended 'web' 'DOMAIN' "$domain"
+
+check_hestia_demo_mode
+
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "Error: Script can be executed only by root"
+	exit 10
+fi
+
+# Get current Redis DB from web.conf
+current_db=$(get_object_values 'web' 'DOMAIN' "$domain" '$REDIS_DB')
+
+# Optionally flush the keys in the unassigned DB
+if [ "$flush_db" = "yes" ] && [ -n "$current_db" ] && [ "$current_db" != "null" ]; then
+	redis-cli -n "$current_db" flushdb async 2>/dev/null || redis-cli -n "$current_db" flushdb 2>/dev/null || true
+fi
+
+# Locate project document root and target .env paths
+docroot="$HOMEDIR/$user/web/$domain/public_html"
+env_targets=("$docroot/.env")
+if [ -d "$HOMEDIR/$user/web/$domain/private" ]; then
+	env_targets+=("$HOMEDIR/$user/web/$domain/private/.env")
+fi
+if [ -f "$HOMEDIR/$user/web/$domain/.env" ]; then
+	env_targets+=("$HOMEDIR/$user/web/$domain/.env")
+fi
+
+# Function to remove key from .env safely
+remove_env_var() {
+	local file="$1"
+	local key="$2"
+	if [ -f "$file" ]; then
+		local tmp_env
+		tmp_env=$(mktemp /tmp/nexvia_env_rm_XXXXXX)
+		chmod 600 "$tmp_env"
+		grep -v "^${key}=" "$file" > "$tmp_env" 2>/dev/null || true
+		mv -f "$tmp_env" "$file"
+		chmod 600 "$file"
+		chown "$user:$user" "$file"
+	fi
+}
+
+for env_file in "${env_targets[@]}"; do
+	remove_env_var "$env_file" "REDIS_HOST"
+	remove_env_var "$env_file" "REDIS_PORT"
+	remove_env_var "$env_file" "REDIS_DB"
+	remove_env_var "$env_file" "REDIS_SOCKET"
+done
+
+# Remove keys from web.conf
+delete_object_key 'web' 'DOMAIN' "$domain" 'REDIS_DB'
+delete_object_key 'web' 'DOMAIN' "$domain" 'REDIS_HOST'
+delete_object_key 'web' 'DOMAIN' "$domain" 'REDIS_PORT'
+delete_object_key 'web' 'DOMAIN' "$domain" 'REDIS_SOCKET'
+
+# Logging
+$BIN/v-log-action "$user" "Info" "Web" "Redis database assignment removed from domain $domain."
+log_event "$OK" "$ARGUMENTS"
+
+echo "OK: Redis database assignment removed from domain $domain."
+exit 0

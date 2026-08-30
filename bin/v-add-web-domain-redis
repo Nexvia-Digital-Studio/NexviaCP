@@ -62,6 +62,14 @@ for sock_path in /var/run/redis/redis-server.sock /var/run/redis/redis.sock /var
 	fi
 done
 
+# If unassignment was requested
+case "$redis_db" in
+	none|remove|delete|unbind|off|no)
+		$BIN/v-delete-web-domain-redis "$user" "$domain" "no"
+		exit $?
+		;;
+esac
+
 # Allocate or validate Redis Database (0 - 15)
 if [ "$redis_db" = "auto" ] || [ -z "$redis_db" ]; then
 	# Collect currently allocated DB numbers from all web.conf files
