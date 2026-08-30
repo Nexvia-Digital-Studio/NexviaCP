@@ -20,11 +20,15 @@ env_file=${6:-}
 
 # Includes
 # shellcheck source=/etc/hestiacp/hestia.conf
-source /etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
 # shellcheck source=/usr/local/hestia/func/main.sh
-source $HESTIA/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
 # load config file
-source_conf "$HESTIA/conf/hestia.conf"
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
 
 #----------------------------------------------------------#
 #                    Verifications                         #
@@ -202,7 +206,46 @@ fi
 # must never see the admin's global API keys. Use v-set-web-domain-env to
 # manage per-domain secrets explicitly.
 
-# Step 2.5: Auto-provision MySQL Database if schema.sql exists
+# Step 2.3: Scan repository metadata with nexvia-repo-scan.py
+scanner="$HESTIA/lib/nexvia-repo-scan.py"
+detected_type=""
+pkg_mgr="npm"
+out_dir="dist"
+detected_target_fw=""
+detected_orm=""
+
+if [ -f "$scanner" ] && command -v python3 &>/dev/null; then
+	echo "[*] Analyzing repository metadata with scanner..."
+	scan_json=$(python3 "$scanner" "$docroot" "$branch" 2>/dev/null || echo "{}")
+	if [ -n "$scan_json" ]; then
+		eval "$(python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    if data.get("ok"):
+        plat = data.get("platform") or {}
+        comps = data.get("components") or [{}]
+        primary = comps[0] if comps else {}
+        db = data.get("database") or {}
+
+        mode = plat.get("mode") or primary.get("mode") or ""
+        pm = data.get("package_manager") or plat.get("package_manager") or primary.get("package_manager") or "npm"
+        od = data.get("output_directory") or plat.get("output_directory") or primary.get("output_directory") or primary.get("output_dir") or "dist"
+        tfw = data.get("target_framework") or plat.get("target_framework") or primary.get("target_framework") or primary.get("runtime_version") or ""
+        orm = data.get("orm") or db.get("orm") or ""
+
+        print(f"detected_type={json.dumps(str(mode))}")
+        print(f"pkg_mgr={json.dumps(str(pm))}")
+        print(f"out_dir={json.dumps(str(od))}")
+        print(f"detected_target_fw={json.dumps(str(tfw))}")
+        print(f"detected_orm={json.dumps(str(orm))}")
+except Exception:
+    pass
+' <<< "$scan_json" 2>/dev/null || true)"
+	fi
+fi
+
+# Step 2.5: Auto-provision MySQL Database if schema.sql or Prisma schema exists
 sql_file=""
 for f in "$docroot/schema.sql" "$docroot/database.sql" "$docroot/db.sql" "$docroot/install.sql" "$docroot/build/schema.sql"; do
 	if [ -f "$f" ]; then
@@ -239,7 +282,7 @@ if [ -n "$sql_file" ]; then
 
 	# Inject DB credentials into .env (force-update: the password may have
 	# been rotated above, stale values from older deployments must go)
-	for db_var in "DB_HOST=127.0.0.1" "DB_PORT=3306" "DB_NAME=$full_db_name" "DB_DATABASE=$full_db_name" "DB_USER=$full_db_name" "DB_USERNAME=$full_db_name" "DB_PASS=$db_pass" "DB_PASSWORD=$db_pass"; do
+	for db_var in "DB_HOST=127.0.0.1" "DB_PORT=3306" "DB_NAME=$full_db_name" "DB_DATABASE=$full_db_name" "DB_USER=$full_db_name" "DB_USERNAME=$full_db_name" "DB_PASS=$db_pass" "DB_PASSWORD=$db_pass" "DATABASE_URL=mysql://${full_db_name}:${db_pass}@127.0.0.1:3306/${full_db_name}"; do
 		k=$(echo "$db_var" | cut -d '=' -f 1)
 		if grep -q "^${k}=" "$docroot/.env" 2>/dev/null; then
 			sed -i "s|^${k}=.*|${db_var}|g" "$docroot/.env"
@@ -279,6 +322,41 @@ if [ -n "$sql_file" ]; then
 		su - "$user" -s /bin/bash -c "cd '$docroot/build' && php '$(basename "$seeder")'" >/dev/null 2>&1 \
 			|| echo "[!] Seeder failed: $(basename "$seeder") (continuing)"
 	done
+elif [ -f "$docroot/prisma/schema.prisma" ] || [ -f "$docroot/schema.prisma" ] || [ "$detected_orm" = "prisma" ]; then
+	# If DATABASE_URL is not configured, provision MySQL DB for Prisma
+	need_db_provision=0
+	if ! grep -q "^DATABASE_URL=" "$docroot/.env" 2>/dev/null; then
+		need_db_provision=1
+	else
+		db_url_val=$(grep "^DATABASE_URL=" "$docroot/.env" | head -n 1 | cut -d '=' -f 2-)
+		case "$db_url_val" in
+			"" | *"changeme"* | *"change_me"* | *"xxx"* | *"your"* | *"<"* | *"{"*)
+				need_db_provision=1
+				;;
+		esac
+	fi
+	if [ "$need_db_provision" -eq 1 ]; then
+		clean_repo_db=$(echo "$repo_slug" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g' | cut -c 1-12)
+		db_name="${clean_repo_db}"
+		full_db_name="${user}_${db_name}"
+		db_pass=$(head /dev/urandom 2>/dev/null | tr -dc A-Za-z0-9 | head -c 16)
+		[ -z "$db_pass" ] && db_pass="NxvPass$(date +%s)"
+
+		echo "[*] Prisma schema found. Provisioning panel database: $full_db_name..."
+		if ! $BIN/v-list-database "$user" "$full_db_name" >/dev/null 2>&1; then
+			$BIN/v-add-database "$user" "$db_name" "$db_name" "$db_pass" >/dev/null 2>&1 || true
+		fi
+		$BIN/v-change-database-password "$user" "$full_db_name" "$db_pass" >/dev/null 2>&1 || true
+
+		for db_var in "DB_HOST=127.0.0.1" "DB_PORT=3306" "DB_NAME=$full_db_name" "DB_DATABASE=$full_db_name" "DB_USER=$full_db_name" "DB_USERNAME=$full_db_name" "DB_PASS=$db_pass" "DB_PASSWORD=$db_pass" "DATABASE_URL=mysql://${full_db_name}:${db_pass}@127.0.0.1:3306/${full_db_name}"; do
+			k=$(echo "$db_var" | cut -d '=' -f 1)
+			if grep -q "^${k}=" "$docroot/.env" 2>/dev/null; then
+				sed -i "s|^${k}=.*|${db_var}|g" "$docroot/.env"
+			else
+				echo "$db_var" >> "$docroot/.env"
+			fi
+		done
+	fi
 elif ls "$docroot"/seed.sql "$docroot"/seeds.sql "$docroot"/database/seed.sql "$docroot"/build/seed.sql &>/dev/null; then
 	echo "[i] Seed data found but no schema.sql — database not provisioned, seeds skipped."
 	echo "    (Add schema.sql so the panel can auto-create the database, or create the DB manually and re-deploy.)"
@@ -291,7 +369,7 @@ env_required=""
 if [ -f "$docroot/.env" ]; then
 	while IFS='=' read -r ek ev; do
 		case "$ek" in
-			"" | DB_HOST | DB_PORT | DB_NAME | DB_DATABASE | DB_USER | DB_USERNAME | DB_PASS | DB_PASSWORD | APP_KEY)
+			"" | DB_HOST | DB_PORT | DB_NAME | DB_DATABASE | DB_USER | DB_USERNAME | DB_PASS | DB_PASSWORD | DATABASE_URL | APP_KEY)
 				continue
 				;;
 		esac
@@ -310,21 +388,6 @@ chmod 600 "$docroot/.env" 2>/dev/null || true
 chown -R "$user:$user" "$docroot"
 
 echo "[*] Step 3: Detecting application stack..."
-detected_type="php"
-pkg_mgr="npm"
-out_dir="dist"
-detected_orm=""
-
-# Run rich analyzer if available
-if [ -f "$HESTIA/lib/nexvia-repo-scan.py" ] && command -v python3 &>/dev/null; then
-	scan_json=$(python3 "$HESTIA/lib/nexvia-repo-scan.py" "$docroot" "$branch" 2>/dev/null || echo "{}")
-	if [ -n "$scan_json" ]; then
-		detected_type=$(echo "$scan_json" | python3 -c 'import sys, json; data=json.load(sys.stdin); print(data.get("platform", {}).get("mode") or "php")' 2>/dev/null || echo "php")
-		pkg_mgr=$(echo "$scan_json" | python3 -c 'import sys, json; data=json.load(sys.stdin); comps=data.get("components", []); print(comps[0].get("package_manager") if comps else "npm")' 2>/dev/null || echo "npm")
-		out_dir=$(echo "$scan_json" | python3 -c 'import sys, json; data=json.load(sys.stdin); comps=data.get("components", []); print(comps[0].get("output_dir") if comps else "dist")' 2>/dev/null || echo "dist")
-		detected_orm=$(echo "$scan_json" | python3 -c 'import sys, json; data=json.load(sys.stdin); print(data.get("database", {}).get("orm") or "")' 2>/dev/null || echo "")
-	fi
-fi
 
 # Fallback heuristic if scan didn't resolve
 if [ -z "$detected_type" ] || [ "$detected_type" = "unknown" ]; then
@@ -340,6 +403,19 @@ if [ -z "$detected_type" ] || [ "$detected_type" = "unknown" ]; then
 		detected_type="react"
 	elif [ -f "$docroot/artisan" ]; then
 		detected_type="laravel"
+	else
+		detected_type="php"
+	fi
+fi
+
+# Fallback package manager detection if lockfiles exist
+if [ -z "$pkg_mgr" ] || [ "$pkg_mgr" = "npm" ]; then
+	if [ -f "$docroot/pnpm-lock.yaml" ]; then
+		pkg_mgr="pnpm"
+	elif [ -f "$docroot/bun.lockb" ] || [ -f "$docroot/bun.lock" ]; then
+		pkg_mgr="bun"
+	elif [ -f "$docroot/yarn.lock" ]; then
+		pkg_mgr="yarn"
 	fi
 fi
 
@@ -358,31 +434,78 @@ echo "[+] Application Stack Detected: $detected_type (Mode: $app_mode | Pkg: $pk
 
 # Helper for running Node.js package manager commands under user privileges
 run_node_pkg() {
-	local action="$1"
+	local action="$1" # "install_prod", "install", or "build"
 	local mgr="$pkg_mgr"
-	if [ "$mgr" = "bun" ] && command -v bun &>/dev/null; then
-		if [ "$action" = "install" ]; then
-			su - "$user" -s /bin/bash -c "cd '$docroot' && bun install" 2>/dev/null || true
-		elif [ "$action" = "build" ]; then
-			su - "$user" -s /bin/bash -c "cd '$docroot' && bun run build" 2>/dev/null || true
-		fi
-	elif [ "$mgr" = "pnpm" ] && command -v pnpm &>/dev/null; then
-		if [ "$action" = "install" ]; then
-			su - "$user" -s /bin/bash -c "cd '$docroot' && pnpm install --frozen-lockfile 2>/dev/null || pnpm install" 2>/dev/null || true
-		elif [ "$action" = "build" ]; then
-			su - "$user" -s /bin/bash -c "cd '$docroot' && pnpm build" 2>/dev/null || true
-		fi
-	elif [ "$mgr" = "yarn" ] && command -v yarn &>/dev/null; then
-		if [ "$action" = "install" ]; then
-			su - "$user" -s /bin/bash -c "cd '$docroot' && yarn install --production=false" 2>/dev/null || true
-		elif [ "$action" = "build" ]; then
-			su - "$user" -s /bin/bash -c "cd '$docroot' && yarn build" 2>/dev/null || true
-		fi
-	elif command -v npm &>/dev/null; then
-		if [ "$action" = "install" ]; then
-			su - "$user" -s /bin/bash -c "cd '$docroot' && npm install --production=false" 2>/dev/null || true
+
+	case "$mgr" in
+		pnpm)
+			if command -v pnpm &>/dev/null; then
+				if [ "$action" = "install_prod" ]; then
+					su - "$user" -s /bin/bash -c "cd '$docroot' && pnpm install --prod" 2>/dev/null \
+						|| su - "$user" -s /bin/bash -c "cd '$docroot' && pnpm install" 2>/dev/null || true
+				elif [ "$action" = "install" ]; then
+					su - "$user" -s /bin/bash -c "cd '$docroot' && pnpm install" 2>/dev/null || true
+				elif [ "$action" = "build" ]; then
+					su - "$user" -s /bin/bash -c "cd '$docroot' && pnpm run build" 2>/dev/null || true
+				fi
+				return 0
+			else
+				echo "[!] pnpm detected but not in PATH, falling back to npm"
+			fi
+			;;
+		bun)
+			if command -v bun &>/dev/null; then
+				if [ "$action" = "install_prod" ] || [ "$action" = "install" ]; then
+					su - "$user" -s /bin/bash -c "cd '$docroot' && bun install" 2>/dev/null || true
+				elif [ "$action" = "build" ]; then
+					su - "$user" -s /bin/bash -c "cd '$docroot' && bun run build" 2>/dev/null || true
+				fi
+				return 0
+			else
+				echo "[!] bun detected but not in PATH, falling back to npm"
+			fi
+			;;
+		yarn)
+			if command -v yarn &>/dev/null; then
+				if [ "$action" = "install_prod" ]; then
+					su - "$user" -s /bin/bash -c "cd '$docroot' && yarn install --production" 2>/dev/null \
+						|| su - "$user" -s /bin/bash -c "cd '$docroot' && yarn install" 2>/dev/null || true
+				elif [ "$action" = "install" ]; then
+					su - "$user" -s /bin/bash -c "cd '$docroot' && yarn install" 2>/dev/null || true
+				elif [ "$action" = "build" ]; then
+					su - "$user" -s /bin/bash -c "cd '$docroot' && yarn build" 2>/dev/null || true
+				fi
+				return 0
+			else
+				echo "[!] yarn detected but not in PATH, falling back to npm"
+			fi
+			;;
+	esac
+
+	# Default npm
+	if command -v npm &>/dev/null; then
+		if [ "$action" = "install_prod" ]; then
+			su - "$user" -s /bin/bash -c "cd '$docroot' && npm install --production" 2>/dev/null \
+				|| su - "$user" -s /bin/bash -c "cd '$docroot' && npm install" 2>/dev/null || true
+		elif [ "$action" = "install" ]; then
+			su - "$user" -s /bin/bash -c "cd '$docroot' && npm install" 2>/dev/null || true
 		elif [ "$action" = "build" ]; then
 			su - "$user" -s /bin/bash -c "cd '$docroot' && npm run build" 2>/dev/null || true
+		fi
+	fi
+}
+
+# Helper for executing Prisma ORM migrations under user privileges
+run_prisma_migrations() {
+	if [ -f "$docroot/prisma/schema.prisma" ] || [ -f "$docroot/schema.prisma" ] || [ "$detected_orm" = "prisma" ]; then
+		if grep -q "^DATABASE_URL=" "$docroot/.env" 2>/dev/null; then
+			echo "[*] Prisma schema detected. Running prisma generate & migrate deploy..."
+			su - "$user" -s /bin/bash -c "cd '$docroot' && npx prisma generate" 2>/dev/null \
+				|| echo "[!] Warning: Prisma generate failed (continuing)"
+			su - "$user" -s /bin/bash -c "cd '$docroot' && npx prisma migrate deploy" 2>/dev/null \
+				|| echo "[!] Warning: Prisma migrate deploy failed (continuing)"
+		else
+			echo "[i] Prisma schema found but DATABASE_URL is not set in .env — skipping prisma migrate."
 		fi
 	fi
 }
@@ -391,10 +514,16 @@ case "$detected_type" in
 	dotnet)
 		echo "[*] Configuring .NET Kestrel backend..."
 		$BIN/v-change-web-domain-tpl "$user" "$domain" "dotnet"
-		if ls "$docroot"/*.csproj &>/dev/null && command -v dotnet &>/dev/null; then
-			echo "[*] Building .NET project..."
-			su - "$user" -s /bin/bash -c "cd '$docroot' && dotnet publish -c Release -o '$docroot/publish'" 2>/dev/null || true
-			dll_file=$(find "$docroot/publish" -maxdepth 1 -name "*.dll" ! -name "Microsoft.*" ! -name "System.*" | head -n 1)
+		if (ls "$docroot"/*.csproj &>/dev/null || ls "$docroot"/*.sln &>/dev/null) && command -v dotnet &>/dev/null; then
+			if [ -n "$detected_target_fw" ]; then
+				echo "[*] Building .NET project (framework: $detected_target_fw)..."
+				su - "$user" -s /bin/bash -c "cd '$docroot' && dotnet publish -c Release -f '$detected_target_fw' -o '$docroot/publish'" 2>/dev/null \
+					|| su - "$user" -s /bin/bash -c "cd '$docroot' && dotnet publish -c Release -o '$docroot/publish'" 2>/dev/null || true
+			else
+				echo "[*] Building .NET project..."
+				su - "$user" -s /bin/bash -c "cd '$docroot' && dotnet publish -c Release -o '$docroot/publish'" 2>/dev/null || true
+			fi
+			dll_file=$(find "$docroot/publish" -maxdepth 1 -name "*.dll" ! -name "Microsoft.*" ! -name "System.*" 2>/dev/null | head -n 1)
 			if [ -n "$dll_file" ]; then
 				dll_base=$(basename "$dll_file")
 				$BIN/v-add-web-domain-app "$user" "$domain" dotnet "dotnet $docroot/publish/$dll_base"
@@ -405,18 +534,20 @@ case "$detected_type" in
 		echo "[*] Configuring Node.js application ($pkg_mgr)..."
 		$BIN/v-change-web-domain-tpl "$user" "$domain" "node-js"
 		if [ -f "$docroot/package.json" ]; then
+			echo "[*] Installing Node dependencies ($pkg_mgr)..."
 			run_node_pkg "install"
+			echo "[*] Building Node project ($pkg_mgr)..."
 			run_node_pkg "build"
 			# Prisma migration hook if detected
-			if [ "$detected_orm" = "prisma" ] || [ -f "$docroot/prisma/schema.prisma" ]; then
-				echo "[*] Running Prisma database setup..."
-				su - "$user" -s /bin/bash -c "cd '$docroot' && npx prisma generate >/dev/null 2>&1 && npx prisma migrate deploy >/dev/null 2>&1" || true
-			fi
+			run_prisma_migrations
 		fi
 		entry_file="app.js"
 		[ -f "$docroot/server.js" ] && entry_file="server.js"
 		[ -f "$docroot/index.js" ] && entry_file="index.js"
+		[ -f "$docroot/main.js" ] && entry_file="main.js"
 		[ -f "$docroot/dist/main.js" ] && entry_file="dist/main.js"
+		[ -f "$docroot/dist/index.js" ] && entry_file="dist/index.js"
+		[ -f "$docroot/dist/server.js" ] && entry_file="dist/server.js"
 		if [ "$detected_type" = "next" ] || [ -d "$docroot/.next" ]; then
 			$BIN/v-add-web-domain-app "$user" "$domain" node "npx next start"
 		else
@@ -427,15 +558,23 @@ case "$detected_type" in
 		echo "[*] Configuring Static SPA / Frontend ($pkg_mgr)..."
 		$BIN/v-change-web-domain-tpl "$user" "$domain" "default"
 		if [ -f "$docroot/package.json" ]; then
+			echo "[*] Installing dependencies ($pkg_mgr)..."
 			run_node_pkg "install"
+			echo "[*] Running frontend build ($pkg_mgr)..."
 			run_node_pkg "build"
+			# Prisma ORM hook if relevant
+			run_prisma_migrations
 		fi
-		# Copy compiled assets from output directory (out, dist, build)
-		target_out="$docroot/dist"
-		[ -d "$docroot/out" ] && target_out="$docroot/out"
-		[ -d "$docroot/build" ] && [ "$target_out" != "$docroot/out" ] && target_out="$docroot/build"
-		[ -n "$out_dir" ] && [ -d "$docroot/$out_dir" ] && target_out="$docroot/$out_dir"
-		if [ -d "$target_out" ] && [ "$target_out" != "$docroot" ]; then
+		# Copy compiled assets from output directory (out, dist, build, publish, etc.)
+		target_out=""
+		for cand in "$out_dir" "out" "dist" "build" "publish"; do
+			[ -z "$cand" ] && continue
+			if [ -d "$docroot/$cand" ] && [ "$cand" != "." ] && [ "$cand" != "public_html" ]; then
+				target_out="$docroot/$cand"
+				break
+			fi
+		done
+		if [ -n "$target_out" ] && [ -d "$target_out" ] && [ "$target_out" != "$docroot" ]; then
 			echo "[*] Deploying static build from ${target_out#"$docroot"/}/..."
 			cp -rf "$target_out"/* "$docroot"/ 2>/dev/null || true
 		fi
@@ -473,3 +612,4 @@ $BIN/v-restart-web 2>/dev/null || systemctl reload nginx 2>/dev/null || true
 echo "[+] SUCCESS: Deployment completed for $domain"
 log_event "$OK" "GitHub repo $repo_input deployed to $domain ($detected_type)"
 exit 0
+
