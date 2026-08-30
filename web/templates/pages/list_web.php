@@ -82,6 +82,60 @@
 
 	<h1 class="u-text-center u-hide-desktop u-mt20 u-pr30 u-mb20 u-pl30"><?= tohtml( _("Web Domains")) ?></h1>
 
+	<?php
+		/* Subdomain classification: hide domains that live under another
+		   domain of the same owner behind a dedicated tab. */
+		$nx_domains_by_owner = [];
+		foreach ($data as $nx_key => $nx_val) {
+			$nx_owner = $nx_val['_owner'] ?? $user;
+			$nx_domains_by_owner[$nx_owner][] = $nx_key;
+		}
+		$nx_main_count = 0;
+		$nx_sub_count = 0;
+		foreach ($data as $nx_key => $nx_val) {
+			$nx_owner = $nx_val['_owner'] ?? $user;
+			$nx_parent = '';
+			foreach ($nx_domains_by_owner[$nx_owner] as $nx_candidate) {
+				if ($nx_candidate !== $nx_key && substr($nx_key, -strlen('.' . $nx_candidate)) === '.' . $nx_candidate) {
+					$nx_parent = $nx_candidate;
+					break;
+				}
+			}
+			$data[$nx_key]['_subdomain_of'] = $nx_parent;
+			if ($nx_parent) { $nx_sub_count++; } else { $nx_main_count++; }
+		}
+	?>
+	<?php if ($nx_sub_count > 0): ?>
+	<style>
+		.nx-is-sub { display: none !important; }
+		body.nx-sub-view .nx-is-sub { display: revert !important; }
+		body.nx-sub-view .nx-is-main { display: none !important; }
+	</style>
+	<div class="u-mb10" style="display:flex; gap:8px; align-items:center;">
+		<button type="button" class="button button-primary js-nx-subtab" data-target="main">
+			<i class="fas fa-globe"></i> <?= tohtml(__tr("Main Domains", "Ana Domainler")) ?> (<?= $nx_main_count ?>)
+		</button>
+		<button type="button" class="button button-secondary js-nx-subtab" data-target="sub">
+			<i class="fas fa-sitemap"></i> <?= tohtml(__tr("Subdomains", "Subdomainler")) ?> (<?= $nx_sub_count ?>)
+		</button>
+	</div>
+	<script>
+		(function () {
+			var btns = document.querySelectorAll(".js-nx-subtab");
+			btns.forEach(function (btn) {
+				btn.addEventListener("click", function () {
+					var showSub = btn.getAttribute("data-target") === "sub";
+					document.body.classList.toggle("nx-sub-view", showSub);
+					btns.forEach(function (b) {
+						b.classList.toggle("button-primary", b === btn);
+						b.classList.toggle("button-secondary", b !== btn);
+					});
+				});
+			});
+		})();
+	</script>
+	<?php endif; ?>
+
 	<div class="units-table js-units-container">
 		<div class="units-table-header">
 				<div class="units-table-cell">
@@ -198,7 +252,7 @@
 				$has_ssl = filter_var($data[$key]['SSL'], FILTER_VALIDATE_BOOL);
 				$vstats_scheme = $has_ssl ? 'https' : 'http';
 			?>
-			<div class="units-table-row <?php if ($data[$key]['SUSPENDED'] == 'yes') echo 'disabled'; ?> js-unit"
+			<div class="units-table-row <?php if ($data[$key]['SUSPENDED'] == 'yes') echo 'disabled'; ?> js-unit <?= $data[$key]['_subdomain_of'] ? "nx-is-sub" : "nx-is-main" ?>"
 				data-sort-ip="<?= tohtml(str_replace(".", "", $data[$key]["IP"])) ?>"
 				data-sort-date="<?= tohtml(strtotime($data[$key]["DATE"] . " " . $data[$key]["TIME"])) ?>"
 				data-sort-name="<?= tohtml($key) ?>"
@@ -241,6 +295,11 @@
 						<?php if (strpos($key, 'pr-') === 0): ?>
 							<span class="badge badge-warning" style="font-size:10px; margin-left:4px; padding:2px 5px;" title="<?= tohtml(__tr("GitHub PR Preview Staging Environment (Protected Access)", "GitHub PR Test Önizleme Ortamı (Korumalı Erişim)")) ?>">
 								<i class="fas fa-code-pull-request"></i> PR
+							</span>
+						<?php endif; ?>
+						<?php if (!empty($data[$key]['_subdomain_of'])): ?>
+							<span class="badge badge-secondary" style="font-size:10px; margin-left:4px; padding:2px 5px;" title="<?= tohtml(__tr("Subdomain of", "Şunun subdomaini")) ?>: <?= tohtml($data[$key]['_subdomain_of']) ?>">
+								<i class="fas fa-sitemap"></i> <?= tohtml($data[$key]['_subdomain_of']) ?>
 							</span>
 						<?php endif; ?>
 						<?php if (($_SESSION["userContext"] ?? "") === "admin"): ?>
