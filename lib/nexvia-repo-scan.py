@@ -96,157 +96,273 @@ def find_env_template(root, subdir=""):
     return None, []
 
 
-def detect_package_manager(base_dir):
-    """Detect package manager and default commands from lockfiles."""
-    if os.path.isfile(os.path.join(base_dir, "bun.lockb")) or os.path.isfile(os.path.join(base_dir, "bun.lock")):
-        return {
-            "name": "bun",
-            "install": "bun install",
-            "build": "bun run build",
-            "start": "bun run start",
-            "run": "bun run"
-        }
-    if os.path.isfile(os.path.join(base_dir, "pnpm-lock.yaml")):
-        return {
-            "name": "pnpm",
-            "install": "pnpm install --frozen-lockfile",
-            "build": "pnpm build",
-            "start": "pnpm start",
-            "run": "pnpm"
-        }
-    if os.path.isfile(os.path.join(base_dir, "yarn.lock")):
-        return {
-            "name": "yarn",
-            "install": "yarn install --immutable",
-            "build": "yarn build",
-            "start": "yarn start",
-            "run": "yarn"
-        }
-    if os.path.isfile(os.path.join(base_dir, "package-lock.json")):
+def detect_package_manager(base_dir, root_dir=None):
+    """Detect package manager and default commands from lockfiles and configs."""
+    search_dirs = [base_dir]
+    if root_dir and root_dir != base_dir:
+        search_dirs.append(root_dir)
+
+    for d in search_dirs:
+        if not os.path.isdir(d):
+            continue
+        if os.path.isfile(os.path.join(d, "bun.lockb")) or os.path.isfile(os.path.join(d, "bun.lock")):
+            return {
+                "name": "bun",
+                "install": "bun install",
+                "build": "bun run build",
+                "start": "bun run start",
+                "run": "bun run"
+            }
+        if os.path.isfile(os.path.join(d, "pnpm-lock.yaml")):
+            return {
+                "name": "pnpm",
+                "install": "pnpm install --frozen-lockfile",
+                "build": "pnpm build",
+                "start": "pnpm start",
+                "run": "pnpm"
+            }
+        if os.path.isfile(os.path.join(d, "yarn.lock")):
+            is_berry = os.path.isfile(os.path.join(d, ".yarnrc.yml")) or os.path.isfile(os.path.join(d, ".yarnrc.yaml"))
+            return {
+                "name": "yarn",
+                "install": "yarn install --immutable" if is_berry else "yarn install",
+                "build": "yarn build",
+                "start": "yarn start",
+                "run": "yarn"
+            }
+        if os.path.isfile(os.path.join(d, "package-lock.json")):
+            return {
+                "name": "npm",
+                "install": "npm ci",
+                "build": "npm run build",
+                "start": "npm start",
+                "run": "npm run"
+            }
+
+    # Composer
+    for d in search_dirs:
+        if not os.path.isdir(d):
+            continue
+        if os.path.isfile(os.path.join(d, "composer.lock")) or os.path.isfile(os.path.join(d, "composer.json")):
+            return {
+                "name": "composer",
+                "install": "composer install --no-dev -o",
+                "build": "",
+                "start": "",
+                "run": "composer"
+            }
+
+    # Modern Python Managers
+    for d in search_dirs:
+        if not os.path.isdir(d):
+            continue
+        if os.path.isfile(os.path.join(d, "uv.lock")):
+            return {
+                "name": "uv",
+                "install": "uv sync",
+                "build": "",
+                "start": "uv run python main.py",
+                "run": "uv run"
+            }
+        if os.path.isfile(os.path.join(d, "poetry.lock")):
+            return {
+                "name": "poetry",
+                "install": "poetry install",
+                "build": "",
+                "start": "poetry run python main.py",
+                "run": "poetry run"
+            }
+        if os.path.isfile(os.path.join(d, "Pipfile.lock")) or os.path.isfile(os.path.join(d, "Pipfile")):
+            return {
+                "name": "pipenv",
+                "install": "pipenv install",
+                "build": "",
+                "start": "pipenv run python main.py",
+                "run": "pipenv run"
+            }
+        if os.path.isfile(os.path.join(d, "requirements.txt")):
+            return {
+                "name": "pip",
+                "install": "pip install -r requirements.txt",
+                "build": "",
+                "start": "python main.py",
+                "run": "python"
+            }
+
+    # .NET
+    for d in search_dirs:
+        if os.path.isdir(d):
+            for f in os.listdir(d):
+                if f.endswith((".csproj", ".sln")) or f == "global.json":
+                    return {
+                        "name": "dotnet",
+                        "install": "dotnet restore",
+                        "build": "dotnet publish -c Release -o bin/Release/publish",
+                        "start": "dotnet run",
+                        "run": "dotnet"
+                    }
+
+    # Fallback if package.json exists
+    if os.path.isfile(os.path.join(base_dir, "package.json")):
         return {
             "name": "npm",
-            "install": "npm ci",
+            "install": "npm install",
             "build": "npm run build",
             "start": "npm start",
             "run": "npm run"
         }
-    if os.path.isfile(os.path.join(base_dir, "composer.lock")) or os.path.isfile(os.path.join(base_dir, "composer.json")):
-        return {
-            "name": "composer",
-            "install": "composer install --no-dev -o",
-            "build": "",
-            "start": "",
-            "run": "composer"
-        }
-    if os.path.isfile(os.path.join(base_dir, "uv.lock")):
-        return {
-            "name": "uv",
-            "install": "uv pip install -r requirements.txt",
-            "build": "",
-            "start": "uv run python main.py",
-            "run": "uv"
-        }
-    if os.path.isfile(os.path.join(base_dir, "poetry.lock")):
-        return {
-            "name": "poetry",
-            "install": "poetry install --no-dev",
-            "build": "",
-            "start": "poetry run python main.py",
-            "run": "poetry"
-        }
-    if os.path.isfile(os.path.join(base_dir, "Pipfile.lock")) or os.path.isfile(os.path.join(base_dir, "Pipfile")):
-        return {
-            "name": "pipenv",
-            "install": "pipenv install --deploy",
-            "build": "",
-            "start": "pipenv run python main.py",
-            "run": "pipenv"
-        }
+
     return {
-        "name": "npm",
-        "install": "npm install",
-        "build": "npm run build",
-        "start": "npm start",
-        "run": "npm run"
+        "name": None,
+        "install": None,
+        "build": None,
+        "start": None,
+        "run": None
     }
 
 
-def detect_runtime_version(base_dir, tech_mode):
-    """Extract runtime version from .nvmrc, .node-version, composer.json, .csproj, pyproject.toml."""
+def detect_runtime_version(base_dir, root_dir, tech_mode):
+    """Extract runtime version from .nvmrc, .node-version, composer.json, .csproj, pyproject.toml, Pipfile."""
+    search_dirs = [base_dir]
+    if root_dir and root_dir != base_dir:
+        search_dirs.append(root_dir)
+
     if tech_mode in ("node", "react", "next"):
-        for f in (".node-version", ".nvmrc"):
-            p = os.path.join(base_dir, f)
+        for d in search_dirs:
+            for f in (".node-version", ".nvmrc"):
+                p = os.path.join(d, f)
+                if os.path.isfile(p):
+                    val = read_text(p).strip().lstrip("v").split()[0]
+                    if val:
+                        return val
+            p = os.path.join(d, ".tool-versions")
             if os.path.isfile(p):
-                val = read_text(p).strip().lstrip("v").split()[0]
-                if val:
-                    return val
+                m = re.search(r"nodejs\s+v?([0-9A-Za-z_.-]+)", read_text(p))
+                if m:
+                    return m.group(1)
         pkg_p = os.path.join(base_dir, "package.json")
         if os.path.isfile(pkg_p):
             try:
                 pkg = json.loads(read_text(pkg_p))
                 eng = pkg.get("engines", {}).get("node")
                 if eng:
-                    return str(eng)
+                    return str(eng).strip()
             except ValueError:
                 pass
     elif tech_mode == "php":
-        comp_p = os.path.join(base_dir, "composer.json")
-        if os.path.isfile(comp_p):
-            try:
-                comp = json.loads(read_text(comp_p))
-                req_php = comp.get("require", {}).get("php")
-                if req_php:
-                    return str(req_php)
-            except ValueError:
-                pass
-    elif tech_mode == "dotnet":
-        glob_p = os.path.join(base_dir, "global.json")
-        if os.path.isfile(glob_p):
-            try:
-                gj = json.loads(read_text(glob_p))
-                sdk_v = gj.get("sdk", {}).get("version")
-                if sdk_v:
-                    return str(sdk_v)
-            except ValueError:
-                pass
-        for f in os.listdir(base_dir):
-            if f.endswith((".csproj", ".fsproj")):
-                txt = read_text(os.path.join(base_dir, f))
-                m = re.search(r"<TargetFramework>(net[0-9.]+)</TargetFramework>", txt, re.I)
+        for d in search_dirs:
+            for f in (".php-version",):
+                p = os.path.join(d, f)
+                if os.path.isfile(p):
+                    val = read_text(p).strip()
+                    if val:
+                        return val
+            p = os.path.join(d, ".tool-versions")
+            if os.path.isfile(p):
+                m = re.search(r"php\s+([0-9.]+)", read_text(p))
                 if m:
                     return m.group(1)
+            comp_p = os.path.join(d, "composer.json")
+            if os.path.isfile(comp_p):
+                try:
+                    comp = json.loads(read_text(comp_p))
+                    req_php = comp.get("require", {}).get("php")
+                    if req_php:
+                        m = re.search(r"(\d+\.\d+)", str(req_php))
+                        return m.group(1) if m else str(req_php).strip()
+                except ValueError:
+                    pass
+    elif tech_mode == "dotnet":
+        for d in search_dirs:
+            glob_p = os.path.join(d, "global.json")
+            if os.path.isfile(glob_p):
+                try:
+                    gj = json.loads(read_text(glob_p))
+                    sdk_v = gj.get("sdk", {}).get("version")
+                    if sdk_v:
+                        return str(sdk_v).strip()
+                except ValueError:
+                    pass
+            if os.path.isdir(d):
+                for f in os.listdir(d):
+                    if f.endswith((".csproj", ".fsproj")):
+                        txt = read_text(os.path.join(d, f))
+                        m = re.search(r"<TargetFramework>([A-Za-z0-9_.-]+)</TargetFramework>", txt, re.I)
+                        if m:
+                            return m.group(1)
+                        m2 = re.search(r"<TargetFrameworks>([A-Za-z0-9_.;-]+)</TargetFrameworks>", txt, re.I)
+                        if m2:
+                            fws = [x.strip() for x in m2.group(1).split(";") if x.strip()]
+                            if fws:
+                                return fws[0]
     elif tech_mode == "python":
-        for f in (".python-version", "runtime.txt"):
-            p = os.path.join(base_dir, f)
+        for d in search_dirs:
+            for f in (".python-version", "runtime.txt"):
+                p = os.path.join(d, f)
+                if os.path.isfile(p):
+                    val = read_text(p).strip()
+                    m = re.search(r"python-?([0-9.]+)", val, re.I)
+                    if m:
+                        return m.group(1)
+                    if val:
+                        return val
+            p = os.path.join(d, ".tool-versions")
             if os.path.isfile(p):
-                val = read_text(p).strip()
-                if val:
-                    return val
+                m = re.search(r"python\s+([0-9.]+)", read_text(p))
+                if m:
+                    return m.group(1)
+            pyproj = os.path.join(d, "pyproject.toml")
+            if os.path.isfile(pyproj):
+                content = read_text(pyproj)
+                m = re.search(r'requires-python\s*=\s*["\']([^"\']+)["\']', content)
+                if m:
+                    return m.group(1).strip()
+                m = re.search(r'python\s*=\s*["\']([^"\']+)["\']', content)
+                if m:
+                    return m.group(1).strip()
+            pipfile = os.path.join(d, "Pipfile")
+            if os.path.isfile(pipfile):
+                content = read_text(pipfile)
+                m = re.search(r'python_version\s*=\s*["\']([^"\']+)["\']', content)
+                if m:
+                    return m.group(1).strip()
     return None
 
 
-def extract_heuristic_port(base_dir, entry_file=""):
+def extract_heuristic_port(base_dir, root_dir=None, entry_file="", default_port=None):
     """Search code files for common port bindings (process.env.PORT || 3000, app.listen, EXPOSE)."""
     candidates = []
     if entry_file and os.path.isfile(os.path.join(base_dir, entry_file)):
         candidates.append(os.path.join(base_dir, entry_file))
 
-    for fn in ("server.js", "app.js", "index.js", "main.js", "src/main.ts", "src/index.ts",
-               "src/server.ts", "main.py", "app.py", "Program.cs", "Dockerfile", "vite.config.ts", "vite.config.js"):
+    for fn in ("server.js", "app.js", "index.js", "main.js", "server.ts", "app.ts", "index.ts",
+               "src/main.ts", "src/index.ts", "src/server.ts", "src/app.ts",
+               "src/main.js", "src/index.js", "src/server.js", "src/app.js",
+               "main.py", "app.py", "server.py", "Program.cs", "Startup.cs",
+               "Dockerfile", "docker/Dockerfile", ".env.example", ".env.sample",
+               "vite.config.ts", "vite.config.js", "astro.config.mjs", "nuxt.config.ts"):
         p = os.path.join(base_dir, fn)
         if os.path.isfile(p) and p not in candidates:
             candidates.append(p)
+        elif root_dir and root_dir != base_dir:
+            rp = os.path.join(root_dir, fn)
+            if os.path.isfile(rp) and rp not in candidates:
+                candidates.append(rp)
 
     port_patterns = [
         re.compile(r"process\.env\.PORT\s*\|\|\s*(\d{2,5})"),
-        re.compile(r"app\.listen\(\s*(\d{2,5})"),
+        re.compile(r"process\.env\[['\"]PORT['\"]\]\s*\|\|\s*(\d{2,5})"),
+        re.compile(r"(?:const|let|var)\s+PORT\s*=\s*(?:process\.env\.PORT\s*\|\|\s*)?(\d{2,5})", re.I),
+        re.compile(r"app\.listen\(\s*(?:process\.env\.PORT\s*\|\|\s*)?(\d{2,5})"),
+        re.compile(r"(?:listen|serve)\(\s*\{?[^\}]*port:\s*(\d{2,5})"),
         re.compile(r"server\.listen\(\s*(\d{2,5})"),
-        re.compile(r"PORT\s*=\s*(\d{2,5})"),
         re.compile(r"EXPOSE\s+(\d{2,5})"),
-        re.compile(r"port:\s*(\d{2,5})"),
-        re.compile(r"uvicorn.*--port\s*(\d{2,5})"),
-        re.compile(r"https?://[^:]+:(\d{2,5})"),
-        re.compile(r"UseUrls\(.*:(\d{2,5})"),
+        re.compile(r"uvicorn.*--port\s+(\d{2,5})"),
+        re.compile(r"uvicorn\.run\(.*port\s*=\s*(\d{2,5})"),
+        re.compile(r"fastapi.*--port\s+(\d{2,5})"),
+        re.compile(r"UseUrls\(.+:(\d{2,5})"),
+        re.compile(r"server\s*:\s*\{[^}]*port\s*:\s*(\d{2,5})"),
+        re.compile(r"^(?:export\s+)?(?:PORT|HTTP_PORT|APP_PORT)\s*=\s*(\d{2,5})", re.M)
     ]
 
     for p in candidates:
@@ -256,11 +372,11 @@ def extract_heuristic_port(base_dir, entry_file=""):
             if m:
                 try:
                     port_val = int(m.group(1))
-                    if 80 <= port_val <= 65535:
+                    if 1 <= port_val <= 65535:
                         return port_val
-                except ValueError:
+                except (ValueError, IndexError):
                     pass
-    return None
+    return default_port
 
 
 def detect_framework(pkg_path, base_dir=""):
@@ -480,7 +596,7 @@ def detect_component(root, subdir):
         if mode == "react" or is_static:
             comp["entry"] = f"{out_dir}/ (build)"
         elif mode == "next":
-            comp.update({"entry": "next start", "next": True})
+            comp.update({"entry": "next start", "next": True, "mode": "node"})
         else:
             comp["entry"] = entry or "app.js"
     elif os.path.isfile(os.path.join(base, "index.php")) or os.path.isfile(os.path.join(base, "composer.json")):
