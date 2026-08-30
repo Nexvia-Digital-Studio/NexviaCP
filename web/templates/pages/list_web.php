@@ -307,17 +307,17 @@
 							}
 							$d_exp_badge = '';
 							if ($d_expiry === 'unlimited') {
-								$d_exp_badge = '<a href="/list/domain-expiry/" style="text-decoration:none;"><span class="badge" style="background:#7c3aed; color:#fff; font-size:10px; margin-left:4px; padding:2px 5px;" title="' . ($is_tr ? "Sınırsız Lisans" : "Unlimited Lifetime") . '">♾️ Süresiz</span></a>';
+								$d_exp_badge = '<a href="/list/domain-expiry/" style="text-decoration:none;"><span class="badge badge-purple" style="font-size:10px; margin-left:4px; padding:2px 6px;" title="' . ($is_tr ? "Sınırsız Lisans" : "Unlimited Lifetime") . '">♾️ Süresiz</span></a>';
 							} else {
 								$d_exp_ts = strtotime($d_expiry);
 								$d_today_ts = strtotime(date('Y-m-d'));
 								$d_days = (int)round(($d_exp_ts - $d_today_ts) / 86400);
 								if ($d_days < 0 || $data[$key]['SUSPENDED'] === 'yes') {
-									$d_exp_badge = '<a href="/list/domain-expiry/" style="text-decoration:none;"><span class="badge" style="background:#dc2626; color:#fff; font-size:10px; margin-left:4px; padding:2px 5px;" title="' . ($is_tr ? "Süresi Doldu / Yayın Kapalı ($d_expiry)" : "Expired ($d_expiry)") . '">🔴 ' . ($is_tr ? "Süresi Doldu" : "Expired") . '</span></a>';
+									$d_exp_badge = '<a href="/list/domain-expiry/" style="text-decoration:none;"><span class="badge badge-danger" style="font-size:10px; margin-left:4px; padding:2px 6px;" title="' . ($is_tr ? "Süresi Doldu / Yayın Kapalı ($d_expiry)" : "Expired ($d_expiry)") . '">🔴 ' . ($is_tr ? "Süresi Doldu" : "Expired") . '</span></a>';
 								} elseif ($d_days <= 30) {
-									$d_exp_badge = '<a href="/list/domain-expiry/" style="text-decoration:none;"><span class="badge" style="background:#f59e0b; color:#fff; font-size:10px; margin-left:4px; padding:2px 5px;" title="' . ($is_tr ? "Bitiş Tarihi: $d_expiry (Kritik)" : "Expires: $d_expiry") . '">⏳ ' . $d_days . 'g kaldı</span></a>';
+									$d_exp_badge = '<a href="/list/domain-expiry/" style="text-decoration:none;"><span class="badge badge-warning" style="font-size:10px; margin-left:4px; padding:2px 6px;" title="' . ($is_tr ? "Bitiş Tarihi: $d_expiry (Kritik)" : "Expires: $d_expiry") . '">⏳ ' . $d_days . 'g kaldı</span></a>';
 								} else {
-									$d_exp_badge = '<a href="/list/domain-expiry/" style="text-decoration:none;"><span class="badge" style="background:#10b981; color:#fff; font-size:10px; margin-left:4px; padding:2px 5px;" title="' . ($is_tr ? "Bitiş Tarihi: $d_expiry" : "Expires: $d_expiry") . '">🟢 ' . $d_days . 'g</span></a>';
+									$d_exp_badge = '<a href="/list/domain-expiry/" style="text-decoration:none;"><span class="badge badge-secondary" style="font-size:10px; margin-left:4px; padding:2px 6px; color: var(--icon-color-green, #22c55e);" title="' . ($is_tr ? "Bitiş Tarihi: $d_expiry" : "Expires: $d_expiry") . '">🟢 ' . $d_days . 'g</span></a>';
 								}
 							}
 						?>
