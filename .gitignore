@@ -47,7 +47,11 @@ web/src/vendor/
 **/.vitepress/cache/
 # Node
 **/node_modules/
-npm-debug.log
+# Python
+**/__pycache__/
+*.py[cod]
+*$py.class
 
 # ZCode agent workspace
 .zcode/
+
