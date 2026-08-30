@@ -204,16 +204,23 @@ if (!empty($services)) {
 								$d_prio = (int)($d_val["PRIORITY"] ?? 0);
 								$d_workers = (int)($d_val["PHP_WORKERS"] ?? 0);
 								$d_suspended = $d_val["SUSPENDED"] ?? "no";
+								$d_app_type = $d_val["APP_TYPE"] ?? "";
+								$is_standalone = in_array($d_app_type, ["dotnet", "node-js", "python", "docker", "api"]) || ($d_mem >= 200);
 							?>
-								<tr class="res-item-row" data-name="<?= tohtml(strtolower($d_name . ' ' . $d_user)) ?>" style="border-bottom: 1px solid var(--border-color, #334155);">
+								<tr class="res-item-row" data-name="<?= tohtml(strtolower($d_name . ' ' . $d_user . ' ' . $d_app_type)) ?>" style="border-bottom: 1px solid var(--border-color, #334155);">
 									
 									<!-- Domain & Owner -->
 									<td style="padding: 12px 14px; vertical-align: middle;">
 										<div style="display: flex; align-items: center; gap: 10px;">
-											<i class="fas fa-earth-americas" style="font-size: 16px; color: <?= ($d_suspended === 'yes') ? 'var(--color-danger, #ef4444)' : 'var(--icon-color-blue, #38bdf8)' ?>; flex-shrink: 0;"></i>
+											<i class="fas <?= $is_standalone ? 'fa-cube' : 'fa-earth-americas' ?>" style="font-size: 16px; color: <?= ($d_suspended === 'yes') ? 'var(--color-danger, #ef4444)' : ($is_standalone ? 'var(--icon-color-purple, #a855f7)' : 'var(--icon-color-blue, #38bdf8)') ?>; flex-shrink: 0;"></i>
 											<div>
 												<div style="display: flex; align-items: center; gap: 6px;">
 													<strong style="color: var(--color-text, #fff); font-size: 13.5px;"><?= tohtml($d_name) ?></strong>
+													<?php if (!empty($d_app_type)): ?>
+														<span class="badge badge-purple" style="font-size: 9.5px; padding: 1px 5px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.3px;">
+															<?= tohtml($d_app_type) ?>
+														</span>
+													<?php endif; ?>
 													<a href="http://<?= tohtml($d_name) ?>" target="_blank" rel="noopener" style="color: var(--color-text-muted, #94a3b8); font-size: 11px;">
 														<i class="fas fa-arrow-up-right-from-square"></i>
 													</a>
@@ -233,8 +240,8 @@ if (!empty($services)) {
 										<span style="font-weight: 700; font-size: 13.5px; color: <?= $d_mem > 512 ? 'var(--icon-color-orange, #f97316)' : 'var(--color-text, #fff)' ?>;">
 											<?= $d_mem > 0 ? $d_mem . " MB" : "<10 MB" ?>
 										</span>
-										<div style="font-size: 10.5px; color: var(--color-text-muted, #94a3b8);" title="<?= tohtml($is_tr ? "Tek PHP isteği için izin verilen tavan memory_limit" : "Single worker memory limit") ?>">
-											Limit: <?= tohtml($d_high) ?> / istek
+										<div style="font-size: 10.5px; color: var(--color-text-muted, #94a3b8);" title="<?= tohtml($is_tr ? ($is_standalone ? "Uygulama için tahsis edilen akıllı bellek tavanı" : "Tek PHP isteği için izin verilen tavan memory_limit") : "Allocated memory limit") ?>">
+											Limit: <?= tohtml($d_high) ?> <?= $is_standalone ? "" : "/ istek" ?>
 										</div>
 									</td>
 

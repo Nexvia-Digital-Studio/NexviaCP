@@ -87,8 +87,25 @@ tune_domain() {
 	if [ -z "$app_type" ]; then
 		local tpl_type
 		tpl_type=$(echo "$wline" | grep -o "TPL='[^']*'" | cut -d"'" -f2)
-		case "$tpl_type" in dotnet|node-js) app_type="$tpl_type" ;; esac
+		case "$tpl_type" in dotnet*|node-js*|python*|reverse-proxy*|custom-port*) app_type="$tpl_type" ;; esac
 	fi
+
+	# Auto-detect standalone app runtime from directory content or processes
+	if [ -z "$app_type" ]; then
+		local web_dir="$HOMEDIR/$u/web/$d"
+		if [ -d "$web_dir" ]; then
+			if ls "$web_dir"/*.dll "$web_dir"/public_html/*.dll "$web_dir"/appsettings.json "$web_dir"/public_html/appsettings.json >/dev/null 2>&1; then
+				app_type="dotnet"
+			elif [ -f "$web_dir/public_html/package.json" ] || [ -f "$web_dir/package.json" ]; then
+				app_type="node-js"
+			elif [ -f "$web_dir/public_html/requirements.txt" ] || [ -f "$web_dir/requirements.txt" ]; then
+				app_type="python"
+			elif [[ "$d" =~ ^api\. ]] || [[ "$d" =~ ^backend\. ]] || [[ "$d" =~ ^app\. ]]; then
+				app_type="api"
+			fi
+		fi
+	fi
+
 	local engine_extra=()
 	if [ -n "$app_type" ]; then
 		engine_extra+=(--app-type "$app_type")

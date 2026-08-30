@@ -505,7 +505,7 @@ def decide(prev_state, score, req10, idle_sec, last_change, now_ts, learning,
     return cand, (now_ts if changed else last_change), reasons
 
 
-def size_resources(state, users, dyn10, avg_rt, score):
+def size_resources(state, users, dyn10, avg_rt, score, app_type="", current_ram_mb=0):
     """RAM/CPU sizing. Traffic feeds *sizing* (Little's law concurrency),
     the distress score feeds the *state*; a slow-but-quiet domain still
     deserves roomier per-worker limits."""
@@ -517,15 +517,26 @@ def size_resources(state, users, dyn10, avg_rt, score):
         workers = max(workers, 4)
     elif state == "boosted":
         workers = max(workers, 8)
-    worker_mb = s["worker"]
-    # slow responses on a distressed site deserve a roomier per-worker limit
-    if avg_rt and avg_rt > 1.0 and state in ("active", "busy"):
-        worker_mb = 192
-    mem_max = clamp(round((worker_mb * workers) / 64.0) * 64, s["floor"], s["ceil"])
-    if mem_max < worker_mb * 2:
-        mem_max = worker_mb * 2
-    cpu = clamp(round(workers * (100 if state == "boosted" else 75) / 25) * 25,
-                s["cpu_min"], s["cpu_max"])
+
+    is_standalone = (app_type in ("dotnet", "node-js", "python", "docker", "api")) or (current_ram_mb >= 200)
+
+    if is_standalone:
+        # Standalone persistent runtime (e.g. .NET Core CLR, V8, Python).
+        # Dynamically envelope the application's actual memory footprint with at least 40% headroom.
+        base_needed = max(384, int(current_ram_mb * 1.45))
+        worker_mb = ((base_needed + 127) // 128) * 128
+        mem_max = max(1024, worker_mb * 2)
+        cpu = clamp(max(100, round(workers * 100 / 25) * 25), 100, 400)
+    else:
+        worker_mb = s["worker"]
+        # slow responses on a distressed site deserve a roomier per-worker limit
+        if avg_rt and avg_rt > 1.0 and state in ("active", "busy"):
+            worker_mb = 192
+        mem_max = clamp(round((worker_mb * workers) / 64.0) * 64, s["floor"], s["ceil"])
+        if mem_max < worker_mb * 2:
+            mem_max = worker_mb * 2
+        cpu = clamp(round(workers * (100 if state == "boosted" else 75) / 25) * 25,
+                    s["cpu_min"], s["cpu_max"])
     return fmt_mb(worker_mb), fmt_mb(mem_max), "%d%%" % cpu, s["io"], workers
 
 
@@ -636,13 +647,16 @@ def run(args):
                                           learning, api_mode=api_mode)
     if err5xx_ratio >= 0.10 and tr["req10"] >= 10:
         reasons.append("high_5xx_errors")
+    
+    ram_usage_mb = ram_b // 1048576
     mem_high, mem_max, cpu, io, workers = size_resources(
-        status, users, tr["dyn10"], avg_rt, score)
+        status, users, tr["dyn10"], avg_rt, score,
+        app_type=app_type, current_ram_mb=ram_usage_mb)
 
     out = dict(
         DOMAIN=args.domain, USER=args.user, PRIORITY=0, STATUS=status,
         APP_TYPE=app_type,
-        MEMORY_USAGE_MB=ram_b // 1048576, MEMORY_HIGH=mem_high, MEMORY_MAX=mem_max,
+        MEMORY_USAGE_MB=ram_usage_mb, MEMORY_HIGH=mem_high, MEMORY_MAX=mem_max,
         CPU_QUOTA=cpu, IO_WEIGHT=io,
         REQ_COUNT_10M=tr["req10"], DYN_REQ_10M=tr["dyn10"],
         STATIC_REQ_10M=tr["static10"], BOT_REQ_10M=tr["bot10"],
