@@ -72,12 +72,47 @@ tune_domain() {
 	local prio=$(get_object_value 'web' 'DOMAIN' "$d" '$RESOURCE_PRIORITY')
 	[ -z "$prio" ] && prio="0"
 
-	# Engine measures traffic, scores demand, decides state and writes the
-	# governance state JSON; the same JSON is echoed on stdout.
+	# API/backend domains (docker apps, standalone dotnet/node services):
+	# the engine scores them distress-first and never idles them; docker
+	# domains get real container memory pressure instead of PHP cgroups.
+	local wline
+	wline=$(grep -F "DOMAIN='$d'" "$HESTIA/data/users/$u/web.conf" 2>/dev/null | head -1)
+	local app_type
+	app_type=$(echo "$wline" | grep -o "APP_TYPE='[^']*'" | cut -d"'" -f2)
+	if [ -z "$app_type" ]; then
+		local tpl_type
+		tpl_type=$(echo "$wline" | grep -o "TPL='[^']*'" | cut -d"'" -f2)
+		case "$tpl_type" in dotnet|node-js) app_type="$tpl_type" ;; esac
+	fi
+	local engine_extra=()
+	if [ -n "$app_type" ]; then
+		engine_extra+=(--app-type "$app_type")
+	fi
+	if [ "$app_type" = "docker" ]; then
+		local dapp="" dsvc=""
+		for acf in "$HESTIA"/data/docker-apps/*/app.conf; do
+			[ -f "$acf" ] || continue
+			for dent in $(grep -m1 '^DOMAINS=' "$acf" | cut -d"'" -f2); do
+				if [ "${dent%%:*}" = "$u@$d" ]; then
+					dapp=$(basename "$(dirname "$acf")")
+					dsvc=$(echo "$dent" | cut -d: -f2)
+					break 2
+				fi
+			done
+		done
+		if [ -n "$dapp" ]; then
+			engine_extra+=(--docker-app "$dapp" --docker-service "$dsvc")
+		fi
+	fi
+
+	# Engine measures distress (latency/memory/cpu saturation), scores demand,
+	# decides state and writes the governance state JSON; the same JSON is
+	# echoed on stdout.
 	local out=""
 	if [ -x "$ENGINE" ] && [ -x "$(command -v python3)" ]; then
 		out=$("$ENGINE" --user "$u" --domain "$d" --priority "$prio" \
-			--gov-dir "$GOV_DIR" --homedir "$HOMEDIR" 2>/dev/null) || out=""
+			--gov-dir "$GOV_DIR" --homedir "$HOMEDIR" \
+			${engine_extra[@]+"${engine_extra[@]}"} 2>/dev/null) || out=""
 	fi
 
 	local status="active"
