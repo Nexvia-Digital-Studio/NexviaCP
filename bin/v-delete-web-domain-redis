@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # info: remove dedicated Redis database assignment from domain and clean .env
 # options: USER DOMAIN [FLUSH_DB]
 #
@@ -76,11 +76,11 @@ for env_file in "${env_targets[@]}"; do
 	remove_env_var "$env_file" "REDIS_SOCKET"
 done
 
-# Remove keys from web.conf
-delete_object_key 'web' 'DOMAIN' "$domain" 'REDIS_DB'
-delete_object_key 'web' 'DOMAIN' "$domain" 'REDIS_HOST'
-delete_object_key 'web' 'DOMAIN' "$domain" 'REDIS_PORT'
-delete_object_key 'web' 'DOMAIN' "$domain" 'REDIS_SOCKET'
+# Clear keys in web.conf
+update_object_value 'web' 'DOMAIN' "$domain" '$REDIS_DB' ''
+update_object_value 'web' 'DOMAIN' "$domain" '$REDIS_HOST' ''
+update_object_value 'web' 'DOMAIN' "$domain" '$REDIS_PORT' ''
+update_object_value 'web' 'DOMAIN' "$domain" '$REDIS_SOCKET' ''
 
 # Logging
 $BIN/v-log-action "$user" "Info" "Web" "Redis database assignment removed from domain $domain."

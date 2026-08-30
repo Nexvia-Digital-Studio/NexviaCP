@@ -249,14 +249,10 @@ for wconf in users_conf_files:
                             content = ef.read()
                             if "REDIS_DB" in content:
                                 env_has_redis = True
-                                if not redis_db_val:
-                                    m = re.search(r'REDIS_DB=["\']?(\d+)["\']?', content)
-                                    if m:
-                                        redis_db_val = m.group(1)
                     except Exception:
                         pass
                 
-                db_num = int(redis_db_val) if redis_db_val.isdigit() else None
+                db_num = int(redis_db_val) if (redis_db_val and redis_db_val.isdigit()) else None
                 if db_num is not None and 0 <= db_num <= 15:
                     assigned_db_count += 1
                     db_stats[f"db{db_num}"]["assigned_domain"] = dname

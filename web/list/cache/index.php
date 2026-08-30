@@ -69,18 +69,24 @@ if (!empty($_POST["assign_redis_db"])) {
 	if ($domain_allowed) {
 		$target_user = quoteshellarg($owner);
 		$target_domain = quoteshellarg($domain_plain);
-		$redis_db = quoteshellarg($_POST["redis_db"] ?? "auto");
+		$raw_db = trim($_POST["redis_db"] ?? "auto");
+		$redis_db = quoteshellarg($raw_db);
 
-		exec(HESTIA_CMD . "v-add-web-domain-redis " . $target_user . " " . $target_domain . " " . $redis_db . " no", $output, $return_var);
-		if ($return_var == 0) {
-			if ($_POST["redis_db"] === "none" || $_POST["redis_db"] === "remove") {
+		if ($raw_db === "none" || $raw_db === "remove" || $raw_db === "unbind") {
+			exec(HESTIA_CMD . "v-delete-web-domain-redis " . $target_user . " " . $target_domain . " no", $output, $return_var);
+			if ($return_var == 0) {
 				$_SESSION["ok_msg"] = ($is_tr ? "Redis veritabanı ataması başarıyla kaldırıldı ve .env temizlendi: " : _("Redis DB unassigned and .env cleaned: ")) . htmlspecialchars($domain_plain);
 			} else {
-				$assigned_msg = ($_POST["redis_db"] === "auto" || empty($_POST["redis_db"])) ? ($is_tr ? "Otomatik DB" : _("Auto DB")) : "DB " . htmlspecialchars($_POST["redis_db"]);
-				$_SESSION["ok_msg"] = ($is_tr ? "Redis veritabanı ayrıldı ve .env dosyasına enjekte edildi: " : _("Redis DB assigned and injected into .env: ")) . htmlspecialchars($domain_plain) . " -> " . $assigned_msg;
+				$_SESSION["error_msg"] = ($is_tr ? "Redis ataması kaldırılırken hata: " : _("Error unassigning Redis DB: ")) . implode(" ", $output);
 			}
 		} else {
-			$_SESSION["error_msg"] = ($is_tr ? "Redis veritabanı işlemi sırasında hata: " : _("Error updating Redis DB: ")) . implode(" ", $output);
+			exec(HESTIA_CMD . "v-add-web-domain-redis " . $target_user . " " . $target_domain . " " . $redis_db . " no", $output, $return_var);
+			if ($return_var == 0) {
+				$assigned_msg = ($raw_db === "auto" || empty($raw_db)) ? ($is_tr ? "Otomatik DB" : _("Auto DB")) : "DB " . htmlspecialchars($raw_db);
+				$_SESSION["ok_msg"] = ($is_tr ? "Redis veritabanı ayrıldı ve .env dosyasına enjekte edildi: " : _("Redis DB assigned and injected into .env: ")) . htmlspecialchars($domain_plain) . " -> " . $assigned_msg;
+			} else {
+				$_SESSION["error_msg"] = ($is_tr ? "Redis veritabanı atanırken hata: " : _("Error assigning Redis DB: ")) . implode(" ", $output);
+			}
 		}
 	} elseif ($domain_plain !== "") {
 		$_SESSION["error_msg"] = ($is_tr ? "Erişim reddedildi: " : _("Access denied: ")) . htmlspecialchars($domain_plain) . ($is_tr ? " bu hesaba ait bir web alan adı değil." : _(" is not a web domain of this account."));
