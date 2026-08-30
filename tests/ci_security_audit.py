@@ -55,6 +55,17 @@ def record_fail(test_name, details=""):
         print(f"    {YELLOW}↳ Details:{RESET} {details}")
 
 
+def find_bash_executable():
+    for b in ["C:\\Program Files\\Git\\bin\\bash.exe", "C:\\Program Files\\Git\\usr\\bin\\bash.exe", "bash", "sh"]:
+        try:
+            r = subprocess.run([b, "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if r.returncode == 0:
+                return b
+        except (OSError, subprocess.SubprocessError):
+            continue
+    return "bash"
+
+
 # -------------------------------------------------------------
 # SUITE 1: CLI Scripts Syntax Validation (Bash & PHP Shebangs)
 # -------------------------------------------------------------
@@ -62,6 +73,7 @@ def test_cli_scripts_syntax():
     log_section("1. CLI Scripts Syntax Validation (bin/v-*)")
     bin_dir = os.path.join(REPO_ROOT, "bin")
     scripts = glob.glob(os.path.join(bin_dir, "v-*"))
+    bash_cmd = find_bash_executable()
 
     if not scripts:
         record_fail("CLI Scripts Discovery", "No bin/v-* scripts found!")
@@ -79,7 +91,7 @@ def test_cli_scripts_syntax():
             else:
                 record_fail(f"PHP CLI Syntax: {s_name}", res.stderr.strip())
         else:
-            res = subprocess.run(["bash", "-n", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            res = subprocess.run([bash_cmd, "-n", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             if res.returncode == 0:
                 record_pass(f"Bash CLI Syntax: {s_name}")
             else:
@@ -98,7 +110,7 @@ def test_php_syntax():
                 php_files.append(os.path.join(root, f))
 
     for php_f in sorted(php_files):
-        rel_path = os.path.relpath(php_f, REPO_ROOT)
+        rel_path = os.path.relpath(php_f, REPO_ROOT).replace("\\", "/")
         res = subprocess.run(["php", "-l", php_f], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if res.returncode == 0:
             record_pass(f"PHP Lint: {rel_path}")
@@ -114,7 +126,7 @@ def test_security_static_analysis():
     controllers = glob.glob(os.path.join(REPO_ROOT, "web", "**", "index.php"), recursive=True)
 
     for ctrl in sorted(controllers):
-        rel_path = os.path.relpath(ctrl, REPO_ROOT)
+        rel_path = os.path.relpath(ctrl, REPO_ROOT).replace("\\", "/")
         with open(ctrl, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
 
