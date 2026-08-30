@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # nexvia repo structure analyzer — turns a cloned repo into a deployment plan
 # usage: repo_scan.py REPO_DIR [BRANCH] -> single JSON object on stdout
+import glob
 import json
 import os
 import re
@@ -197,7 +198,7 @@ def detect_package_manager(base_dir, root_dir=None):
                     return {
                         "name": "dotnet",
                         "install": "dotnet restore",
-                        "build": "dotnet publish -c Release -o bin/Release/publish",
+                        "build": "dotnet publish -c Release -o publish",
                         "start": "dotnet run",
                         "run": "dotnet"
                     }
@@ -268,8 +269,7 @@ def detect_runtime_version(base_dir, root_dir, tech_mode):
                     comp = json.loads(read_text(comp_p))
                     req_php = comp.get("require", {}).get("php")
                     if req_php:
-                        m = re.search(r"(\d+\.\d+)", str(req_php))
-                        return m.group(1) if m else str(req_php).strip()
+                        return str(req_php).strip()
                 except ValueError:
                     pass
     elif tech_mode == "dotnet":
@@ -380,11 +380,11 @@ def extract_heuristic_port(base_dir, root_dir=None, entry_file="", default_port=
 
 
 def detect_framework(pkg_path, base_dir=""):
-    """Map a package.json to (tech key, deploy mode, icon, output_dir, is_static_export)."""
+    """Map a package.json to (tech key, deploy mode, icon, output_dir, is_static_export, framework_name, default_port)."""
     try:
         pkg = json.loads(read_text(pkg_path))
     except ValueError:
-        return "Node.js", "node", "🟢", "dist", False
+        return "Node.js", "node", "🟢", "dist", False, "Node.js", 3000
     deps = {**(pkg.get("dependencies") or {}), **(pkg.get("devDependencies") or {})}
     scripts = pkg.get("scripts") or {}
 
@@ -392,7 +392,7 @@ def detect_framework(pkg_path, base_dir=""):
     if "next" in deps:
         is_export = False
         if base_dir:
-            for cfg in ("next.config.js", "next.config.mjs", "next.config.ts"):
+            for cfg in ("next.config.js", "next.config.mjs", "next.config.ts", "next.config.cjs"):
                 cfg_p = os.path.join(base_dir, cfg)
                 if os.path.isfile(cfg_p):
                     txt = read_text(cfg_p)
@@ -400,124 +400,251 @@ def detect_framework(pkg_path, base_dir=""):
                         is_export = True
                         break
         build_scr = scripts.get("build", "")
-        if "next export" in build_scr:
+        if "next export" in build_scr or "export" in scripts:
             is_export = True
         if is_export:
-            return "Next.js (Static Export)", "react", "▲", "out", True
-        return "Next.js", "next", "▲", ".next", False
+            return "Next.js (Static Export)", "react", "▲", "out", True, "Next.js", 3000
+        return "Next.js", "next", "▲", ".next", False, "Next.js", 3000
 
+    # NestJS
     if "@nestjs/core" in deps:
-        return "NestJS", "node", "🟢", "dist", False
-    if "vite" in deps and "react" in deps:
-        return "React / Vite", "react", "⚛️", "dist", True
-    if "react-scripts" in deps or ("react" in deps and "vite" not in deps):
-        return "React", "react", "⚛️", "build", True
-    if "nuxt" in deps:
-        return "Nuxt", "node", "💚", ".output/server", False
-    if "vue" in deps:
-        return "Vue", "react", "💚", "dist", True
+        return "NestJS", "node", "🦁", "dist", False, "NestJS", 3000
+
+    # Astro
+    if "astro" in deps or "@astrojs/core" in deps:
+        is_ssr = False
+        if base_dir:
+            for cfg in ("astro.config.mjs", "astro.config.ts", "astro.config.js", "astro.config.cjs"):
+                cfg_p = os.path.join(base_dir, cfg)
+                if os.path.isfile(cfg_p):
+                    txt = read_text(cfg_p)
+                    if re.search(r"output\s*:\s*['\"](?:server|hybrid)['\"]", txt) or "@astrojs/node" in txt or "@astrojs/deno" in txt:
+                        is_ssr = True
+                        break
+        if "@astrojs/node" in deps or "@astrojs/deno" in deps:
+            is_ssr = True
+        if is_ssr:
+            return "Astro (SSR)", "node", "🚀", "dist", False, "Astro", 4321
+        return "Astro", "react", "🚀", "dist", True, "Astro", 4321
+
+    # SvelteKit / Svelte
     if "@sveltejs/kit" in deps:
-        if "@sveltejs/adapter-static" in deps:
-            return "SvelteKit (Static)", "react", "🧡", "build", True
-        return "SvelteKit", "node", "🧡", ".svelte-kit/output", False
+        svelte_cfg_p = os.path.join(base_dir, "svelte.config.js") if base_dir else ""
+        svelte_cfg = read_text(svelte_cfg_p) if (svelte_cfg_p and os.path.isfile(svelte_cfg_p)) else ""
+        if "@sveltejs/adapter-static" in svelte_cfg or "@sveltejs/adapter-static" in deps:
+            return "SvelteKit (Static)", "react", "🧡", "build", True, "SvelteKit", 5173
+        if "@sveltejs/adapter-node" in svelte_cfg or "@sveltejs/adapter-node" in deps:
+            return "SvelteKit (Node SSR)", "node", "🧡", "build", False, "SvelteKit", 3000
+        return "SvelteKit", "node", "🧡", "build", False, "SvelteKit", 3000
     if "svelte" in deps:
-        return "Svelte", "react", "🧡", "dist", True
-    if "astro" in deps:
-        return "Astro", "react", "🚀", "dist", True
-    if "remix" in deps or "@remix-run/react" in deps:
-        return "Remix", "node", "💿", "build", False
+        return "Svelte", "react", "🧡", "dist", True, "Svelte", 5173
+
+    # Nuxt 3 / Nuxt 2
+    if "nuxt" in deps or "nuxt3" in deps or "@nuxt/kit" in deps:
+        nuxt_v = str(deps.get("nuxt", ""))
+        is_nuxt3 = ("nuxt3" in deps or "@nuxt/kit" in deps or
+                    nuxt_v.startswith(("^3", "~3", "3", "^4", "4", "latest")) or
+                    (base_dir and (os.path.isfile(os.path.join(base_dir, "app.vue")) or
+                                   os.path.isfile(os.path.join(base_dir, "nuxt.config.ts")))))
+        is_static = "generate" in scripts or "nuxt generate" in scripts.get("build", "")
+        if is_static:
+            out_dir = ".output/public" if is_nuxt3 else "dist"
+            tech_name = "Nuxt 3 (Static)" if is_nuxt3 else "Nuxt (Static)"
+            return tech_name, "react", "💚", out_dir, True, "Nuxt", 3000
+        out_dir = ".output/server" if is_nuxt3 else ".nuxt"
+        tech_name = "Nuxt 3" if is_nuxt3 else "Nuxt"
+        return tech_name, "node", "💚", out_dir, False, "Nuxt", 3000
+
+    # Remix
+    if "remix" in deps or "@remix-run/react" in deps or "@remix-run/node" in deps:
+        return "Remix", "node", "💿", "build", False, "Remix", 3000
+
+    # React / Vite / Vue / Angular / Solid / Gatsby
+    if "vite" in deps and "react" in deps:
+        return "React / Vite", "react", "⚛️", "dist", True, "React", 5173
+    if "react-scripts" in deps or ("react" in deps and "vite" not in deps):
+        return "React", "react", "⚛️", "build", True, "React", 3000
+    if "vite" in deps and "vue" in deps:
+        return "Vue / Vite", "react", "💚", "dist", True, "Vue", 5173
+    if "vue" in deps:
+        return "Vue", "react", "💚", "dist", True, "Vue", 5173
     if "@angular/core" in deps:
-        return "Angular", "react", "🅰️", "dist", True
+        return "Angular", "react", "🅰️", "dist", True, "Angular", 4200
+    if "solid-js" in deps:
+        return "Solid.js", "react", "🔵", "dist", True, "Solid.js", 5173
     if "gatsby" in deps:
-        return "Gatsby", "react", "🟣", "public", True
-    if any(d in deps for d in ("express", "fastify", "koa", "@hapi/hapi", "hapi")):
-        return "Node.js API", "node", "🟢", "dist", False
+        return "Gatsby", "react", "🟣", "public", True, "Gatsby", 8000
+
+    # Node.js APIs
+    if any(d in deps for d in ("express", "fastify", "koa", "@hapi/hapi", "hapi", "hono")):
+        matched = next((d for d in ("express", "fastify", "koa", "hono") if d in deps), "Node.js API")
+        tech_str = f"{matched.capitalize() if matched != 'hono' else 'Hono'} (Node.js)" if matched != "Node.js API" else "Node.js API"
+        return tech_str, "node", "🟢", "dist", False, matched.capitalize(), 3000
+
     if "build" in scripts and "start" in scripts:
-        return "Node.js", "node", "🟢", "dist", False
-    return "Node.js", "node", "🟢", "dist", False
+        return "Node.js", "node", "🟢", "dist", False, "Node.js", 3000
+
+    return "Node.js", "node", "🟢", "dist", False, "Node.js", 3000
 
 
 def node_entry(subdir_path):
-    for name in ("server.js", "app.js", "index.js", "dist/main.js", "dist/index.js", "src/index.js", "src/main.js"):
+    for name in ("server.js", "app.js", "index.js", "dist/main.js", "dist/index.js",
+                 "src/main.ts", "src/index.ts", "src/server.ts", "src/app.ts",
+                 "src/main.js", "src/index.js", "src/server.js", "src/app.js"):
         if os.path.isfile(os.path.join(subdir_path, name)):
             return name
     return None
 
 
-def detect_database_orm(root, base_dir=""):
-    """Detect modern ORMs (Prisma, Drizzle, EF Core, Laravel) and schema files."""
-    base = base_dir if base_dir else root
+def detect_database_orm(root, comp_dirs=None):
+    """Detect modern ORMs (Prisma, Drizzle, EF Core, TypeORM, Sequelize, Laravel) and schema files."""
+    comp_dirs = comp_dirs or []
+    search_dirs = [root] + [os.path.join(root, d) for d in comp_dirs if d and d != "."]
 
     # 1. Prisma ORM
-    for bp in (base, root):
-        if not os.path.isdir(bp):
+    for d in search_dirs:
+        if not os.path.isdir(d):
             continue
-        prisma_schema = os.path.join(bp, "prisma", "schema.prisma")
-        if os.path.isfile(prisma_schema):
-            txt = read_text(prisma_schema)
-            m = re.search(r'provider\s*=\s*["\']([^"\']+)["\']', txt)
-            prov = m.group(1).lower() if m else "postgresql"
-            engine = "postgresql" if prov in ("postgres", "postgresql") else "mysql" if prov == "mysql" else prov
-            return {
-                "needed": True,
-                "engine": engine,
-                "orm": "prisma",
-                "provision": "npx prisma migrate deploy (Prisma)",
-                "auto": True
-            }
+        for p_name in ("prisma/schema.prisma", "schema.prisma"):
+            prisma_file = os.path.join(d, p_name)
+            if os.path.isfile(prisma_file):
+                txt = read_text(prisma_file)
+                m = re.search(r'provider\s*=\s*["\']([^"\']+)["\']', txt)
+                provider = (m.group(1).lower() if m else "postgresql")
+                engine_map = {
+                    "postgresql": "postgresql",
+                    "postgres": "postgresql",
+                    "mysql": "mysql",
+                    "sqlite": "sqlite",
+                    "mongodb": "mongodb",
+                    "cockroachdb": "cockroachdb",
+                    "sqlserver": "mssql"
+                }
+                engine = engine_map.get(provider, provider)
+                return {
+                    "needed": True,
+                    "engine": engine,
+                    "orm": "prisma",
+                    "provision": "npx prisma migrate deploy (Prisma)",
+                    "auto": engine in ("mysql", "postgresql", "postgres")
+                }
 
     # 2. Drizzle ORM
-    for bp in (base, root):
-        if not os.path.isdir(bp):
+    for d in search_dirs:
+        if not os.path.isdir(d):
             continue
-        for cfg in ("drizzle.config.ts", "drizzle.config.js", "drizzle.config.json"):
-            p = os.path.join(bp, cfg)
+        for cfg in ("drizzle.config.ts", "drizzle.config.js", "drizzle.config.json",
+                    "drizzle.config.mjs", "drizzle.config.cjs"):
+            p = os.path.join(d, cfg)
             if os.path.isfile(p):
                 txt = read_text(p)
                 m = re.search(r'dialect\s*:\s*["\']([^"\']+)["\']', txt) or re.search(r'driver\s*:\s*["\']([^"\']+)["\']', txt)
-                dialect = m.group(1).lower() if m else "mysql"
-                engine = "postgresql" if ("pg" in dialect or "postgres" in dialect) else "mysql"
+                dialect = (m.group(1).lower() if m else "postgresql")
+                engine_map = {
+                    "postgresql": "postgresql",
+                    "postgres": "postgresql",
+                    "pg": "postgresql",
+                    "mysql": "mysql",
+                    "mysql2": "mysql",
+                    "sqlite": "sqlite",
+                    "better-sqlite3": "sqlite",
+                    "turso": "sqlite",
+                    "libsql": "sqlite"
+                }
+                engine = engine_map.get(dialect, dialect)
                 return {
                     "needed": True,
                     "engine": engine,
                     "orm": "drizzle",
                     "provision": "npx drizzle-kit migrate (Drizzle)",
-                    "auto": True
+                    "auto": engine in ("mysql", "postgresql", "postgres")
                 }
 
-    # 3. .NET Entity Framework Core
-    for bp in (base, root):
-        if os.path.isdir(bp):
-            for f in os.listdir(bp):
-                if f.endswith((".csproj", ".fsproj")):
-                    txt = read_text(os.path.join(bp, f))
-                    if "Microsoft.EntityFrameworkCore" in txt:
-                        eng = "postgresql" if "Npgsql" in txt else "sqlserver" if "SqlServer" in txt else "mysql"
-                        return {
-                            "needed": True,
-                            "engine": eng,
-                            "orm": "efcore",
-                            "provision": "dotnet ef database update (EF Core)",
-                            "auto": True
-                        }
-
-    # 4. SQL Schema file
-    for s in SCHEMA_FILES:
-        for bp in (base, root):
-            sp = os.path.join(bp, s)
-            if os.path.isfile(sp):
+    # 3. TypeORM
+    for d in search_dirs:
+        if not os.path.isdir(d):
+            continue
+        for cfg in ("ormconfig.json", "ormconfig.js", "ormconfig.ts", "data-source.ts",
+                    "src/data-source.ts", "dataSource.ts"):
+            p = os.path.join(d, cfg)
+            if os.path.isfile(p):
+                txt = read_text(p)
+                m = re.search(r'["\']?type["\']?\s*:\s*["\'](postgres|postgresql|mysql|mariadb|sqlite|mongodb|oracle|mssql)["\']', txt, re.I)
+                engine = (m.group(1).lower() if m else "mysql")
+                if engine == "postgres":
+                    engine = "postgresql"
                 return {
                     "needed": True,
-                    "engine": "mysql",
+                    "engine": engine,
+                    "orm": "typeorm",
+                    "provision": "npx typeorm migration:run (TypeORM)",
+                    "auto": engine in ("mysql", "postgresql")
+                }
+
+    # 4. Sequelize
+    for d in search_dirs:
+        if not os.path.isdir(d):
+            continue
+        for cfg in (".sequelizerc", "config/config.json", "config/config.js"):
+            p = os.path.join(d, cfg)
+            if os.path.isfile(p):
+                txt = read_text(p)
+                m = re.search(r'["\']?dialect["\']?\s*:\s*["\'](postgres|postgresql|mysql|mariadb|sqlite|mssql)["\']', txt, re.I)
+                engine = (m.group(1).lower() if m else "mysql")
+                if engine == "postgres":
+                    engine = "postgresql"
+                return {
+                    "needed": True,
+                    "engine": engine,
+                    "orm": "sequelize",
+                    "provision": "npx sequelize-cli db:migrate (Sequelize)",
+                    "auto": engine in ("mysql", "postgresql")
+                }
+
+    # 5. .NET Entity Framework Core
+    for d in search_dirs:
+        if not os.path.isdir(d):
+            continue
+        for csproj in glob.glob(os.path.join(d, "*.csproj")) + glob.glob(os.path.join(d, "**/*.csproj"), recursive=True):
+            content = read_text(csproj)
+            if "Microsoft.EntityFrameworkCore" in content or "Npgsql.EntityFrameworkCore" in content or "Pomelo.EntityFrameworkCore" in content:
+                if "Npgsql.EntityFrameworkCore.PostgreSQL" in content or "Microsoft.EntityFrameworkCore.PostgreSQL" in content:
+                    engine = "postgresql"
+                elif "Pomelo.EntityFrameworkCore.MySql" in content or "MySql.EntityFrameworkCore" in content:
+                    engine = "mysql"
+                elif "Microsoft.EntityFrameworkCore.Sqlite" in content:
+                    engine = "sqlite"
+                elif "Microsoft.EntityFrameworkCore.SqlServer" in content:
+                    engine = "mssql"
+                else:
+                    engine = "mysql"
+                return {
+                    "needed": True,
+                    "engine": engine,
+                    "orm": "efcore",
+                    "provision": "dotnet ef database update (EF Core)",
+                    "auto": engine in ("mysql", "postgresql")
+                }
+
+    # 6. SQL Schema Files
+    for s in SCHEMA_FILES:
+        for d in search_dirs:
+            sp = os.path.join(d, s)
+            if os.path.isfile(sp):
+                txt = read_text(sp, limit=20_000)
+                engine = "postgresql" if re.search(r"\b(SERIAL|TIMESTAMPTZ|uuid_generate_v4|CREATE EXTENSION)\b", txt, re.I) else "mysql"
+                return {
+                    "needed": True,
+                    "engine": engine,
                     "orm": "sql",
                     "provision": rel(root, sp),
                     "auto": True
                 }
 
-    # 5. Laravel migrations
-    for bp in (base, root):
-        if os.path.isdir(bp) and os.path.isfile(os.path.join(bp, "artisan")) and (
-            os.path.isdir(os.path.join(bp, "database", "migrations")) or os.path.isdir(os.path.join(root, "database", "migrations"))
+    # 7. Laravel Migrations
+    for d in search_dirs:
+        if os.path.isdir(d) and os.path.isfile(os.path.join(d, "artisan")) and (
+            os.path.isdir(os.path.join(d, "database", "migrations")) or os.path.isdir(os.path.join(root, "database", "migrations"))
         ):
             return {
                 "needed": True,
@@ -525,6 +652,17 @@ def detect_database_orm(root, base_dir=""):
                 "orm": "laravel",
                 "provision": "php artisan migrate --force (Laravel)",
                 "auto": True
+            }
+
+    # 8. Django Migrations
+    for d in search_dirs:
+        if os.path.isdir(d) and os.path.isfile(os.path.join(d, "manage.py")):
+            return {
+                "needed": True,
+                "engine": "postgresql",
+                "orm": "django",
+                "provision": "python manage.py migrate (Django)",
+                "auto": False
             }
 
     return {"needed": False}
@@ -539,33 +677,60 @@ def detect_component(root, subdir):
        os.path.isfile(os.path.join(base, "compose.yaml")):
         return None  # handled by compose channel
 
-    pkg_mgr = detect_package_manager(base)
-    comp["package_manager"] = pkg_mgr["name"]
-    comp["install_command"] = pkg_mgr["install"]
+    pkg_mgr = detect_package_manager(base, root)
+    if pkg_mgr.get("name"):
+        comp["package_manager"] = pkg_mgr["name"]
+    if pkg_mgr.get("install"):
+        comp["install_command"] = pkg_mgr["install"]
 
     if os.path.isfile(os.path.join(base, "artisan")):
-        rt_v = detect_runtime_version(base, "php")
-        comp.update({"type": "web", "tech": "Laravel (PHP)", "mode": "php",
-                     "icon": "🐘", "entry": "public/index.php", "output_dir": "public", "output_directory": "public"})
+        rt_v = detect_runtime_version(base, root, "php")
+        port = extract_heuristic_port(base, root, "public/index.php", default_port=80)
+        comp.update({
+            "type": "web",
+            "tech": "Laravel (PHP)",
+            "framework": "Laravel",
+            "mode": "php",
+            "icon": "🐘",
+            "entry": "public/index.php",
+            "output_dir": "public",
+            "output_directory": "public",
+            "build_command": "php artisan optimize" if os.path.isfile(os.path.join(base, "artisan")) else None,
+            "start_command": "php artisan serve",
+            "dev_command": "php artisan serve"
+        })
         if rt_v:
             comp["runtime_version"] = rt_v
-    elif glob_first(base, "*.csproj") or glob_first(base, "*.sln"):
-        cs = glob_first(base, "*.csproj") or glob_first(base, "*.sln")
-        rt_v = detect_runtime_version(base, "dotnet")
-        port = extract_heuristic_port(base, cs)
-        comp.update({"type": "api", "tech": ".NET / ASP.NET Core", "mode": "dotnet",
-                     "icon": "🟣", "entry": cs, "build_command": "dotnet publish -c Release -o publish",
-                     "output_dir": "publish", "output_directory": "publish"})
+        if port:
+            comp["port"] = port
+            comp["ports"] = [{"published": str(port), "target": str(port), "host_ip": ""}]
+    elif glob_first(base, "*.csproj") or glob_first(base, "*.sln") or os.path.isfile(os.path.join(base, "global.json")):
+        cs = glob_first(base, "*.csproj") or glob_first(base, "*.sln") or "Program.cs"
+        rt_v = detect_runtime_version(base, root, "dotnet")
+        port = extract_heuristic_port(base, root, cs, default_port=5000)
+        comp.update({
+            "type": "api",
+            "tech": ".NET / ASP.NET Core",
+            "framework": "ASP.NET Core",
+            "mode": "dotnet",
+            "icon": "🟣",
+            "entry": cs,
+            "build_command": "dotnet publish -c Release -o publish",
+            "start_command": "dotnet run",
+            "output_dir": "publish",
+            "output_directory": "publish"
+        })
         if rt_v:
             comp["runtime_version"] = rt_v
             comp["target_framework"] = rt_v
         if port:
             comp["port"] = port
+            comp["ports"] = [{"published": str(port), "target": str(port), "host_ip": ""}]
     elif os.path.isfile(os.path.join(base, "package.json")):
-        tech, mode, icon, out_dir, is_static = detect_framework(os.path.join(base, "package.json"), base)
+        tech, mode, icon, out_dir, is_static, fw_name, def_port = detect_framework(os.path.join(base, "package.json"), base)
         entry = node_entry(base) or ("next start" if mode == "next" else None)
-        rt_v = detect_runtime_version(base, mode)
-        port = extract_heuristic_port(base, entry or "")
+        rt_v = detect_runtime_version(base, root, mode)
+        port = extract_heuristic_port(base, root, entry or "", default_port=def_port)
 
         try:
             pkg_data = json.loads(read_text(os.path.join(base, "package.json")))
@@ -573,13 +738,16 @@ def detect_component(root, subdir):
         except Exception:
             scripts = {}
 
-        build_cmd = f"{pkg_mgr['run']} build" if "build" in scripts else ""
-        start_cmd = f"{pkg_mgr['run']} start" if "start" in scripts else (f"node {entry}" if entry else "")
-        dev_cmd = f"{pkg_mgr['run']} dev" if "dev" in scripts else ""
+        run_cmd = pkg_mgr.get("run") or "npm run"
+        build_cmd = f"{run_cmd} build" if "build" in scripts else ""
+        start_cmd = f"{run_cmd} start" if "start" in scripts else (pkg_mgr.get("start") or (f"node {entry}" if entry else ""))
+        dev_cmd = f"{run_cmd} dev" if "dev" in scripts else (f"{run_cmd} start:dev" if "start:dev" in scripts else "")
 
+        comp_type = "web" if mode in ("react", "next") or is_static else ("api" if API_DIR_HINTS.search(subdir or "") else ("web" if (WEB_DIR_HINTS.search(subdir or "") and not (API_DIR_HINTS.search(subdir or ""))) else ("api" if mode == "node" else "web")))
         comp.update({
-            "type": "web" if mode in ("react", "next") or is_static else "api",
+            "type": comp_type,
             "tech": tech,
+            "framework": fw_name,
             "mode": mode,
             "icon": icon,
             "output_dir": out_dir,
@@ -592,31 +760,72 @@ def detect_component(root, subdir):
             comp["runtime_version"] = rt_v
         if port:
             comp["port"] = port
+            comp["ports"] = [{"published": str(port), "target": str(port), "host_ip": ""}]
 
         if mode == "react" or is_static:
             comp["entry"] = f"{out_dir}/ (build)"
         elif mode == "next":
             comp.update({"entry": "next start", "next": True, "mode": "node"})
+        elif fw_name == "NestJS":
+            comp["entry"] = "dist/main.js"
         else:
             comp["entry"] = entry or "app.js"
     elif os.path.isfile(os.path.join(base, "index.php")) or os.path.isfile(os.path.join(base, "composer.json")):
-        rt_v = detect_runtime_version(base, "php")
-        comp.update({"type": "web", "tech": "PHP", "mode": "php", "icon": "🐘",
-                     "entry": "index.php", "output_dir": ".", "output_directory": "."})
-        if rt_v:
-            comp["runtime_version"] = rt_v
-    elif os.path.isfile(os.path.join(base, "index.html")):
-        comp.update({"type": "web", "tech": "Statik HTML", "mode": "php", "icon": "📄",
-                     "entry": "index.html", "output_dir": ".", "output_directory": "."})
-    elif os.path.isfile(os.path.join(base, "requirements.txt")) or os.path.isfile(os.path.join(base, "pyproject.toml")):
-        rt_v = detect_runtime_version(base, "python")
-        port = extract_heuristic_port(base, "main.py")
-        comp.update({"type": "api", "tech": "Python", "mode": "python", "icon": "🐍",
-                     "entry": "app.py / main.py", "output_dir": ".", "output_directory": "."})
+        rt_v = detect_runtime_version(base, root, "php")
+        port = extract_heuristic_port(base, root, "index.php", default_port=80)
+        comp.update({
+            "type": "web",
+            "tech": "PHP",
+            "framework": "PHP",
+            "mode": "php",
+            "icon": "🐘",
+            "entry": "index.php",
+            "output_dir": ".",
+            "output_directory": "."
+        })
         if rt_v:
             comp["runtime_version"] = rt_v
         if port:
             comp["port"] = port
+            comp["ports"] = [{"published": str(port), "target": str(port), "host_ip": ""}]
+    elif os.path.isfile(os.path.join(base, "index.html")):
+        comp.update({
+            "type": "web",
+            "tech": "Statik HTML",
+            "framework": "HTML",
+            "mode": "php",
+            "icon": "📄",
+            "entry": "index.html",
+            "output_dir": ".",
+            "output_directory": "."
+        })
+    elif os.path.isfile(os.path.join(base, "requirements.txt")) or \
+         os.path.isfile(os.path.join(base, "pyproject.toml")) or \
+         os.path.isfile(os.path.join(base, "Pipfile")) or \
+         os.path.isfile(os.path.join(base, "uv.lock")) or \
+         os.path.isfile(os.path.join(base, "poetry.lock")) or \
+         os.path.isfile(os.path.join(base, ".python-version")):
+        rt_v = detect_runtime_version(base, root, "python")
+        is_django = os.path.isfile(os.path.join(base, "manage.py"))
+        py_entry = "manage.py" if is_django else ("main.py" if os.path.isfile(os.path.join(base, "main.py")) else ("app.py" if os.path.isfile(os.path.join(base, "app.py")) else "app.py / main.py"))
+        fw_name = "Django" if is_django else "Python"
+        port = extract_heuristic_port(base, root, py_entry, default_port=8000 if is_django else 5000)
+        comp.update({
+            "type": "api",
+            "tech": f"{fw_name} (Python)" if fw_name != "Python" else "Python",
+            "framework": fw_name,
+            "mode": "python",
+            "icon": "🐍",
+            "entry": py_entry,
+            "output_dir": ".",
+            "output_directory": ".",
+            "start_command": pkg_mgr.get("start") or f"python {py_entry}"
+        })
+        if rt_v:
+            comp["runtime_version"] = rt_v
+        if port:
+            comp["port"] = port
+            comp["ports"] = [{"published": str(port), "target": str(port), "host_ip": ""}]
     else:
         return None
 
@@ -1019,7 +1228,8 @@ def scan_repo(root, branch=""):
                 result["env_template"] = {"file": env_file, "vars": env_vars}
 
         # Deep database & ORM resolution
-        db_info = detect_database_orm(root, primary["path"] if primary else "")
+        comp_dirs = [c.get("path") for c in comps if c.get("path")]
+        db_info = detect_database_orm(root, comp_dirs)
         result["database"] = db_info
 
         if primary:
@@ -1072,9 +1282,23 @@ def main():
 
     result = scan_repo(root, branch)
     if "--summary" in flags:
-        print(result.get("summary_tr", ""))
+        summary_str = result.get("summary_tr", "")
+        try:
+            print(summary_str)
+        except (UnicodeEncodeError, OSError):
+            try:
+                sys.stdout.buffer.write((summary_str + "\n").encode("utf-8", errors="replace"))
+            except Exception:
+                print(summary_str.encode("ascii", errors="replace").decode("ascii"))
     else:
-        print(json.dumps(result, ensure_ascii=False))
+        output_str = json.dumps(result, ensure_ascii=False)
+        try:
+            print(output_str)
+        except (UnicodeEncodeError, OSError):
+            try:
+                sys.stdout.buffer.write((output_str + "\n").encode("utf-8", errors="replace"))
+            except Exception:
+                print(json.dumps(result, ensure_ascii=True))
 
 
 if __name__ == "__main__":
