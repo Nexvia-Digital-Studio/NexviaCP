@@ -122,7 +122,9 @@ function __t($en, $tr) {
 						<span class="u-hide-desktop"><?= tohtml(__t("Status", "Durum")) ?>:</span>
 						<?php if ($is_running): ?>
 							<span style="color: var(--icon-color-green);"><i class="fas fa-circle-check icon-green"></i> <?= tohtml(__t("Running", "Çalışıyor")) ?></span>
-						<?php elseif (($svc["STATUS"] ?? "") === "failed"): ?>
+						<?php elseif (($svc["STATUS"] ?? "") === "deploying"): ?>
+						<span style="color: var(--icon-color-blue);"><i class="fas fa-spinner fa-spin"></i> <?= tohtml(__t("Deploying", "Kuruluyor")) ?></span>
+					<?php elseif (($svc["STATUS"] ?? "") === "failed"): ?>
 							<span style="color: var(--icon-color-red);"><i class="fas fa-circle-xmark icon-red"></i> <?= tohtml(__t("Failed", "Hata")) ?></span>
 						<?php else: ?>
 							<span style="color: var(--color-text);"><i class="fas fa-circle-pause icon-dim"></i> <?= tohtml(__t("Inactive", "Pasif")) ?></span>
