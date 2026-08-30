@@ -110,7 +110,7 @@
 		<div class="box-collapse-content">
 			<p class="u-text-muted u-mb15" style="font-size:0.88rem; line-height:1.4;">
 				🛡️ <strong><?= tohtml(__tr("Zero-Knowledge Security:", "Sıfır Bilgi (Zero-Knowledge) Güvenlik Modeli:")) ?></strong>
-				<?= tohtml(__tr("Secrets defined here are write-only and cannot be read in plaintext by anyone (even administrators) via the UI or API. They are automatically injected into the .env file of all newly deployed websites and APIs.", "Buraya eklediğiniz API anahtarları (örn: GEMINI_API_KEY, GOOGLE_MAPS_KEY) sunucuda chmod 600 ile izole edilir. Güvenlik gereği arayüzde asla düz metin olarak okunamaz, yalnızca güncellenebilir veya silinebilir. Kurulan tüm sitelerin .env dosyasına otomatik enjekte edilir.")) ?>
+				<?= tohtml(__tr("Secrets defined here are root-isolated and write-only, managed in the secure server vault. They are never exposed in user .env files or readable by unprivileged accounts.", "Buraya eklediğiniz API anahtarları sunucuda root yetkisinde izole edilir ve panelde asla düz metin olarak okunamaz. Güvenlik gereği kullanıcıların .env dosyalarına sızdırılmaz, yalnızca sunucu ve yetkili servisler tarafından kullanılır.")) ?>
 			</p>
 
 			<!-- Add New Global Secret Form -->
