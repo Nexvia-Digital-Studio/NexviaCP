@@ -37,9 +37,12 @@ docker_app_load "$app"
 # Authenticate to GHCR when a GitHub token is configured, so private
 # images (ghcr.io/...) can be pulled. Best-effort: public images work
 # without it. The token never appears in command lines or this log.
-if [ -n "$GITHUB_TOKEN" ]; then
-	printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io \
-		-u "${GITHUB_ORG:-github}" --password-stdin >/dev/null 2>&1 \
+# GHCR_TOKEN (classic PAT with read:packages) takes precedence: fine-grained
+# PATs cannot pull private images even when they can read the repository.
+ghcr_token="${GHCR_TOKEN:-$GITHUB_TOKEN}"
+if [ -n "$ghcr_token" ]; then
+	printf '%s' "$ghcr_token" | docker login ghcr.io \
+		-u "${GHCR_USER:-${GITHUB_ORG:-github}}" --password-stdin >/dev/null 2>&1 \
 		|| echo "[nexvia] ghcr.io login failed (continuing; public images only)"
 fi
 
