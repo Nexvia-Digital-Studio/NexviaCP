@@ -51,6 +51,12 @@ fi
 is_system_enabled "$MAIL_SYSTEM" 'MAIL_SYSTEM'
 is_object_valid 'user' 'USER' "$user"
 is_object_unsuspended 'user' 'USER' "$user"
+
+# Auto-provision mail domain if not exists
+if [ -z "$(grep -w "DOMAIN='$domain'" $USER_DATA/mail.conf 2>/dev/null)" ]; then
+	$BIN/v-add-mail-domain "$user" "$domain" "yes" "yes" "yes" >/dev/null 2>&1
+fi
+
 is_object_valid 'mail' 'DOMAIN' "$domain"
 is_object_unsuspended 'mail' 'DOMAIN' "$domain"
 is_package_full 'MAIL_ACCOUNTS'

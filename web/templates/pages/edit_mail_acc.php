@@ -32,6 +32,17 @@
 		<div class="form-container form-container-wide">
 			<h1 class="u-mb20"><?= tohtml( _("Edit Mail Account")) ?></h1>
 			<?php show_alert_message($_SESSION); ?>
+			
+			<div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:12px; padding:14px 18px; margin-bottom:20px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+				<div style="display:flex; align-items:center; gap:10px;">
+					<i class="fas fa-key" style="color:#2563eb; font-size:20px;"></i>
+					<div>
+						<strong style="color:#1e40af; font-size:14px; display:block;">Şifremi Unuttum / Şifre Değiştir</strong>
+						<span style="color:#475569; font-size:12px;">Mevcut şifreniz güvenlik sebebiyle kriptolanmıştır. Şifrenizi değiştirmek için aşağıdaki <strong>Şifre (Password)</strong> alanına yeni şifrenizi yazıp <strong>Kaydet</strong> butonuna basmanız yeterlidir.</span>
+					</div>
+				</div>
+			</div>
+
 			<div class="sidebar-right-grid">
 				<div class="sidebar-right-grid-content">
 					<div class="u-mb10">
