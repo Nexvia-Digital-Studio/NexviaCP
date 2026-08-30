@@ -50,6 +50,7 @@ fi
 # it (docker compose $NEXVIA_COMPOSE_FILES <cmd>).
 override_args=""
 [ -f "$app_dir/nexvia-override.yml" ] && override_args="-f $app_dir/nexvia-override.yml"
+[ -f "$app_dir/nexvia-user-override.yml" ] && override_args="$override_args -f $app_dir/nexvia-user-override.yml"
 export NEXVIA_COMPOSE_FILES="--env-file $app_dir/.env -f $repo_dir/$COMPOSE_FILE $override_args -p nexvia-$app"
 
 deploy_rc=0

@@ -133,6 +133,7 @@ docker_app_compose() {
 		cd "$repo_dir" || exit 1
 		local args=(--env-file "$app_dir/.env" -f "$conf_compose")
 		[ -f "$app_dir/nexvia-override.yml" ] && args+=(-f "$app_dir/nexvia-override.yml")
+		[ -f "$app_dir/nexvia-user-override.yml" ] && args+=(-f "$app_dir/nexvia-user-override.yml")
 		docker compose "${args[@]}" -p "nexvia-$app" "$@"
 	)
 }
