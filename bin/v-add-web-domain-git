@@ -155,7 +155,7 @@ fi
 # Persist repo URL + branch in domain config. Strip embedded credentials from
 # the stored value — the token lives only in .git/config (user-owned, 700);
 # deploys fetch via remote origin anyway.
-git_repo_clean=$(printf '%s' "$repo_url" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://[^/@]+@##')
+git_repo_clean=$(printf '%s' "$repo_url" | sed -E 's#(://)[^/@]+@#\1#')
 add_object_key 'web' 'DOMAIN' "$domain" 'GIT_REPO' 'TIME'
 update_object_value 'web' 'DOMAIN' "$domain" '$GIT_REPO' "$git_repo_clean"
 add_object_key 'web' 'DOMAIN' "$domain" 'GIT_BRANCH' 'TIME'
