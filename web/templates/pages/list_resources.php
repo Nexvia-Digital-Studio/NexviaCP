@@ -240,8 +240,17 @@ if (!empty($services)) {
 										<span style="font-weight: 700; font-size: 13.5px; color: <?= $d_mem > 512 ? 'var(--icon-color-orange, #f97316)' : 'var(--color-text, #fff)' ?>;">
 											<?= $d_mem > 0 ? $d_mem . " MB" : "<10 MB" ?>
 										</span>
-										<div style="font-size: 10.5px; color: var(--color-text-muted, #94a3b8);" title="<?= tohtml($is_tr ? ($is_standalone ? "Uygulama için tahsis edilen akıllı bellek tavanı" : "Tek PHP isteği için izin verilen tavan memory_limit") : "Allocated memory limit") ?>">
-											Limit: <?= tohtml($d_high) ?> <?= $is_standalone ? "" : "/ istek" ?>
+										<?php 
+											if ($is_standalone) {
+												$dynamic_limit_mb = max((int)$d_high, (int)ceil($d_mem * 1.5), 256);
+												$rounded_limit = (ceil($dynamic_limit_mb / 128) * 128);
+												$limit_str = ($rounded_limit >= 1024 && $rounded_limit % 1024 == 0) ? ($rounded_limit / 1024) . 'G' : $rounded_limit . 'M';
+											} else {
+												$limit_str = $d_high;
+											}
+										?>
+										<div style="font-size: 10.5px; color: var(--color-text-muted, #94a3b8);" title="<?= tohtml($is_tr ? ($is_standalone ? "Konteyner / Uygulama için tahsis edilen akıllı bellek tavanı" : "Tek PHP isteği için izin verilen tavan memory_limit") : "Allocated memory limit") ?>">
+											Limit: <?= tohtml($limit_str) ?> <?= $is_standalone ? "(Konteyner)" : "/ istek" ?>
 										</div>
 									</td>
 

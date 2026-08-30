@@ -518,16 +518,21 @@ def size_resources(state, users, dyn10, avg_rt, score, app_type="", current_ram_
     elif state == "boosted":
         workers = max(workers, 8)
 
-    is_standalone = (app_type in ("dotnet", "node-js", "python", "docker", "api")) or (current_ram_mb >= 200)
+    is_container_or_api = (app_type in ("docker", "dotnet", "node-js", "python", "api")) or (current_ram_mb > 0 and app_type != "")
 
-    if is_standalone:
-        # Standalone persistent runtime (e.g. .NET Core CLR, V8, Python).
-        # Dynamically envelope the application's actual memory footprint with at least 40% headroom.
-        base_needed = max(384, int(current_ram_mb * 1.45))
-        worker_mb = ((base_needed + 127) // 128) * 128
-        mem_max = max(1024, worker_mb * 2)
+    if is_container_or_api:
+        # Container / Standalone Runtime (Docker, ASP.NET Core, Node, Python).
+        # Dynamic envelope: Allocate at least 50% headroom above current RAM usage.
+        # Container floor is 256MB.
+        measured_mb = max(current_ram_mb, 128)
+        headroom_target = int(measured_mb * 1.5)
+        # Round up to 128MB steps (256M, 384M, 512M, 640M, 768M, 1024M, etc.)
+        high_mb = max(256, ((headroom_target + 127) // 128) * 128)
+        mem_max_mb = max(512, high_mb * 2)
         cpu = clamp(max(100, round(workers * 100 / 25) * 25), 100, 400)
+        return fmt_mb(high_mb), fmt_mb(mem_max_mb), "%d%%" % cpu, s["io"], workers
     else:
+        # Standard PHP-FPM web domain
         worker_mb = s["worker"]
         # slow responses on a distressed site deserve a roomier per-worker limit
         if avg_rt and avg_rt > 1.0 and state in ("active", "busy"):
@@ -537,7 +542,7 @@ def size_resources(state, users, dyn10, avg_rt, score, app_type="", current_ram_
             mem_max = worker_mb * 2
         cpu = clamp(round(workers * (100 if state == "boosted" else 75) / 25) * 25,
                     s["cpu_min"], s["cpu_max"])
-    return fmt_mb(worker_mb), fmt_mb(mem_max), "%d%%" % cpu, s["io"], workers
+        return fmt_mb(worker_mb), fmt_mb(mem_max), "%d%%" % cpu, s["io"], workers
 
 
 def _utcnow_str():
