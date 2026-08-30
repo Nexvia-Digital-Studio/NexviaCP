@@ -412,6 +412,13 @@ for core_svc in "${core_services[@]}"; do
 done
 
 #----------------------------------------------------------#
+#   4b. Domain Expiry & Suspension Periodic Scan          #
+#----------------------------------------------------------#
+if [ -x "$BIN/v-check-domain-expirations" ]; then
+	$BIN/v-check-domain-expirations check >/dev/null 2>&1 || true
+fi
+
+#----------------------------------------------------------#
 #   5. Write Summary Telemetry File                        #
 #----------------------------------------------------------#
 

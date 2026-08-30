@@ -36,6 +36,14 @@ json_list() {
 		else
 			DOCROOT="$HOMEDIR/$user/web/$DOMAIN/public_html/"
 		fi
+		if [ -z "$EXPIRY_DATE" ]; then
+			if [ -n "$DATE" ]; then
+				EXPIRY_DATE=$(date -d "$DATE + 1 year" +%F 2>/dev/null || date -d "+1 year" +%F 2>/dev/null)
+			else
+				EXPIRY_DATE=$(date -d "+1 year" +%F 2>/dev/null)
+			fi
+			EXPIRY_TYPE="1y"
+		fi
 		echo -n '    "'$DOMAIN'": {
         "IP": "'$IP'",
         "IP6": "'$IP6'",
@@ -56,6 +64,9 @@ json_list() {
         "PROXY": "'$PROXY'",
         "PROXY_EXT": "'$PROXY_EXT'",
         "SUSPENDED": "'$SUSPENDED'",
+        "EXPIRY_DATE": "'$EXPIRY_DATE'",
+        "EXPIRY_TYPE": "'$EXPIRY_TYPE'",
+        "RESOURCE_PRIORITY": "'$RESOURCE_PRIORITY'",
         "TIME": "'$TIME'",
         "DATE": "'$DATE'"
     }'

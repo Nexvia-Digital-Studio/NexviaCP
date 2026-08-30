@@ -15,6 +15,9 @@
 						<i class="fas fa-shield-halved icon-blue"></i><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Tehdit Kalkanı & WAF" : _("Threat Shield & WAF")) ?>
 					</a>
 				<?php } ?>
+				<a href="/list/domain-expiry/" class="button button-secondary">
+					<i class="fas fa-hourglass-half icon-yellow"></i><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Domain Süreleri" : _("Domain Expirations")) ?>
+				</a>
 			<?php } ?>
 		</div>
 		<div class="toolbar-right">
@@ -292,6 +295,33 @@
 						<a href="/edit/web/?<?= tohtml(http_build_query(["domain" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION['token']])) ?>" title="<?= tohtml( _("Edit Domain")) ?>: <?= tohtml($key) ?>">
 							<?= tohtml($key) ?>
 						</a>
+						<?php
+							$d_expiry = $data[$key]['EXPIRY_DATE'] ?? '';
+							$d_created = $data[$key]['DATE'] ?? '';
+							if (empty($d_expiry)) {
+								if (!empty($d_created)) {
+									$d_expiry = date('Y-m-d', strtotime($d_created . ' + 1 year'));
+								} else {
+									$d_expiry = date('Y-m-d', strtotime('+1 year'));
+								}
+							}
+							$d_exp_badge = '';
+							if ($d_expiry === 'unlimited') {
+								$d_exp_badge = '<a href="/list/domain-expiry/" style="text-decoration:none;"><span class="badge" style="background:#7c3aed; color:#fff; font-size:10px; margin-left:4px; padding:2px 5px;" title="' . ($is_tr ? "Sınırsız Lisans" : "Unlimited Lifetime") . '">♾️ Süresiz</span></a>';
+							} else {
+								$d_exp_ts = strtotime($d_expiry);
+								$d_today_ts = strtotime(date('Y-m-d'));
+								$d_days = (int)round(($d_exp_ts - $d_today_ts) / 86400);
+								if ($d_days < 0 || $data[$key]['SUSPENDED'] === 'yes') {
+									$d_exp_badge = '<a href="/list/domain-expiry/" style="text-decoration:none;"><span class="badge" style="background:#dc2626; color:#fff; font-size:10px; margin-left:4px; padding:2px 5px;" title="' . ($is_tr ? "Süresi Doldu / Yayın Kapalı ($d_expiry)" : "Expired ($d_expiry)") . '">🔴 ' . ($is_tr ? "Süresi Doldu" : "Expired") . '</span></a>';
+								} elseif ($d_days <= 30) {
+									$d_exp_badge = '<a href="/list/domain-expiry/" style="text-decoration:none;"><span class="badge" style="background:#f59e0b; color:#fff; font-size:10px; margin-left:4px; padding:2px 5px;" title="' . ($is_tr ? "Bitiş Tarihi: $d_expiry (Kritik)" : "Expires: $d_expiry") . '">⏳ ' . $d_days . 'g kaldı</span></a>';
+								} else {
+									$d_exp_badge = '<a href="/list/domain-expiry/" style="text-decoration:none;"><span class="badge" style="background:#10b981; color:#fff; font-size:10px; margin-left:4px; padding:2px 5px;" title="' . ($is_tr ? "Bitiş Tarihi: $d_expiry" : "Expires: $d_expiry") . '">🟢 ' . $d_days . 'g</span></a>';
+								}
+							}
+						?>
+						<?= $d_exp_badge ?>
 						<?php if (strpos($key, 'pr-') === 0): ?>
 							<span class="badge badge-warning" style="font-size:10px; margin-left:4px; padding:2px 5px;" title="<?= tohtml(__tr("GitHub PR Preview Staging Environment (Protected Access)", "GitHub PR Test Önizleme Ortamı (Korumalı Erişim)")) ?>">
 								<i class="fas fa-code-pull-request"></i> PR

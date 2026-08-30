@@ -1,0 +1,153 @@
+#!/bin/bash
+# info: set or update web domain expiry duration and lifecycle status
+# options: USER DOMAIN EXPIRY [RESTART]
+#
+# example: v-set-web-domain-expiry admin example.com 1y
+# example: v-set-web-domain-expiry admin example.com 3d
+# example: v-set-web-domain-expiry admin example.com unlimited
+# example: v-set-web-domain-expiry admin example.com 2027-12-31
+#
+# Supports relative tokens (3d, 1m, 3m, 6m, 1y, 2y, 3y, 5y), 'unlimited', or custom YYYY-MM-DD date.
+# Automatically unsuspends domain if new date is in the future.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+user=$1
+domain=$2
+expiry_input=$3
+restart=${4:-yes}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+if [ -f "/etc/hestiacp/hestia.conf" ]; then
+	source /etc/hestiacp/hestia.conf
+fi
+if [ -z "$HESTIA" ]; then
+	HESTIA="/usr/local/hestia"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+if [ -f "$HESTIA/func/main.sh" ]; then
+	source "$HESTIA/func/main.sh"
+fi
+# shellcheck source=/usr/local/hestia/func/domain.sh
+if [ -f "$HESTIA/func/domain.sh" ]; then
+	source "$HESTIA/func/domain.sh"
+fi
+# load config file
+if [ -f "$HESTIA/conf/hestia.conf" ]; then
+	source_conf "$HESTIA/conf/hestia.conf"
+fi
+
+if [ -z "$BIN" ]; then
+	BIN="$HESTIA/bin"
+fi
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '3' "$#" 'USER DOMAIN EXPIRY [RESTART]'
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
+
+# Demo mode check
+check_hestia_demo_mode
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+get_domain_values 'web'
+
+current_expiry=$(get_object_value 'web' 'DOMAIN' "$domain" '$EXPIRY_DATE')
+current_suspended=$(get_object_value 'web' 'DOMAIN' "$domain" '$SUSPENDED')
+
+expiry_date=""
+expiry_type=""
+
+# Calculate expiration date
+case "$expiry_input" in
+	unlimited|none|0|never|infinity)
+		expiry_date="unlimited"
+		expiry_type="unlimited"
+		;;
+	3d|3days)
+		expiry_date=$(date -d "+3 days" +%F 2>/dev/null || date -v+3d +%F)
+		expiry_type="3d"
+		;;
+	1m|1month)
+		expiry_date=$(date -d "+1 month" +%F 2>/dev/null || date -v+1m +%F)
+		expiry_type="1m"
+		;;
+	3m|3months)
+		expiry_date=$(date -d "+3 months" +%F 2>/dev/null || date -v+3m +%F)
+		expiry_type="3m"
+		;;
+	6m|6months)
+		expiry_date=$(date -d "+6 months" +%F 2>/dev/null || date -v+6m +%F)
+		expiry_type="6m"
+		;;
+	1y|1year|annual)
+		expiry_date=$(date -d "+1 year" +%F 2>/dev/null || date -v+1y +%F)
+		expiry_type="1y"
+		;;
+	2y|2years)
+		expiry_date=$(date -d "+2 years" +%F 2>/dev/null || date -v+2y +%F)
+		expiry_type="2y"
+		;;
+	3y|3years)
+		expiry_date=$(date -d "+3 years" +%F 2>/dev/null || date -v+3y +%F)
+		expiry_type="3y"
+		;;
+	5y|5years)
+		expiry_date=$(date -d "+5 years" +%F 2>/dev/null || date -v+5y +%F)
+		expiry_type="5y"
+		;;
+	*)
+		# Check if valid YYYY-MM-DD
+		if date -d "$expiry_input" +%F >/dev/null 2>&1; then
+			expiry_date=$(date -d "$expiry_input" +%F)
+			expiry_type="custom"
+		else
+			echo "Error: Invalid expiry duration or date format: $expiry_input"
+			exit 2
+		fi
+		;;
+esac
+
+# Ensure keys exist in web.conf
+add_object_key 'web' 'DOMAIN' "$domain" 'EXPIRY_DATE' 'TIME'
+add_object_key 'web' 'DOMAIN' "$domain" 'EXPIRY_TYPE' 'TIME'
+add_object_key 'web' 'DOMAIN' "$domain" 'EXPIRY_UPDATED' 'TIME'
+
+# Update values in web.conf
+update_object_value 'web' 'DOMAIN' "$domain" '$EXPIRY_DATE' "$expiry_date"
+update_object_value 'web' 'DOMAIN' "$domain" '$EXPIRY_TYPE' "$expiry_type"
+update_object_value 'web' 'DOMAIN' "$domain" '$EXPIRY_UPDATED' "$(date +%F)"
+
+today=$(date +%F)
+
+# Handle auto-unsuspend / auto-suspend
+if [ "$expiry_date" = "unlimited" ] || [[ "$expiry_date" > "$today" ]] || [ "$expiry_date" = "$today" ]; then
+	# Expiry is in the future or unlimited: If currently suspended, reactivate
+	if [ "$current_suspended" = "yes" ]; then
+		$BIN/v-unsuspend-web-domain "$user" "$domain" "$restart" >/dev/null 2>&1
+		$BIN/v-log-action "$user" "Info" "Web" "Domain $domain unsuspended automatically after expiry renewal ($expiry_date)."
+	fi
+elif [[ "$expiry_date" < "$today" ]]; then
+	# Expiry is in the past: If not suspended, suspend it
+	if [ "$current_suspended" != "yes" ]; then
+		$BIN/v-suspend-web-domain "$user" "$domain" "$restart" >/dev/null 2>&1
+		$BIN/v-log-action "$user" "Warning" "Web" "Domain $domain suspended automatically due to expired duration ($expiry_date)."
+	fi
+fi
+
+# Logging
+$BIN/v-log-action "$user" "Info" "Web" "Updated domain expiry for $domain: $expiry_date ($expiry_type)."
+log_event "$OK" "$ARGUMENTS"
+
+echo "OK: Domain $domain expiry set to $expiry_date ($expiry_type)"
+exit 0

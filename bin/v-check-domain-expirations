@@ -1,0 +1,205 @@
+#!/bin/bash
+# info: check domain expirations, migrate past domains (1 year default), and suspend expired domains
+# options: [ACTION] [USER]
+#
+# example: v-check-domain-expirations
+# example: v-check-domain-expirations json
+# example: v-check-domain-expirations check admin
+#
+# Actions:
+#   check           (default) Scan all domains, populate defaults for legacy domains, suspend expired domains
+#   json            Output full scan data and summary in JSON format
+#   sync_defaults   Ensure all legacy domains without expiry have 1-year default from creation date
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+action="${1:-check}"
+target_user="$2"
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+if [ -f "/etc/hestiacp/hestia.conf" ]; then
+	source /etc/hestiacp/hestia.conf
+fi
+if [ -z "$HESTIA" ]; then
+	HESTIA="/usr/local/hestia"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+if [ -f "$HESTIA/func/main.sh" ]; then
+	source "$HESTIA/func/main.sh"
+fi
+# shellcheck source=/usr/local/hestia/func/domain.sh
+if [ -f "$HESTIA/func/domain.sh" ]; then
+	source "$HESTIA/func/domain.sh"
+fi
+# load config file
+if [ -f "$HESTIA/conf/hestia.conf" ]; then
+	source_conf "$HESTIA/conf/hestia.conf"
+fi
+
+if [ -z "$BIN" ]; then
+	BIN="$HESTIA/bin"
+fi
+
+today=$(date +%F)
+today_ts=$(date -d "$today" +%s 2>/dev/null || date -j -f "%Y-%m-%d" "$today" +%s 2>/dev/null || date +%s)
+
+total_domains=0
+active_domains=0
+expiring_soon_domains=0
+expired_domains=0
+suspended_domains=0
+unlimited_domains=0
+migrated_count=0
+
+domains_json=""
+
+# Get users list
+if [ -n "$target_user" ]; then
+	user_list="$target_user"
+else
+	user_list=$(ls -1 "$HESTIA/data/users" 2>/dev/null)
+fi
+
+# Process domains
+for user in $user_list; do
+	conf_file="$HESTIA/data/users/$user/web.conf"
+	[ ! -f "$conf_file" ] && continue
+
+	# We process line by line
+	while IFS= read -r line || [ -n "$line" ]; do
+		[ -z "$line" ] && continue
+		parse_object_kv_list "$line"
+		[ -z "$DOMAIN" ] && continue
+
+		((total_domains++))
+
+		# 1. Migration for legacy domains without EXPIRY_DATE
+		if [ -z "$EXPIRY_DATE" ]; then
+			if [ -n "$DATE" ] && date -d "$DATE" +%F >/dev/null 2>&1; then
+				EXPIRY_DATE=$(date -d "$DATE + 1 year" +%F 2>/dev/null || date -d "+1 year" +%F)
+			else
+				EXPIRY_DATE=$(date -d "+1 year" +%F 2>/dev/null)
+			fi
+			EXPIRY_TYPE="1y"
+			EXPIRY_UPDATED="$today"
+
+			add_object_key 'web' 'DOMAIN' "$DOMAIN" 'EXPIRY_DATE' 'TIME'
+			add_object_key 'web' 'DOMAIN' "$DOMAIN" 'EXPIRY_TYPE' 'TIME'
+			add_object_key 'web' 'DOMAIN' "$DOMAIN" 'EXPIRY_UPDATED' 'TIME'
+
+			update_object_value 'web' 'DOMAIN' "$DOMAIN" '$EXPIRY_DATE' "$EXPIRY_DATE"
+			update_object_value 'web' 'DOMAIN' "$DOMAIN" '$EXPIRY_TYPE' "$EXPIRY_TYPE"
+			update_object_value 'web' 'DOMAIN' "$DOMAIN" '$EXPIRY_UPDATED' "$today"
+			((migrated_count++))
+		fi
+
+		# 2. Expiry status & remaining days calculation
+		days_left=0
+		status="active"
+
+		if [ "$EXPIRY_DATE" = "unlimited" ]; then
+			((unlimited_domains++))
+			status="unlimited"
+			days_left=99999
+		else
+			exp_ts=$(date -d "$EXPIRY_DATE" +%s 2>/dev/null || date -j -f "%Y-%m-%d" "$EXPIRY_DATE" +%s 2>/dev/null || echo 0)
+			if [ "$exp_ts" -gt 0 ]; then
+				diff_sec=$((exp_ts - today_ts))
+				days_left=$((diff_sec / 86400))
+			fi
+
+			if [ "$days_left" -lt 0 ] || [[ "$EXPIRY_DATE" < "$today" ]]; then
+				status="expired"
+				((expired_domains++))
+
+				# Auto-suspend expired domain if not already suspended
+				if [ "$SUSPENDED" != "yes" ] && [ "$action" != "json_only" ]; then
+					$BIN/v-suspend-web-domain "$user" "$DOMAIN" "yes" >/dev/null 2>&1
+					SUSPENDED="yes"
+					
+					# Send notification to panel and system
+					if [ -x "$BIN/v-add-user-notification" ]; then
+						$BIN/v-add-user-notification "$user" "Domain Süresi Doldu" "<strong>$DOMAIN</strong> web sitesinin geçerlilik süresi ($EXPIRY_DATE) doldu. Site yayını ve yönlendirmesi durduruldu." "warning" >/dev/null 2>&1 || true
+					fi
+					if [ -x "$BIN/v-send-sys-notification" ]; then
+						notif_msg="Domainin lisans/yönlendirme süresi dolduğu için yayın ve yönlendirmesi otomatik olarak durduruldu ve askıya alındı.\n\nKullanıcı: $user\nDomain: $DOMAIN\nBitiş Tarihi: $EXPIRY_DATE"
+						notif_extra=$(jq -nc --arg d "$DOMAIN" --arg u "$user" --arg exp "$EXPIRY_DATE" '{"service":"Web Expiry","status":"EXPIRED_SUSPENDED","domain":$d,"user":$u,"expiry":$exp}')
+						$BIN/v-send-sys-notification "Domain Süresi Doldu (Askıya Alındı): $DOMAIN" "$notif_msg" "WARNING" "" "domain_expiry" "$notif_extra" >/dev/null 2>&1 &
+					fi
+					$BIN/v-log-action "$user" "Warning" "Web" "Domain $DOMAIN expired ($EXPIRY_DATE) and was suspended automatically."
+				fi
+			elif [ "$days_left" -le 30 ]; then
+				status="expiring_soon"
+				((expiring_soon_domains++))
+				((active_domains++))
+			else
+				status="active"
+				((active_domains++))
+			fi
+		fi
+
+		if [ "$SUSPENDED" = "yes" ]; then
+			((suspended_domains++))
+		fi
+
+		# Build JSON row if requested
+		if [ "$action" = "json" ]; then
+			row_json=$(jq -nc \
+				--arg domain "$DOMAIN" \
+				--arg user "$user" \
+				--arg created "${DATE:-}" \
+				--arg created_time "${TIME:-}" \
+				--arg expiry "$EXPIRY_DATE" \
+				--arg expiry_type "${EXPIRY_TYPE:-1y}" \
+				--arg days "$days_left" \
+				--arg status "$status" \
+				--arg suspended "$SUSPENDED" \
+				'{domain:$domain, user:$user, created_date:$created, created_time:$created_time, expiry_date:$expiry, expiry_type:$expiry_type, days_left:($days|tonumber), status:$status, suspended:$suspended}')
+			if [ -z "$domains_json" ]; then
+				domains_json="$row_json"
+			else
+				domains_json="$domains_json,$row_json"
+			fi
+		fi
+
+	done < "$conf_file"
+done
+
+# Output results
+if [ "$action" = "json" ]; then
+	cat << EOF
+{
+	"success": true,
+	"today": "$today",
+	"summary": {
+		"total_domains": $total_domains,
+		"active_domains": $active_domains,
+		"expiring_soon": $expiring_soon_domains,
+		"expired": $expired_domains,
+		"suspended": $suspended_domains,
+		"unlimited": $unlimited_domains,
+		"migrated": $migrated_count
+	},
+	"domains": [$domains_json]
+}
+EOF
+	exit 0
+fi
+
+echo "=========================================================="
+echo " NexviaCP Domain Expiry & Lifecycle Engine"
+echo " Date: $today"
+echo "=========================================================="
+echo " Total Domains:    $total_domains"
+echo " Active Domains:   $active_domains"
+echo " Expiring Soon:    $expiring_soon_domains (< 30 days)"
+echo " Expired Domains:  $expired_domains"
+echo " Suspended:        $suspended_domains"
+echo " Unlimited (∞):    $unlimited_domains"
+echo " Legacy Migrated:  $migrated_count (initialized to 1-year default)"
+echo "=========================================================="
+
+exit 0

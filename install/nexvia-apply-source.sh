@@ -158,6 +158,11 @@ if [ -d "/etc/dovecot/conf.d" ]; then
 	systemctl reload dovecot 2>/dev/null || systemctl restart dovecot 2>/dev/null || true
 fi
 
+# Sync domain expiry defaults for existing domains
+if [ -x "$HESTIA/bin/v-check-domain-expirations" ]; then
+	"$HESTIA/bin/v-check-domain-expirations" "sync_defaults" || true
+fi
+
 #----------------------------------------------------------#
 #                 5. Restart the panel                      #
 #----------------------------------------------------------#

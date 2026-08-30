@@ -247,6 +247,16 @@
 								</a>
 							</li>
 
+							<!-- Domain Expiry & Subscriptions -->
+							<li class="top-bar-menu-item">
+								<a title="<?= function_exists('__tr') ? __tr("Domain Validity & Expiry Dashboard", "Domain Süreleri ve Lisans Takibi") : _("Domain Expirations") ?>" class="top-bar-menu-link <?php if ($TAB == "DOMAIN_EXPIRY") {
+									echo "active";
+								} ?>" href="/list/domain-expiry/">
+									<i class="fas fa-hourglass-half icon-yellow"></i>
+									<span class="top-bar-menu-link-label u-hide-desktop"><?= function_exists('__tr') ? __tr("Domain Expirations", "Domain Süreleri") : _("Domain Expirations") ?></span>
+								</a>
+							</li>
+
 							<!-- Security & CVE Scan — admin only -->
 							<li class="top-bar-menu-item">
 								<a title="<?= function_exists('__tr') ? __tr("Security & CVE Scan", "Güvenlik ve CVE Taraması") : _("Security & CVE Scan") ?>" class="top-bar-menu-link <?php if ($TAB == "CVES") {

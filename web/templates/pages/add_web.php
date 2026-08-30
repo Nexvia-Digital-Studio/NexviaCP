@@ -56,6 +56,30 @@
 					</select>
 				</div>
 				<div class="u-mb20">
+					<label for="v_expiry" class="form-label">
+						<i class="fas fa-hourglass-half icon-yellow u-mr5"></i><?= tohtml(function_exists('__tr') ? __tr("Domain Validity & Subscription Duration", "Domain Geçerlilik & Lisans Süresi") : _("Domain Validity Duration")) ?>
+					</label>
+					<select class="form-select" name="v_expiry" id="v_expiry" onchange="document.getElementById('custom-expiry-wrap').style.display = (this.value === 'custom') ? 'block' : 'none';">
+						<option value="1y" selected>📅 <?= tohtml(function_exists('__tr') ? __tr("1 Year (Standard Annual Sale - Default)", "1 Yıl (Standart Yıllık Satış - Varsayılan)") : "1 Year") ?></option>
+						<option value="3d">⏳ <?= tohtml(function_exists('__tr') ? __tr("3 Days (Demo / Trial)", "3 Gün (Demo / Deneme)") : "3 Days") ?></option>
+						<option value="1m">🗓️ <?= tohtml(function_exists('__tr') ? __tr("1 Month", "1 Ay") : "1 Month") ?></option>
+						<option value="3m">🗓️ <?= tohtml(function_exists('__tr') ? __tr("3 Months", "3 Ay") : "3 Months") ?></option>
+						<option value="6m">🗓️ <?= tohtml(function_exists('__tr') ? __tr("6 Months", "6 Ay") : "6 Months") ?></option>
+						<option value="2y">📅 <?= tohtml(function_exists('__tr') ? __tr("2 Years", "2 Yıl") : "2 Years") ?></option>
+						<option value="3y">📅 <?= tohtml(function_exists('__tr') ? __tr("3 Years", "3 Yıl") : "3 Years") ?></option>
+						<option value="5y">📅 <?= tohtml(function_exists('__tr') ? __tr("5 Years", "5 Yıl") : "5 Years") ?></option>
+						<option value="unlimited">♾️ <?= tohtml(function_exists('__tr') ? __tr("Unlimited (Lifetime / No Expiration)", "Sınırsız / Süresiz Lisans") : "Unlimited") ?></option>
+						<option value="custom">✏️ <?= tohtml(function_exists('__tr') ? __tr("Custom Expiration Date…", "Özel Bitiş Tarihi Seçimi…") : "Custom Date") ?></option>
+					</select>
+					<div id="custom-expiry-wrap" style="display:none; margin-top:10px;">
+						<label for="v_expiry_custom_date" class="form-label" style="font-size:12px;"><?= tohtml(function_exists('__tr') ? __tr("Custom Expiry Date (YYYY-MM-DD)", "Özel Bitiş Tarihi") : "Custom Expiry Date") ?></label>
+						<input type="date" class="form-control" name="v_expiry_custom_date" id="v_expiry_custom_date" min="<?= date('Y-m-d') ?>" value="<?= date('Y-m-d', strtotime('+1 year')) ?>">
+					</div>
+					<small class="form-text text-muted u-mt5">
+						<?= tohtml(function_exists('__tr') ? __tr("When the duration expires, the site and redirection will automatically stop/suspend. Extending duration later restores it immediately.", "Süre dolduğunda site ve yönlendirmesi otomatik durdurulur/askıya alınır. Panele yeni süre girildiğinde site anında tekrar açılır.") : "Site is suspended when duration ends.") ?>
+					</small>
+				</div>
+				<div class="u-mb20">
 					<label for="v_app_preset" class="form-label">
 						<i class="fas fa-layer-group icon-purple u-mr5"></i><?= tohtml( _("Application Runtime & Proxy Preset (Uygulama Çalıştırma Tipi)")) ?>
 					</label>

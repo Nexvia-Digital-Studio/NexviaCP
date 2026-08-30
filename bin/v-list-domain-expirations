@@ -1,0 +1,31 @@
+#!/bin/bash
+# info: list domain expirations and remaining days
+# options: [USER] [FORMAT]
+#
+# example: v-list-domain-expirations
+# example: v-list-domain-expirations admin json
+# example: v-list-domain-expirations json
+
+user="$1"
+format="$2"
+
+if [ "$user" = "json" ] || [ "$user" = "plain" ] || [ "$user" = "shell" ]; then
+	format="$user"
+	user=""
+fi
+
+if [ -z "$format" ]; then
+	format="json"
+fi
+
+if [ -f "/etc/hestiacp/hestia.conf" ]; then
+	source /etc/hestiacp/hestia.conf
+fi
+if [ -z "$HESTIA" ]; then
+	HESTIA="/usr/local/hestia"
+fi
+if [ -z "$BIN" ]; then
+	BIN="$HESTIA/bin"
+fi
+
+$BIN/v-check-domain-expirations "$format" "$user"

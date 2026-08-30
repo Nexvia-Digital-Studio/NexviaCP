@@ -25,6 +25,14 @@ source_conf "$HESTIA/conf/hestia.conf"
 
 # JSON list function
 json_list() {
+	if [ -z "$EXPIRY_DATE" ]; then
+		if [ -n "$DATE" ]; then
+			EXPIRY_DATE=$(date -d "$DATE + 1 year" +%F 2>/dev/null || date -d "+1 year" +%F 2>/dev/null)
+		else
+			EXPIRY_DATE=$(date -d "+1 year" +%F 2>/dev/null)
+		fi
+		EXPIRY_TYPE="1y"
+	fi
 	echo '{'
 	echo '    "'$DOMAIN'": {
         "IP": "'$IP'",
@@ -53,6 +61,9 @@ json_list() {
         "REDIRECT_CODE": "'$REDIRECT_CODE'",
         "CUSTOM_DOCROOT": "'$CUSTOM_DOCROOT'",
         "SUSPENDED": "'$SUSPENDED'",
+        "EXPIRY_DATE": "'$EXPIRY_DATE'",
+        "EXPIRY_TYPE": "'$EXPIRY_TYPE'",
+        "RESOURCE_PRIORITY": "'$RESOURCE_PRIORITY'",
         "TIME": "'$TIME'",
         "DATE": "'$DATE'"
     }'

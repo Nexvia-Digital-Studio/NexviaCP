@@ -85,6 +85,18 @@ if (!empty($_POST["ok"])) {
 		check_return_code($return_var, $output);
 		unset($output);
 		$domain_added = empty($_SESSION["error_msg"]);
+
+		// Set custom or preset expiration duration if specified
+		if ($domain_added) {
+			$v_expiry_input = $_POST["v_expiry"] ?? "1y";
+			if ($v_expiry_input === "custom" && !empty($_POST["v_expiry_custom_date"])) {
+				$v_expiry_input = trim($_POST["v_expiry_custom_date"]);
+			}
+			if (!empty($v_expiry_input)) {
+				exec(HESTIA_CMD . "v-set-web-domain-expiry " . $user . " " . quoteshellarg($v_domain) . " " . quoteshellarg($v_expiry_input) . " 'no'", $exp_out, $exp_rc);
+				unset($exp_out);
+			}
+		}
 	}
 
 	if (empty($_POST["v_dns"])) {

@@ -268,11 +268,16 @@ if [ "$stats_default" = "no" ] || [ "$stats_default" = "none" ]; then
 	stats_default=""
 fi
 
+# Calculate default 1-year expiry
+expiry_date=$(date -d "+1 year" +%F 2>/dev/null || date -v+1y +%F 2>/dev/null)
+expiry_type="1y"
+
 # Adding domain in web.conf
 echo "DOMAIN='$domain' IP='$ip' IP6='' CUSTOM_DOCROOT='' ALIAS='$ALIAS' TPL='$WEB_TEMPLATE'\
  SSL='no' SSL_FORCE='no' SSL_HOME='same' LETSENCRYPT='no' FTP_USER='' FTP_MD5=''\
  BACKEND='$BACKEND_TEMPLATE' PROXY='$PROXY_TEMPLATE' PROXY_EXT='$PROXY_EXT'\
  STATS='$stats_default' STATS_USER='' STATS_CRYPT='' U_DISK='0' U_BANDWIDTH='0'\
+ EXPIRY_DATE='$expiry_date' EXPIRY_TYPE='$expiry_type' EXPIRY_UPDATED='$date'\
  SUSPENDED='no' TIME='$time' DATE='$date'" >> $USER_DATA/web.conf
 
 syshealth_repair_web_config
