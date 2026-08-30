@@ -185,8 +185,15 @@
 								</a>
 							</li>
 
-							<!-- Docker Manager (Portainer) — admin only -->
+							<!-- GitHub & CI/CD Integration — admin only -->
 							<?php if (($_SESSION["userContext"] ?? "") === "admin") { ?>
+							<li class="top-bar-menu-item">
+								<a title="<?= function_exists('__tr') ? __tr("GitHub & CI/CD Integration", "GitHub & CI/CD Entegrasyonu") : _("GitHub & CI/CD") ?>" class="top-bar-menu-link <?php if ($TAB == "GITHUB" || ($TAB == "SERVER" && strpos($_SERVER['REQUEST_URI'] ?? '', '/edit/server/github') !== false)) { echo "active"; } ?>" href="/edit/server/github/">
+									<i class="fab fa-github" style="color: #38bdf8; font-size: 1.15rem;"></i>
+									<span class="top-bar-menu-link-label u-hide-desktop"><?= function_exists('__tr') ? __tr("GitHub & CI/CD", "GitHub & CI/CD") : _("GitHub & CI/CD") ?></span>
+								</a>
+							</li>
+							<!-- Docker Manager (Portainer) — admin only -->
 							<li class="top-bar-menu-item">
 								<a title="<?= _("Docker Manager (Portainer)") ?>" class="top-bar-menu-link <?php if ($TAB == "DOCKER") { echo "active"; } ?>" href="/list/docker/">
 									<i class="fas fa-cubes icon-blue"></i>

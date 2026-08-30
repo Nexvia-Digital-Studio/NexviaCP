@@ -1,7 +1,7 @@
 <?php
 use function Hestiacp\quoteshellarg\quoteshellarg;
 
-$TAB = "SERVER";
+$TAB = "GITHUB";
 
 // Main include
 include $_SERVER["DOCUMENT_ROOT"] . "/inc/main.php";
