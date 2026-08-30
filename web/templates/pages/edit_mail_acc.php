@@ -51,26 +51,26 @@
 						<input type="hidden" name="v_domain" value="<?= tohtml(trim($v_domain, "'")) ?>">
 						<input type="hidden" name="v_account" value="<?= tohtml(trim($v_account, "'")) ?>" class="js-account-input">
 					</div>
-					<div class="u-mb10">
-						<label for="v_password" class="form-label">
-							<?= tohtml( _("Password")) ?>
-							<button type="button" title="<?= tohtml( _("Generate")) ?>" class="u-unstyled-button u-ml5 js-generate-password">
-								<i class="fas fa-arrows-rotate icon-green"></i>
+					<div style="background:#f8fafc; border:1.5px solid #cbd5e1; border-radius:12px; padding:18px; margin-bottom:20px;">
+						<label for="v_password" class="form-label" style="font-weight:700; color:#1e293b; display:flex; justify-content:space-between; align-items:center;">
+							<span><i class="fas fa-key" style="color:#2563eb;"></i> <?= tohtml( _("Yeni Şifre (Şifre Değiştirme)")) ?></span>
+							<button type="button" title="<?= tohtml( _("Generate")) ?>" class="button button-secondary" style="font-size:12px; padding:4px 10px; font-weight:700; color:#2563eb;">
+								<i class="fas fa-arrows-rotate icon-green"></i> <?= tohtml( _("Rastgele Şifre Üret")) ?>
 							</button>
 						</label>
 						<div class="u-pos-relative u-mb10">
-							<input type="text" class="form-control js-password-input" name="v_password" id="v_password" value="<?= tohtml(trim($v_password, "'")) ?>">
-							<div class="password-meter">
+							<input type="text" class="form-control js-password-input" name="v_password" id="v_password" placeholder="Şifreyi değiştirmek için yeni şifre girin (Değişmeyecekse boş bırakın)" value="<?= tohtml(trim($v_password, "'")) ?>" style="font-family:monospace; font-size:13px;">
+							<div class="password-meter" style="margin-top:6px;">
 								<meter max="4" class="password-meter-input js-password-meter"></meter>
 							</div>
 						</div>
+						<p class="u-mb5" style="font-size:12px; color:#64748b; font-weight:600;"><?= tohtml( _("Güvenli şifre kriterleri")) ?>:</p>
+						<ul class="u-list-bulleted" style="font-size:12px; color:#64748b; margin-bottom:0;">
+							<li><?= tohtml( _("En az 8 karakter uzunluğunda")) ?></li>
+							<li><?= tohtml( _("Büyük & küçük harf")) ?></li>
+							<li><?= tohtml( _("En az 1 rakam")) ?></li>
+						</ul>
 					</div>
-					<p class="u-mb10"><?= tohtml( _("Your password must have at least")) ?>:</p>
-					<ul class="u-list-bulleted u-mb20">
-						<li><?= tohtml( _("8 characters long")) ?></li>
-						<li><?= tohtml( _("1 uppercase & 1 lowercase character")) ?></li>
-						<li><?= tohtml( _("1 number")) ?></li>
-					</ul>
 					<div class="u-mb10">
 						<label for="v_send_email" class="form-label">
 							<?= tohtml( _("Email login credentials to:")) ?>

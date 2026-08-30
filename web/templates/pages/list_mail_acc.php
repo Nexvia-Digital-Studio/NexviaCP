@@ -77,10 +77,14 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 	modalOpen: false,
 	selectedAccount: '',
 	selectedDomain: '<?= tohtml($_GET['domain'] ?? '') ?>',
+	webmailAlias: '<?= tohtml($v_webmail_alias ?? 'webmail') ?>',
 	token: '<?= tohtml($_SESSION['token'] ?? '') ?>',
+	newPassword: '',
+	showPassword: true,
 	copied: false,
 	openModal(acc) {
 		this.selectedAccount = acc;
+		this.newPassword = '';
 		this.modalOpen = true;
 		this.copied = false;
 	},
@@ -88,6 +92,14 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 		navigator.clipboard.writeText(txt);
 		this.copied = true;
 		setTimeout(() => { this.copied = false; }, 2000);
+	},
+	generatePass() {
+		const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$%&*';
+		let pass = '';
+		for (let i = 0; i < 14; i++) {
+			pass += chars.charAt(Math.floor(Math.random() * chars.length));
+		}
+		this.newPassword = pass;
 	}
 }">
 
@@ -198,7 +210,7 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 								<li class="units-table-row-action" data-key-action="href">
 									<a
 										class="units-table-row-action-link"
-										href="http://<?= tohtml($v_webmail_alias) ?>.<?= tohtml($_GET["domain"]) ?>/?<?= tohtml(http_build_query(["_user" => $key . '@' . $_GET["domain"]])) ?>"
+										href="https://<?= tohtml($v_webmail_alias) ?>.<?= tohtml($_GET["domain"]) ?>/?<?= tohtml(http_build_query(["_user" => $key . '@' . $_GET["domain"], "email" => $key . '@' . $_GET["domain"]])) ?>"
 										target="_blank"
 										title="<?= tohtml( _("Open Webmail")) ?>"
 									>
@@ -214,9 +226,9 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 										<li class="units-table-row-action" data-key-action="href">
 											<a
 												class="units-table-row-action-link"
-												href="http://<?= tohtml($v_webmail_alias) ?>.<?= tohtml($_GET["domain"]) ?>/?<?= tohtml(http_build_query(["_user" => $key . '@' . $_GET["domain"]])) ?>"
+												href="https://<?= tohtml($v_webmail_alias) ?>.<?= tohtml($_GET["domain"]) ?>/?<?= tohtml(http_build_query(["_user" => $key . '@' . $_GET["domain"], "email" => $key . '@' . $_GET["domain"]])) ?>"
 												target="_blank"
-												title="<?= tohtml( _("Open Webmail")) ?>"
+												title="<?= tohtml( _("Open Webmail (Otomatik Giriş / Doldurulmuş)")) ?>"
 											>
 												<i class="fas fa-envelope-open-text icon-maroon"></i>
 												<span class="u-hide-desktop"><?= tohtml( _("Open Webmail")) ?></span>
@@ -224,6 +236,18 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 										</li>
 									<?php } ?>
 								<?php } ?>
+								<li class="units-table-row-action" data-key-action="js">
+									<button
+										type="button"
+										class="units-table-row-action-link"
+										style="background:none; border:none; padding:0 8px; cursor:pointer; display:inline-flex; align-items:center;"
+										x-on:click="openModal('<?= tohtml($key) ?>')"
+										title="<?= tohtml( _("Şifre Değiştir & SMTP Bilgileri")) ?>"
+									>
+										<i class="fas fa-key icon-blue"></i>
+										<span class="u-hide-desktop"><?= tohtml( _("Şifre & SMTP")) ?></span>
+									</button>
+								</li>
 								<li class="units-table-row-action shortcut-enter" data-key-action="href">
 									<a
 										class="units-table-row-action-link"
@@ -233,18 +257,6 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 										<i class="fas fa-pencil icon-orange"></i>
 										<span class="u-hide-desktop"><?= tohtml( _("Edit Mail Account")) ?></span>
 									</a>
-								</li>
-								<li class="units-table-row-action" data-key-action="js">
-									<button
-										type="button"
-										class="units-table-row-action-link"
-										style="background:none; border:none; padding:0 8px; cursor:pointer; display:inline-flex; align-items:center;"
-										x-on:click="openModal('<?= tohtml($key) ?>')"
-										title="<?= tohtml( _("Connection & SMTP Settings")) ?>"
-									>
-										<i class="fas fa-key icon-blue"></i>
-										<span class="u-hide-desktop"><?= tohtml( _("Connection Settings")) ?></span>
-									</button>
 								</li>
 							<?php } ?>
 							<li class="units-table-row-action shortcut-s" data-key-action="js">
@@ -314,7 +326,7 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 		</p>
 	</div>
 
-	<!-- Interactive Mail & SMTP Connection Modal -->
+	<!-- Interactive Mail & SMTP Connection Modal with Direct Password Change -->
 	<div
 		x-cloak
 		x-show="modalOpen"
@@ -329,7 +341,7 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 		x-on:keydown.escape.window="modalOpen = false"
 	>
 		<div
-			style="background:#ffffff; width:100%; max-width:580px; border-radius:16px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25); border:1px solid #e2e8f0; overflow:hidden; font-family:inherit; color:#1e293b;"
+			style="background:#ffffff; width:100%; max-width:620px; border-radius:16px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25); border:1px solid #e2e8f0; overflow:hidden; font-family:inherit; color:#1e293b;"
 			x-transition:enter="transition ease-out duration-200"
 			x-transition:enter-start="opacity-0 transform scale-95"
 			x-transition:enter-end="opacity-100 transform scale-100"
@@ -337,12 +349,12 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 			<!-- Header -->
 			<div style="background:#0f172a; color:#ffffff; padding:20px 24px; display:flex; align-items:center; justify-content:space-between; border-bottom:3px solid #3b82f6;">
 				<div style="display:flex; align-items:center; gap:12px;">
-					<div style="background:rgba(59,130,246,0.2); width:40px; height:40px; border-radius:10px; display:flex; align-items:center; justify-content:center; color:#60a5fa; font-size:18px;">
-						<i class="fas fa-server"></i>
+					<div style="background:rgba(59,130,246,0.2); width:42px; height:42px; border-radius:10px; display:flex; align-items:center; justify-content:center; color:#60a5fa; font-size:20px;">
+						<i class="fas fa-envelope"></i>
 					</div>
 					<div>
-						<h3 style="margin:0; font-size:17px; font-weight:700; color:#ffffff;" x-text="selectedAccount + '@' + selectedDomain"></h3>
-						<span style="font-size:12px; color:#94a3b8;">E-Posta &amp; SMTP Bağlantı Parametreleri</span>
+						<h3 style="margin:0; font-size:18px; font-weight:700; color:#ffffff;" x-text="selectedAccount + '@' + selectedDomain"></h3>
+						<span style="font-size:12px; color:#94a3b8;">E-Posta Yönetimi, Şifre Değiştirme &amp; SMTP</span>
 					</div>
 				</div>
 				<button type="button" x-on:click="modalOpen = false" style="background:none; border:none; color:#94a3b8; font-size:20px; cursor:pointer; padding:4px;" title="Kapat">
@@ -353,6 +365,44 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 			<!-- Body -->
 			<div style="padding:24px; max-height:75vh; overflow-y:auto;">
 				
+				<!-- Şifre Değiştirme Formu (Doğrudan Bu Ekranda) -->
+				<form method="post" :action="'/edit/mail/?domain=' + encodeURIComponent(selectedDomain) + '&account=' + encodeURIComponent(selectedAccount)">
+					<input type="hidden" name="token" :value="token">
+					<input type="hidden" name="save" value="save">
+					<input type="hidden" name="v_account" :value="selectedAccount">
+					<input type="hidden" name="v_domain" :value="selectedDomain">
+
+					<div style="background:#eff6ff; border:1.5px solid #bfdbfe; border-radius:12px; padding:16px; margin-bottom:20px;">
+						<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+							<label style="font-weight:700; font-size:13px; color:#1e40af;">
+								<i class="fas fa-key" style="color:#2563eb;"></i> Şifremi Unuttum / Yeni Şifre Belirle
+							</label>
+							<button type="button" x-on:click="generatePass()" style="background:#ffffff; border:1px solid #bfdbfe; border-radius:6px; padding:4px 10px; font-size:11px; font-weight:700; cursor:pointer; color:#2563eb;">
+								<i class="fas fa-arrows-rotate"></i> Rastgele Şifre Üret
+							</button>
+						</div>
+						<div style="display:flex; gap:8px;">
+							<div style="position:relative; flex:1;">
+								<input
+									:type="showPassword ? 'text' : 'password'"
+									name="v_password"
+									x-model="newPassword"
+									placeholder="Yeni şifrenizi buraya yazın..."
+									class="form-control"
+									style="width:100%; box-sizing:border-box; padding-right:36px; font-family:monospace; font-size:13px;"
+									required
+								>
+								<button type="button" x-on:click="showPassword = !showPassword" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:#64748b; cursor:pointer;">
+									<i class="fas" :class="showPassword ? 'fa-eye-slash' : 'fa-eye'"></i>
+								</button>
+							</div>
+							<button type="submit" class="button" style="background:#2563eb; color:#ffffff; border:none; padding:0 16px; font-weight:700; border-radius:8px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+								<i class="fas fa-floppy-disk"></i> Şifreyi Kaydet
+							</button>
+						</div>
+					</div>
+				</form>
+
 				<!-- Durum Rozeti -->
 				<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px;">
 					<div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:12px 14px; display:flex; align-items:center; gap:10px;">
@@ -393,16 +443,6 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 						</div>
 					</div>
 
-					<div style="display:flex; justify-content:space-between; align-items:center; padding-bottom:10px; border-bottom:1px solid #e2e8f0; margin-bottom:10px;">
-						<span style="color:#64748b; font-weight:600;">Şifre:</span>
-						<div style="display:flex; align-items:center; gap:8px;">
-							<span style="color:#64748b; font-style:italic;">Kayıtlı Şifreniz</span>
-							<a :href="'/edit/mail/?domain=' + encodeURIComponent(selectedDomain) + '&account=' + encodeURIComponent(selectedAccount) + '&token=' + encodeURIComponent(token)" style="background:#eff6ff; border:1px solid #bfdbfe; color:#2563eb; padding:4px 8px; border-radius:6px; font-weight:600; text-decoration:none; font-size:12px;">
-								<i class="fas fa-key"></i> Şifre Değiştir
-							</a>
-						</div>
-					</div>
-
 					<div style="display:flex; justify-content:space-between; align-items:center;">
 						<span style="color:#64748b; font-weight:600;">Şifreleme &amp; Port:</span>
 						<strong style="color:#0f172a;">STARTTLS (Port 587) / SSL (Port 465)</strong>
@@ -437,13 +477,13 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 			<!-- Footer -->
 			<div style="background:#f8fafc; padding:16px 24px; border-top:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
 				<a
-					:href="'http://webmail.' + selectedDomain + '/?_user=' + encodeURIComponent(selectedAccount + '@' + selectedDomain)"
+					:href="'https://' + (webmailAlias || 'webmail') + '.' + selectedDomain + '/?_user=' + encodeURIComponent(selectedAccount + '@' + selectedDomain) + '&email=' + encodeURIComponent(selectedAccount + '@' + selectedDomain)"
 					target="_blank"
-					style="color:#64748b; font-size:13px; font-weight:600; text-decoration:none; display:flex; align-items:center; gap:6px;"
+					style="background:#d97706; color:#ffffff; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:700; text-decoration:none; display:inline-flex; align-items:center; gap:8px;"
 				>
-					<i class="fas fa-envelope-open-text" style="color:#d97706;"></i> Webmail'e Git
+					<i class="fas fa-envelope-open-text"></i> Webmail'e Git (Otomatik Kullanıcı Adı)
 				</a>
-				<button type="button" x-on:click="modalOpen = false" class="button button-secondary" style="padding:6px 18px;">
+				<button type="button" x-on:click="modalOpen = false" class="button button-secondary" style="padding:8px 18px;">
 					Kapat
 				</button>
 			</div>
@@ -451,4 +491,5 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 	</div>
 
 </div>
+
 
