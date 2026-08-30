@@ -65,6 +65,25 @@ if (!empty($_GET["delete_vault"]) && !empty($_GET["key"])) {
 	}
 }
 
+// Action 4: Generate or Save GitHub Webhook Secret
+if (!empty($_POST["save_webhook_secret"])) {
+	verify_csrf($_POST);
+	$v_secret_val = trim($_POST["webhook_secret_val"] ?? "");
+	if (empty($v_secret_val) || !empty($_POST["generate_random"])) {
+		$v_secret_val = bin2hex(random_bytes(24));
+	}
+	$v_key = quoteshellarg("GITHUB_WEBHOOK_SECRET");
+	$v_val = quoteshellarg($v_secret_val);
+	exec(HESTIA_CMD . "v-set-sys-global-vault " . $v_key . " " . $v_val, $output, $return_var);
+	if ($return_var == 0) {
+		$_SESSION["ok_msg"] = $is_tr ? "GitHub Webhook Secret başarıyla kaydedildi." : _("GitHub Webhook Secret saved successfully.");
+	} else {
+		$_SESSION["error_msg"] = $is_tr ? "Webhook Secret kaydedilirken hata oluştu." : _("Error saving Webhook Secret.");
+	}
+	header("Location: /edit/server/github/");
+	exit();
+}
+
 // Read from system config
 exec(HESTIA_CMD . "v-list-sys-config json", $sys_output, $sys_return_var);
 $sys_config = json_decode(implode("", $sys_output), true)["config"] ?? [];
@@ -91,6 +110,10 @@ if (!empty($v_github_token)) {
 
 // Fetch Global Vault Secrets (Masked)
 $global_vault = json_decode(shell_exec(HESTIA_CMD . "v-list-sys-global-vault json"), true) ?: [];
+
+// Fetch Webhook Secret
+exec(HESTIA_CMD . "v-list-webhook-secret 2>/dev/null", $wh_secret_out, $wh_secret_rc);
+$webhook_secret = ($wh_secret_rc === 0 && !empty($wh_secret_out[0])) ? trim($wh_secret_out[0]) : "";
 
 // Render page
 render_page($user, $TAB, "edit_server_github");

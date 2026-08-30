@@ -151,15 +151,15 @@
 	</div>
 
 	<!-- Comparative Sites Matrix Table -->
-	<div class="units-table" style="background:var(--color-background, #fff); border-radius:8px; border:1px solid var(--border-color, #334155); overflow:hidden;">
-		<div class="units-table-header" style="background:rgba(0,0,0,0.03); font-weight:bold;">
-			<div class="units-table-cell" style="flex: 2;"><?= tohtml(__tr("Domain & Stack", "Web Sitesi / Domain")) ?></div>
-			<div class="units-table-cell u-text-center" style="flex: 1.6;"><?= tohtml(__tr("Priority Tier (0-5)", "Öncelik Kademesi")) ?></div>
-			<div class="units-table-cell u-text-center" style="flex: 1.2;"><?= tohtml(__tr("Dynamic State", "Dinamik Durum")) ?></div>
-			<div class="units-table-cell" style="flex: 2;"><?= tohtml(__tr("RAM Allocation (High / Peak)", "RAM Tahsisi (High / Tavan)")) ?></div>
-			<div class="units-table-cell u-text-center" style="flex: 1;"><?= tohtml(__tr("CPU Quota", "CPU Kotası")) ?></div>
-			<div class="units-table-cell u-text-center" style="flex: 1.5;"><?= tohtml(__tr("Traffic & Demand (10m)", "Trafik & Talep (10dk)")) ?></div>
-			<div class="units-table-cell u-text-center" style="flex: 0.8;"><?= tohtml(__tr("Actions", "İşlem")) ?></div>
+	<div class="units-table" style="background:var(--color-background, #fff); border-radius:8px; border:1px solid var(--border-color, #334155); overflow-x:auto;">
+		<div class="units-table-header" style="background:rgba(0,0,0,0.03); font-weight:bold; min-width:850px;">
+			<div class="units-table-cell" style="flex: 2.2; min-width: 220px;"><?= tohtml(__tr("Domain & Stack", "Web Sitesi / Domain")) ?></div>
+			<div class="units-table-cell u-text-center" style="flex: 1.8; min-width: 170px;"><?= tohtml(__tr("Priority Tier (0-5)", "Öncelik Kademesi")) ?></div>
+			<div class="units-table-cell u-text-center" style="flex: 1.2; min-width: 105px;"><?= tohtml(__tr("Dynamic State", "Dinamik Durum")) ?></div>
+			<div class="units-table-cell" style="flex: 1.8; min-width: 140px;"><?= tohtml(__tr("RAM Allocation (High / Peak)", "RAM Tahsisi (High / Tavan)")) ?></div>
+			<div class="units-table-cell u-text-center" style="flex: 0.9; min-width: 75px;"><?= tohtml(__tr("CPU Quota", "CPU Kotası")) ?></div>
+			<div class="units-table-cell u-text-center" style="flex: 1.4; min-width: 120px;"><?= tohtml(__tr("Traffic & Demand (10m)", "Trafik & Talep (10dk)")) ?></div>
+			<div class="units-table-cell u-text-center" style="flex: 1.0; min-width: 85px;"><?= tohtml(__tr("Actions", "İşlem")) ?></div>
 		</div>
 
 		<?php if (empty($domains)): ?>
@@ -185,32 +185,43 @@
 				$reasons_list = (array)($ddata["REASONS"] ?? []);
 				$reasons_str = !empty($reasons_list) ? implode(", ", $reasons_list) : "";
 			?>
-				<div class="units-table-row domain-governance-row" data-domain="<?= tohtml(strtolower($dname)) ?>" data-status="<?= tohtml($status) ?>">
+				<div class="units-table-row domain-governance-row" data-domain="<?= tohtml(strtolower($dname)) ?>" data-status="<?= tohtml($status) ?>" style="min-width:850px; min-height:64px; padding:8px 0; align-items:center;">
 					<!-- Domain Name -->
-					<div class="units-table-cell" style="flex: 2;">
-						<div style="display:flex; align-items:center; gap:8px;">
-							<i class="fas fa-globe icon-blue"></i>
-							<div>
-								<a href="http://<?= tohtml($dname) ?>:9080/" target="_blank" class="u-text-bold" style="color:var(--color-text); text-decoration:none;">
+					<div class="units-table-cell" style="flex: 2.2; min-width: 220px; padding: 6px 12px;">
+						<div style="display:flex; align-items:flex-start; gap:10px;">
+							<i class="fas fa-globe icon-blue" style="margin-top:3px; font-size:16px; flex-shrink:0;"></i>
+							<div style="display:flex; flex-direction:column; gap:4px; min-width:0; line-height:1.3;">
+								<a href="http://<?= tohtml($dname) ?>:9080/" target="_blank" class="u-text-bold" style="color:var(--color-text); text-decoration:none; font-size:13px; word-break:break-all;">
 									<?= tohtml($dname) ?>
 								</a>
-								<small class="u-text-muted" style="display:block; font-size:11px;">
-									<?= tohtml($u_owner) ?><?php if ($is_api_domain): ?><span class="badge badge-info" style="font-size:9px; margin-left:4px; padding:1px 5px;" title="<?= tohtml(__tr("API / backend service - never idled, scaled by distress (latency, memory, CPU)", "API / arka plan servisi - asla uyutulmaz; gecikme, bellek, CPU sikismasina gore olceklenir")) ?>">API</span><?php if ($container_mem > 0): ?><span style="font-size:9px; color:var(--icon-color-blue, #38bdf8);" title="Container memory">🐳 <?= $container_mem ?> MB</span><?php endif; ?><?php if ($container_cpu > 0): ?><span style="font-size:9px; margin-left:3px; color:var(--icon-color-orange, #f97316);" title="Container CPU">⚡ <?= $container_cpu ?>%</span><?php endif; ?><?php endif; ?><?php if ($rt_ms > 0): ?><span style="font-size:9px; margin-left:6px;" title="<?= tohtml(__tr("Avg response time", "Ortalama cevap suresi")) ?>">⏱ <?= $rt_ms ?> ms</span><?php endif; ?><?php if ($err_5xx > 0): ?><span class="badge badge-danger" style="font-size:9px; margin-left:4px; padding:1px 5px;" title="<?= tohtml(__tr("5xx Server Errors in last 10m", "Son 10 dakikadaki 5xx Sunucu Hataları")) ?>">⚠️ <?= $err_5xx ?> err</span><?php endif; ?>
-								</small>
+								<div style="display:flex; flex-wrap:wrap; align-items:center; gap:5px; font-size:11px; line-height:1.2;">
+									<span class="u-text-muted"><?= tohtml($u_owner) ?></span>
+									<?php if ($is_api_domain): ?>
+										<span class="badge badge-info" style="font-size:9px; padding:1px 5px;" title="<?= tohtml(__tr("API / backend service - never idled, scaled by distress (latency, memory, CPU)", "API / arka plan servisi - asla uyutulmaz; gecikme, bellek, CPU sıkışmasına göre ölçeklenir")) ?>">API</span>
+										<?php if ($container_mem > 0): ?><span style="font-size:9px; color:var(--icon-color-blue, #38bdf8); font-weight:600;" title="Container memory">🐳 <?= $container_mem ?> MB</span><?php endif; ?>
+										<?php if ($container_cpu > 0): ?><span style="font-size:9px; color:var(--icon-color-orange, #f97316); font-weight:600;" title="Container CPU">⚡ <?= $container_cpu ?>%</span><?php endif; ?>
+									<?php endif; ?>
+									<?php if ($rt_ms > 0): ?>
+										<span style="font-size:9px; color:var(--color-text-muted); font-weight:600;" title="<?= tohtml(__tr("Avg response time", "Ortalama cevap süresi")) ?>">⏱ <?= $rt_ms ?> ms</span>
+									<?php endif; ?>
+									<?php if ($err_5xx > 0): ?>
+										<span class="badge badge-danger" style="font-size:9px; padding:1px 5px;" title="<?= tohtml(__tr("5xx Server Errors in last 10m", "Son 10 dakikadaki 5xx Sunucu Hataları")) ?>">⚠️ <?= $err_5xx ?> err</span>
+									<?php endif; ?>
+								</div>
 							</div>
 						</div>
 					</div>
 
 					<!-- Priority Tier (0-5 Interactive Dropdown) -->
-					<div class="units-table-cell u-text-center" style="flex: 1.6;">
+					<div class="units-table-cell u-text-center" style="flex: 1.8; min-width: 170px; padding: 6px 8px;">
 						<form method="post" action="/list/resources/" style="margin:0;">
 							<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
 							<input type="hidden" name="change_priority" value="1">
 							<input type="hidden" name="prio_user" value="<?= tohtml($u_owner) ?>">
 							<input type="hidden" name="prio_domain" value="<?= tohtml($dname) ?>">
 							
-							<select name="prio_level" class="form-select" onchange="this.form.submit();" style="font-size:12px; padding:4px 8px; font-weight:bold; <?= $prio === 0 ? 'border-color:var(--icon-color-blue, #38bdf8); background:rgba(56,189,248,0.08);' : ($prio >= 4 ? 'border-color:var(--icon-color-orange, #f97316); background:rgba(249,115,22,0.08);' : '') ?>">
-								<option value="0" <?= $prio === 0 ? "selected" : "" ?>>⚡ 0 (<?= tohtml(__tr("Auto-Adaptive", "Akıllı Otomatik")) ?>)</option>
+							<select name="prio_level" class="form-select" onchange="this.form.submit();" style="font-size:11px; padding:4px 6px; font-weight:bold; width:100%; max-width:160px; <?= $prio === 0 ? 'border-color:var(--icon-color-blue, #38bdf8); background:rgba(56,189,248,0.08);' : ($prio >= 4 ? 'border-color:var(--icon-color-orange, #f97316); background:rgba(249,115,22,0.08);' : '') ?>">
+								<option value="0" <?= $prio === 0 ? "selected" : "" ?>>⚡ 0 (<?= tohtml(__tr("Auto", "Akıllı Oto")) ?>)</option>
 								<option value="1" <?= $prio === 1 ? "selected" : "" ?>>🟢 1 (<?= tohtml(__tr("Low / Eco", "Düşük / Eco")) ?>)</option>
 								<option value="2" <?= $prio === 2 ? "selected" : "" ?>>🔵 2 (<?= tohtml(__tr("Normal", "Standart")) ?>)</option>
 								<option value="3" <?= $prio === 3 ? "selected" : "" ?>>🟣 3 (<?= tohtml(__tr("High", "Yüksek")) ?>)</option>
@@ -221,7 +232,7 @@
 					</div>
 
 					<!-- Dynamic State Badge -->
-					<div class="units-table-cell u-text-center" style="flex: 1.2;" title="<?= tohtml($reasons_str ? __tr("Reasons: ", "Nedenler: ") . $reasons_str : "") ?>">
+					<div class="units-table-cell u-text-center" style="flex: 1.2; min-width: 105px; padding: 6px 8px;" title="<?= tohtml($reasons_str ? __tr("Reasons: ", "Nedenler: ") . $reasons_str : "") ?>">
 						<?php if ($status === "idle"): ?>
 							<span class="badge badge-secondary" style="font-size:11px; padding:4px 8px; background:rgba(100,116,139,0.15); color:var(--color-text-muted); border:1px solid rgba(100,116,139,0.3);">
 								💤 <?= tohtml(__tr("Eco-Idle (64M)", "Uykuda (64M)")) ?>
@@ -250,7 +261,7 @@
 					</div>
 
 					<!-- RAM Allocation -->
-					<div class="units-table-cell" style="flex: 2;">
+					<div class="units-table-cell" style="flex: 1.8; min-width: 140px; padding: 6px 10px;">
 						<div style="font-size:12px; font-family:monospace; margin-bottom:4px;">
 							<strong style="color:var(--color-text);"><?= tohtml($mem_high) ?></strong> <span class="u-text-muted">/ <?= tohtml($mem_max) ?></span>
 						</div>
@@ -265,14 +276,14 @@
 					</div>
 
 					<!-- CPU Quota -->
-					<div class="units-table-cell u-text-center" style="flex: 1;">
+					<div class="units-table-cell u-text-center" style="flex: 0.9; min-width: 75px; padding: 6px 4px;">
 						<span class="badge badge-info" style="font-family:monospace; font-size:11px; padding:3px 7px;">
 							<?= tohtml($cpu_q) ?>
 						</span>
 					</div>
 
 					<!-- Traffic & Demand Score (10m) -->
-					<div class="units-table-cell u-text-center" style="flex: 1.5;">
+					<div class="units-table-cell u-text-center" style="flex: 1.4; min-width: 120px; padding: 6px 8px;">
 						<div style="font-family:monospace; font-size:12px; font-weight:bold; <?= $reqs > 0 ? 'color:var(--color-text);' : 'color:var(--color-text-muted);' ?>">
 							👤 <?= $users ?> <span class="u-text-muted">·</span> <?= $reqs ?> <?= tohtml(__tr("req", "istek")) ?>
 						</div>
@@ -285,10 +296,21 @@
 					</div>
 
 					<!-- Actions -->
-					<div class="units-table-cell u-text-center" style="flex: 0.8;">
-						<button type="button" class="button button-secondary button-small" onclick="openCustomTuneModal('<?= tohtml($u_owner) ?>', '<?= tohtml($dname) ?>', '<?= tohtml($mem_high) ?>', '<?= tohtml($mem_max) ?>', '<?= tohtml($cpu_q) ?>');" title="<?= tohtml(__tr("Fine-Tune Limits", "İnce Limit Ayarı")) ?>" style="padding:4px 8px; font-size:11px;">
-							<i class="fas fa-sliders"></i>
-						</button>
+					<div class="units-table-cell u-text-center" style="flex: 1.0; min-width: 85px; padding: 6px 8px;">
+						<div style="display:flex; align-items:center; justify-content:center; gap:5px;">
+							<form method="post" action="/list/resources/" style="margin:0; display:inline-block;">
+								<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
+								<input type="hidden" name="tune_single" value="1">
+								<input type="hidden" name="tune_user" value="<?= tohtml($u_owner) ?>">
+								<input type="hidden" name="tune_domain" value="<?= tohtml($dname) ?>">
+								<button type="submit" class="button button-secondary button-small" title="<?= tohtml(__tr("Analyze & Auto-Tune Domain Now", "Bu Domaini Şimdi Analiz Et & Optimize Et")) ?>" style="padding:4px 8px; font-size:11px;">
+									<i class="fas fa-bolt" style="color:var(--icon-color-orange, #f97316);"></i>
+								</button>
+							</form>
+							<button type="button" class="button button-secondary button-small" onclick="openCustomTuneModal('<?= tohtml($u_owner) ?>', '<?= tohtml($dname) ?>', '<?= tohtml($mem_high) ?>', '<?= tohtml($mem_max) ?>', '<?= tohtml($cpu_q) ?>');" title="<?= tohtml(__tr("Fine-Tune Limits", "İnce Limit Ayarı")) ?>" style="padding:4px 8px; font-size:11px;">
+								<i class="fas fa-sliders"></i>
+							</button>
+						</div>
 					</div>
 				</div>
 			<?php endforeach; ?>

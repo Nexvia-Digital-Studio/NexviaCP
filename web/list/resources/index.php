@@ -56,6 +56,23 @@ if (!empty($_POST["tune_all"])) {
 	exit();
 }
 
+// Action 2b: Trigger Single Domain Auto-Tune Now
+if (!empty($_POST["tune_single"])) {
+	verify_csrf($_POST);
+	$v_user = quoteshellarg($_POST["tune_user"] ?? $user_plain);
+	$v_domain = quoteshellarg($_POST["tune_domain"] ?? "");
+	if (!empty($_POST["tune_domain"])) {
+		exec(HESTIA_CMD . "v-tune-sys-resources " . $v_user . " " . $v_domain, $output, $return_var);
+		if ($return_var == 0) {
+			$_SESSION["ok_msg"] = ($is_tr ? "Analiz ve optimizasyon tamamlandı: " : _("Analysis and optimization completed: ")) . htmlspecialchars($_POST["tune_domain"]);
+		} else {
+			$_SESSION["error_msg"] = ($is_tr ? "Optimizasyon sırasında hata: " : _("Error during optimization: ")) . implode(" ", $output);
+		}
+	}
+	header("Location: /list/resources/");
+	exit();
+}
+
 // Action 3: Fine-grain Custom Limits Save
 if (!empty($_POST["save_custom_cgroup"])) {
 	verify_csrf($_POST);

@@ -181,21 +181,56 @@
 		</summary>
 		<div class="box-collapse-content">
 			<p class="u-text-muted u-mb15" style="font-size:0.88rem; line-height:1.4;">
-				<?= tohtml(__tr("Add this Webhook URL to your GitHub repository (or organization) to automatically update all deployed websites and APIs whenever you push commits or publish releases.", "Bu Webhook URL'sini GitHub'da deponuza eklediğinizde, her yeni commit/push veya yeni Release yayınlandığında ona bağlı olan tüm siteler sunucu tarafından otomatik güncellenir.")) ?>
+				<?= tohtml(__tr("Add this Webhook URL and Secret to your GitHub repository (Settings -> Webhooks) to automatically update and rebuild all deployed websites and APIs whenever you push commits.", "Bu Webhook URL ve Secret bilgilerini GitHub deponuza (Settings -> Webhooks) eklediğinizde, depoya her 'git push' yaptığınızda bağlı tüm siteler (PHP, Laravel, Node.js, .NET) sunucuda otomatik çekilir, derlenir ve sıfır kesintiyle güncellenir.")) ?>
 			</p>
 			<?php
 				$webhook_url = "https://" . ($_SERVER["HTTP_HOST"] ?? "panel.nexvia.test") . "/webhook/github/";
 			?>
 			<div class="card u-mb15" style="padding:15px; border: 1px solid var(--border-color, #334155); border-radius:6px; background: rgba(0,0,0,0.02);">
-				<label class="form-label u-mb5 u-text-bold" style="font-size:12px;"><?= tohtml(__tr("Your Server Webhook Payload URL:", "Sunucu Webhook URL'niz (GitHub'a Eklenecek):")) ?></label>
-				<div style="display:flex; gap:10px; align-items:center;">
-					<input type="text" class="form-control" value="<?= tohtml($webhook_url) ?>" readonly id="webhook-url-input" style="font-family:monospace; font-weight:bold;">
-					<button type="button" class="button button-secondary" onclick="navigator.clipboard.writeText(document.getElementById('webhook-url-input').value); alert('<?= tohtml(__tr("Webhook URL copied to clipboard!", "Webhook URL kopyalandı!")) ?>');">
-						<i class="fas fa-copy"></i> <?= tohtml(__tr("Copy", "Kopyala")) ?>
-					</button>
+				<!-- 1. Payload URL -->
+				<div class="u-mb15">
+					<label class="form-label u-mb5 u-text-bold" style="font-size:12px;"><?= tohtml(__tr("1. Payload URL (GitHub'a Eklenecek URL):", "1. Payload URL (GitHub'a Eklenecek URL):")) ?></label>
+					<div style="display:flex; gap:10px; align-items:center;">
+						<input type="text" class="form-control" value="<?= tohtml($webhook_url) ?>" readonly id="webhook-url-input" style="font-family:monospace; font-weight:bold;">
+						<button type="button" class="button button-secondary" onclick="navigator.clipboard.writeText(document.getElementById('webhook-url-input').value); alert('<?= tohtml(__tr("Webhook URL copied to clipboard!", "Webhook URL kopyalandı!")) ?>');">
+							<i class="fas fa-copy"></i> <?= tohtml(__tr("Copy", "Kopyala")) ?>
+						</button>
+					</div>
 				</div>
-				<div class="u-mt10" style="font-size: 0.85rem; color: var(--color-text);">
-					<strong><?= tohtml(__tr("GitHub Configuration:", "GitHub Yapılandırması:")) ?></strong> Content type: <code>application/json</code> &bull; Events: <code>Pushes</code> <?= tohtml(__tr("or", "veya")) ?> <code>Releases</code>
+
+				<!-- 2. Webhook Secret -->
+				<div class="u-mb15">
+					<label class="form-label u-mb5 u-text-bold" style="font-size:12px;"><?= tohtml(__tr("2. Secret (HMAC-SHA256 Güvenlik Anahtarı):", "2. Secret (HMAC-SHA256 Güvenlik Anahtarı):")) ?></label>
+					<?php if (!empty($webhook_secret)): ?>
+						<div style="display:flex; gap:10px; align-items:center;">
+							<input type="text" class="form-control" value="<?= tohtml($webhook_secret) ?>" readonly id="webhook-secret-input" style="font-family:monospace; font-weight:bold;">
+							<button type="button" class="button button-secondary" onclick="navigator.clipboard.writeText(document.getElementById('webhook-secret-input').value); alert('<?= tohtml(__tr("Webhook Secret copied to clipboard!", "Webhook Secret kopyalandı!")) ?>');">
+								<i class="fas fa-copy"></i> <?= tohtml(__tr("Copy", "Kopyala")) ?>
+							</button>
+						</div>
+					<?php else: ?>
+						<form method="post" action="/edit/server/github/" style="margin:0;">
+							<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
+							<input type="hidden" name="save_webhook_secret" value="1">
+							<input type="hidden" name="generate_random" value="1">
+							<div style="display:flex; gap:10px; align-items:center;">
+								<span class="badge badge-warning" style="padding:6px 10px; font-size:11px;">⚠️ <?= tohtml(__tr("Webhook secret not set yet", "Henüz secret tanımlanmadı")) ?></span>
+								<button type="submit" class="button button-primary">
+									<i class="fas fa-key"></i> <?= tohtml(__tr("Generate Secure Secret Now", "Otomatik Güvenli Secret Üret & Kaydet")) ?>
+								</button>
+							</div>
+						</form>
+					<?php endif; ?>
+				</div>
+
+				<!-- 3. Instructions -->
+				<div class="u-mt10" style="font-size: 0.85rem; color: var(--color-text); line-height: 1.5; background: rgba(56, 189, 248, 0.06); padding: 10px; border-radius: 6px; border-left: 3px solid var(--icon-color-blue, #38bdf8);">
+					<strong>📌 <?= tohtml(__tr("GitHub Webhook Setup Steps:", "GitHub Webhook Kurulum Adımları:")) ?></strong><br>
+					1. GitHub'da deponuza gidin: <strong>Settings &rarr; Webhooks &rarr; Add webhook</strong><br>
+					2. <strong>Payload URL:</strong> Yukarıdaki URL'yi yapıştırın.<br>
+					3. <strong>Content type:</strong> <code>application/json</code> seçin.<br>
+					4. <strong>Secret:</strong> Yukarıdaki Secret anahtarını yapıştırın.<br>
+					5. <strong>Which events would you like to trigger this webhook?</strong> &rarr; <em>Just the push event</em> seçin ve <strong>Add webhook</strong> butonuna tıklayın.
 				</div>
 			</div>
 		</div>
