@@ -1,0 +1,141 @@
+#!/bin/bash
+# info: list databases running inside docker compose apps
+# options: [--refresh] [FORMAT]
+#
+# example: v-list-docker-app-databases json
+#
+# Discovers postgres/mysql containers of registered docker apps, lists the
+# databases inside them with sizes and the owning panel users (derived from
+# the app's domain mappings). Output is cached for 45 seconds (--refresh
+# bypasses) so sidebar counters stay cheap.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+refresh=0
+format="json"
+if [ "$1" = "--refresh" ]; then
+	refresh=1
+	shift
+fi
+if [ "$1" = "json" ] || [ "$1" = "plain" ]; then
+	format="$1"
+fi
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+CACHE_DIR="/var/lib/hestia"
+CACHE="$CACHE_DIR/nexvia-docker-db-cache.json"
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+if [ "$refresh" -eq 0 ] && [ -f "$CACHE" ]; then
+	age=$(( $(date +%s) - $(stat -c %Y "$CACHE" 2>/dev/null || echo 0) ))
+	if [ "$age" -lt 45 ]; then
+		if [ "$format" = "json" ]; then
+			cat "$CACHE"
+		else
+			python3 - "$CACHE" <<'PYEOF'
+import json, sys
+d = json.load(open(sys.argv[1]))
+print("APP            DATABASE                    TYPE     DISK      OWNERS")
+print("-------------  --------------------------  -------  --------  ---------")
+for k, v in d.items():
+	print(f"{v['APP']:<13}  {v['DATABASE']:<26}  {v['TYPE']:<7}  {v['DISK']:<8}  {v['OWNER']}")
+PYEOF
+		fi
+		exit 0
+	fi
+fi
+
+if ! command -v docker >/dev/null 2>&1 || [ ! -d "$HESTIA/data/docker-apps" ]; then
+	[ "$format" = "json" ] && echo "{}"
+	exit 0
+fi
+
+tmp_rows=$(mktemp /tmp/nxv-dbdbs.XXXXXX)
+trap 'rm -f "$tmp_rows"' EXIT
+
+for acf in "$HESTIA/data/docker-apps"/*/app.conf; do
+	[ -f "$acf" ] || continue
+	dapp=$(basename "$(dirname "$acf")")
+
+	# owning users from the domain registry entries
+	owners=$(grep -m1 '^DOMAINS=' "$acf" | cut -d"'" -f2 | tr ' ' '\n' | sed 's/@.*//' | sort -u | paste -sd, -)
+
+	while IFS='|' read -r cname image csvc; do
+		[ -n "$cname" ] || continue
+		case "$image" in
+			postgres* )
+				# local socket inside the container trusts the postgres user
+				while IFS='|' read -r dbname dbbytes dbpretty; do
+					[ -n "$dbname" ] || continue
+					[ "$dbname" = "postgres" ] && continue
+					echo "$dapp|$csvc|$cname|$dbname|pgsql|$dbbytes|$dbpretty|$owners" >> "$tmp_rows"
+				done < <(docker exec "$cname" psql -U postgres -tAc \
+					"SELECT datname||'|'||pg_database_size(datname)||'|'||pg_size_pretty(pg_database_size(datname)) FROM pg_database WHERE NOT datistemplate" 2>/dev/null | grep -v '^\s*$')
+				;;
+			mysql*|mariadb* )
+				# root password is app-specific; only readable when the app
+				# exported it into the managed .env (MYSQL_ROOT_PASSWORD)
+				dbpass=$(grep -m1 '^MYSQL_ROOT_PASSWORD=' "$HESTIA/data/docker-apps/$dapp/.env" 2>/dev/null | cut -d"'" -f2 | cut -d= -f2-)
+				[ -n "$dbpass" ] || continue
+				while IFS='	' read -r dbname; do
+					[ -n "$dbname" ] || continue
+					case "$dbname" in information_schema|mysql|performance_schema|sys) continue ;; esac
+					echo "$dapp|$csvc|$cname|$dbname|mysql|0|-|$owners" >> "$tmp_rows"
+				done < <(docker exec -e MYSQL_PWD="$dbpass" "$cname" mysql -uroot -NBe "SHOW DATABASES" 2>/dev/null)
+				;;
+		esac
+	done < <(docker ps --filter "label=com.docker.compose.project=nexvia-$dapp" \
+		--format '{{.Names}}|{{.Image}}|{{.Label "com.docker.compose.service"}}' 2>/dev/null)
+done
+
+mkdir -p "$CACHE_DIR"
+python3 - "$tmp_rows" "$CACHE" "$format" <<'PYEOF'
+import json, sys
+
+rows = []
+for line in open(sys.argv[1]):
+    parts = line.rstrip("\n").split("|")
+    if len(parts) != 8:
+        continue
+    app, svc, cname, dbname, dbtype, dbbytes, dbpretty, owners = parts
+    rows.append((app, svc, cname, dbname, dbtype, dbbytes, dbpretty, owners))
+
+out = {}
+for app, svc, cname, dbname, dbtype, dbbytes, dbpretty, owners in rows:
+    key = f"{app}:{dbname}"
+    out[key] = {
+        "APP": app,
+        "SERVICE": svc,
+        "CONTAINER": cname,
+        "DATABASE": dbname,
+        "TYPE": dbtype,
+        "DISK": dbpretty,
+        "DISK_MB": int(int(dbbytes) / 1024 / 1024),
+        "OWNER": owners,
+    }
+
+with open(sys.argv[2], "w") as f:
+    json.dump(out, f)
+
+if sys.argv[3] == "json":
+    print(json.dumps(out, indent=4))
+else:
+    print("APP            DATABASE                    TYPE     DISK      OWNERS")
+    print("-------------  --------------------------  -------  --------  ---------")
+    for k, v in out.items():
+        print(f"{v['APP']:<13}  {v['DATABASE']:<26}  {v['TYPE']:<7}  {v['DISK']:<8}  {v['OWNER']}")
+PYEOF
+
+exit 0
