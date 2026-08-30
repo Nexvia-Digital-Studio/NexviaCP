@@ -697,19 +697,47 @@
 					<?php } ?>
 				<?php } ?>
 
+				<?php
+					/* NexviaCP: docker-app backed API services & databases
+					   (sidebar counters; --fast skips live container stats) */
+					$nx_api_extra = 0;
+					$nx_db_extra = 0;
+					exec(HESTIA_CMD . "v-list-web-domain-apps --fast json 2>/dev/null", $nx_a_out, $nx_a_rc);
+					if ($nx_a_rc === 0) {
+						$nx_a = json_decode(implode("", $nx_a_out) ?: "[]", true);
+						if (is_array($nx_a)) {
+							$nx_api_extra = count($nx_a);
+						}
+					}
+					unset($nx_a_out);
+					exec(HESTIA_CMD . "v-list-docker-app-databases json 2>/dev/null", $nx_d_out, $nx_d_rc);
+					if ($nx_d_rc === 0) {
+						$nx_d = json_decode(implode("", $nx_d_out) ?: "[]", true);
+						if (is_array($nx_d)) {
+							foreach ($nx_d as $nx_one) {
+								$nx_owners = array_map("trim", explode(",", (string)($nx_one["OWNER"] ?? "")));
+								if (($_SESSION["userContext"] ?? "") === "admin" || in_array($user, $nx_owners, true)) {
+									$nx_db_extra++;
+								}
+							}
+						}
+					}
+					unset($nx_d_out);
+				?>
+
 				<!-- 5. Databases tab -->
 				<?php if (isset($_SESSION["DB_SYSTEM"]) && !empty($_SESSION["DB_SYSTEM"])) { ?>
 					<?php if ($panel[$user]["DATABASES"] != "0") { ?>
 						<li class="main-menu-item">
 							<a class="main-menu-item-link <?php if ($TAB == "DB") {
        	echo "active";
-       } ?>" href="/list/db/" title="<?= _("Databases") ?>: <?= $panel[$user]["U_DATABASES"] ?>&#13;<?= _("Limit") ?>: <?= $panel[$user]["DATABASES"] == "unlimited"
+       } ?>" href="/list/db/" title="<?= _("Databases") ?>: <?= (int)$panel[$user]["U_DATABASES"] + $nx_db_extra ?>&#13;<?= _("Limit") ?>: <?= $panel[$user]["DATABASES"] == "unlimited"
 	? "∞"
 	: $panel[$user]["DATABASES"] ?>&#13;<?= _("Suspended") ?>: <?= $panel[$user]["SUSPENDED_DB"] ?>">
 								<p class="main-menu-item-label"><?= _("DB") ?><i class="fas fa-database"></i></p>
 								<ul class="main-menu-stats">
 									<li>
-										<?= _("Databases") ?>: <?= $panel[$user]["U_DATABASES"] ?> / <?= $panel[$user]["DATABASES"] == "unlimited" ? "<span class=\"u-text-bold\">∞</span>" : $panel[$user]["DATABASES"] ?>
+										<?= _("Databases") ?>: <?= (int)$panel[$user]["U_DATABASES"] + $nx_db_extra ?> / <?= $panel[$user]["DATABASES"] == "unlimited" ? "<span class=\"u-text-bold\">∞</span>" : $panel[$user]["DATABASES"] ?>
 									</li>
 								</ul>
 							</a>
@@ -764,7 +792,7 @@
 							<p class="main-menu-item-label"><?= _("API") ?><i class="fas fa-bolt"></i></p>
 							<ul class="main-menu-stats">
 								<li>
-									<?= $is_panel_tr ? "servisler" : _("Services") ?>: <?= htmlspecialchars($panel[$user]["U_API_SERVICES"] ?? (count(glob('/etc/systemd/system/hestia-app-*.service') ?: []))) ?> / <span class="u-text-bold">∞</span>
+									<?= $is_panel_tr ? "servisler" : _("Services") ?>: <?= htmlspecialchars($panel[$user]["U_API_SERVICES"] ?? (count(glob('/etc/systemd/system/hestia-app-*.service') ?: []) + $nx_api_extra)) ?> / <span class="u-text-bold">∞</span>
 								</li>
 								<li>
 									<?= $is_panel_tr ? "durum" : _("Status") ?>: <?= $is_panel_tr ? "aktif" : _("Active") ?>
