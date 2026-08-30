@@ -13,6 +13,13 @@
 						<i class="fas fa-fire-flame-curved"></i> <?= tohtml(__tr("Purge All System Caches", "Tüm Sistem Önbelleğini Temizle")) ?>
 					</button>
 				</form>
+				<form method="post" action="/list/cache/" style="display:inline;" onsubmit="return confirm('<?= tohtml(__tr("Are you sure you want to reset and clear the slow query log?", "Yavaş sorgu günlüğünü sıfırlayıp temizlemek istediğinize emin misiniz?")) ?>');">
+					<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
+					<input type="hidden" name="reset_slow_log" value="1">
+					<button type="submit" class="button button-secondary" title="<?= tohtml(__tr("Clear MySQL slow query log", "MySQL yavaş sorgu logunu sıfırla")) ?>">
+						<i class="fas fa-broom icon-orange"></i> <?= tohtml(__tr("Clear Slow Log", "Logu Sıfırla")) ?>
+					</button>
+				</form>
 				<?php if (!($summary["SLOW_LOG_ENABLED"] ?? false)) { ?>
 					<form method="post" action="/list/cache/" style="display:inline;">
 						<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
@@ -56,16 +63,27 @@
 					<i class="fas fa-server fa-lg" style="color:var(--icon-color-blue, #38bdf8);"></i>
 				</div>
 			</div>
-			<div style="margin-top:10px; font-size:12px; color:var(--color-text-muted); display:flex; justify-content:space-between;">
+			<div style="margin-top:10px; font-size:12px; color:var(--color-text-muted); display:flex; justify-content:space-between; flex-wrap:wrap; gap:5px;">
 				<span><i class="fas fa-chart-line"></i> <?= tohtml(__tr("Peak:", "Zirve:")) ?> <strong><?= tohtml($summary["REDIS_PEAK_MEMORY_HUMAN"] ?? "0B") ?></strong></span>
+				<span><i class="fas fa-key"></i> <?= (int)($summary["TOTAL_REDIS_KEYS"] ?? 0) ?> <?= tohtml(__tr("keys", "anahtar")) ?></span>
 				<span><i class="fas fa-plug"></i> <?= (int)($summary["REDIS_CONNECTED_CLIENTS"] ?? 0) ?> <?= tohtml(__tr("clients", "bağlantı")) ?></span>
 			</div>
 		</div>
 
 		<!-- Stat 2: Hit Rate Ratio -->
 		<?php
-			$hit_rate = (float)($summary["REDIS_HIT_RATE_PCT"] ?? 100);
-			$hit_color = $hit_rate >= 90 ? "var(--icon-color-green, #22c55e)" : ($hit_rate >= 70 ? "var(--icon-color-orange, #f97316)" : "var(--color-danger, #ef4444)");
+			$hits = (int)($summary["REDIS_KEYSPACE_HITS"] ?? 0);
+			$misses = (int)($summary["REDIS_KEYSPACE_MISSES"] ?? 0);
+			$total_redis_req = $hits + $misses;
+			$hit_rate_raw = $summary["REDIS_HIT_RATE_PCT"] ?? null;
+			if ($total_redis_req === 0 || $hit_rate_raw === null) {
+				$hit_display = "—";
+				$hit_color = "var(--color-text-muted, #94a3b8)";
+			} else {
+				$hit_rate = (float)$hit_rate_raw;
+				$hit_display = number_format($hit_rate, 1) . "%";
+				$hit_color = $hit_rate >= 90 ? "var(--icon-color-green, #22c55e)" : ($hit_rate >= 70 ? "var(--icon-color-orange, #f97316)" : "var(--color-danger, #ef4444)");
+			}
 		?>
 		<div class="card" style="padding: 18px; border-radius: 8px; border: 1px solid var(--border-color, #334155); background: var(--color-background, #fff);">
 			<div style="display:flex; justify-content:space-between; align-items:center;">
@@ -74,7 +92,7 @@
 						<?= tohtml(__tr("Cache Hit Ratio", "Önbellek İsabet Oranı")) ?>
 					</small>
 					<h2 style="margin:5px 0 0 0; font-size:1.6rem; font-weight:bold; color:<?= $hit_color ?>;">
-						<?= number_format($hit_rate, 1) ?>%
+						<?= $hit_display ?>
 					</h2>
 				</div>
 				<div style="width:40px; height:40px; border-radius:8px; background:rgba(34, 197, 94, 0.1); display:flex; align-items:center; justify-content:center;">
@@ -82,8 +100,8 @@
 				</div>
 			</div>
 			<div style="margin-top:10px; font-size:12px; color:var(--color-text-muted); display:flex; justify-content:space-between;">
-				<span>🎯 <?= number_format((int)($summary["REDIS_KEYSPACE_HITS"] ?? 0)) ?> <?= tohtml(__tr("Hits", "İsabet")) ?></span>
-				<span>❌ <?= number_format((int)($summary["REDIS_KEYSPACE_MISSES"] ?? 0)) ?> <?= tohtml(__tr("Misses", "Kaçırma")) ?></span>
+				<span>🎯 <?= number_format($hits) ?> <?= tohtml(__tr("Hits", "İsabet")) ?></span>
+				<span>❌ <?= number_format($misses) ?> <?= tohtml(__tr("Misses", "Kaçırma")) ?></span>
 			</div>
 		</div>
 
@@ -109,14 +127,18 @@
 		</div>
 
 		<!-- Stat 4: SQL Optimizer & Slow Queries -->
+		<?php
+			$active_slow_patterns = count($slow_queries["queries"] ?? []);
+			$mysql_qps = (float)($summary["MYSQL_QPS"] ?? 0);
+		?>
 		<div class="card" style="padding: 18px; border-radius: 8px; border: 1px solid var(--border-color, #334155); background: var(--color-background, #fff);">
 			<div style="display:flex; justify-content:space-between; align-items:center;">
 				<div>
 					<small class="u-text-muted" style="font-size:11px; text-transform:uppercase; font-weight:bold; letter-spacing:0.5px;">
-						<?= tohtml(__tr("SQL Slow Query Analyzer", "Yavaş SQL Sorguları")) ?>
+						<?= tohtml(__tr("SQL Slow Query Analyzer", "Yavaş SQL Analizörü")) ?>
 					</small>
-					<h2 style="margin:5px 0 0 0; font-size:1.6rem; font-weight:bold; color:var(--icon-color-orange, #f97316);">
-						<?= (int)($summary["SLOW_QUERIES_COUNT"] ?? 0) ?>
+					<h2 style="margin:5px 0 0 0; font-size:1.6rem; font-weight:bold; color:<?= $active_slow_patterns > 0 ? 'var(--icon-color-orange, #f97316)' : 'var(--icon-color-green, #22c55e)' ?>;">
+						<?= $active_slow_patterns ?> <?= tohtml(__tr("Slow Patterns", "Yavaş Kalıp")) ?>
 					</h2>
 				</div>
 				<div style="width:40px; height:40px; border-radius:8px; background:rgba(249, 115, 22, 0.1); display:flex; align-items:center; justify-content:center;">
@@ -131,7 +153,13 @@
 						<span style="color:var(--color-text-muted); font-weight:bold;">○ <?= tohtml(__tr("Log Inactive", "Günlük Kapalı")) ?></span>
 					<?php } ?>
 				</span>
-				<span>💡 <?= tohtml(__tr("AI Index Tuning", "AI İndeks Önerisi")) ?></span>
+				<span>
+					<?php if ($mysql_qps > 0): ?>
+						⚡ <?= $mysql_qps ?> QPS
+					<?php else: ?>
+						💡 <?= tohtml(__tr("AI Tuning", "AI İndeksleme")) ?>
+					<?php endif; ?>
+				</span>
 			</div>
 		</div>
 

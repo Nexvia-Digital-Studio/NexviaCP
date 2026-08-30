@@ -124,7 +124,7 @@ if redis_cli_path:
             keyspace_hits = int(redis_info.get("keyspace_hits", 0))
             keyspace_misses = int(redis_info.get("keyspace_misses", 0))
             total_requests = keyspace_hits + keyspace_misses
-            hit_rate_pct = round((keyspace_hits / total_requests) * 100, 2) if total_requests > 0 else 100.0
+            hit_rate_pct = round((keyspace_hits / total_requests) * 100, 1) if total_requests > 0 else None
             
             # Parse db keyspaces (e.g. db0:keys=12,expires=0,avg_ttl=0)
             for i in range(16):
@@ -140,6 +140,8 @@ if redis_cli_path:
     except Exception:
         pass
 
+total_redis_keys = sum(db_stats[f"db{i}"]["keys_count"] for i in range(16))
+
 # Helper to format bytes
 def human_bytes(b):
     if b < 1024:
@@ -151,14 +153,20 @@ def human_bytes(b):
     else:
         return f"{b/1073741824:.2f} GB"
 
-# 2. GATHER FASTCGI & PROXY CACHE STATS
-microcache_dir = "/var/cache/nginx/micro"
-proxycache_dir = "/var/cache/nginx/proxy"
+# 2. GATHER FASTCGI & PROXY CACHE STATS ACROSS ALL CANDIDATE CACHE DIRS
+candidate_cache_dirs = [
+    "/var/cache/nginx/micro",
+    "/var/cache/nginx/proxy",
+    "/var/cache/nginx/fastcgi",
+    "/var/cache/nginx/fastcgi_cache",
+    "/var/run/nginx-cache",
+    "/tmp/nginx_cache"
+]
 total_microcache_bytes = 0
 total_microcache_files = 0
 domain_cache_sizes = {}
 
-for root_dir in (microcache_dir, proxycache_dir):
+for root_dir in candidate_cache_dirs:
     if os.path.isdir(root_dir):
         for root, dirs, files in os.walk(root_dir):
             for f in files:
@@ -171,18 +179,38 @@ for root_dir in (microcache_dir, proxycache_dir):
                     pass
 
 # Measure per-domain microcache size
-if os.path.isdir(microcache_dir):
-    for d_entry in os.listdir(microcache_dir):
-        subpath = os.path.join(microcache_dir, d_entry)
-        if os.path.isdir(subpath):
-            d_bytes = 0
-            for r, ds, fs in os.walk(subpath):
-                for f in fs:
-                    try:
-                        d_bytes += os.path.getsize(os.path.join(r, f))
-                    except Exception:
-                        pass
-            domain_cache_sizes[d_entry] = d_bytes
+for d_check_dir in ("/var/cache/nginx/micro", "/var/cache/nginx/fastcgi", "/var/cache/nginx/proxy"):
+    if os.path.isdir(d_check_dir):
+        for d_entry in os.listdir(d_check_dir):
+            subpath = os.path.join(d_check_dir, d_entry)
+            if os.path.isdir(subpath):
+                d_bytes = 0
+                for r, ds, fs in os.walk(subpath):
+                    for f in fs:
+                        try:
+                            d_bytes += os.path.getsize(os.path.join(r, f))
+                        except Exception:
+                            pass
+                domain_cache_sizes[d_entry] = domain_cache_sizes.get(d_entry, 0) + d_bytes
+
+# Gather Live MySQL/MariaDB QPS & Uptime
+mysql_uptime_sec = 0
+mysql_queries_total = 0
+mysql_qps = 0.0
+try:
+    s_cmd = subprocess.run(["mysql", "-N", "-e", "SHOW GLOBAL STATUS LIKE 'Uptime'; SHOW GLOBAL STATUS LIKE 'Questions';"], capture_output=True, text=True, timeout=2)
+    if s_cmd.returncode == 0:
+        for line in s_cmd.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 2:
+                if parts[0] == "Uptime":
+                    mysql_uptime_sec = int(parts[1])
+                elif parts[0] == "Questions":
+                    mysql_queries_total = int(parts[1])
+        if mysql_uptime_sec > 0 and mysql_queries_total > 0:
+            mysql_qps = round(mysql_queries_total / mysql_uptime_sec, 1)
+except Exception:
+    pass
 
 # 3. GATHER DOMAIN ALLOCATIONS & WEB.CONF
 domains_list = {}
@@ -332,13 +360,17 @@ governance_data = {
         "REDIS_KEYSPACE_HITS": keyspace_hits,
         "REDIS_KEYSPACE_MISSES": keyspace_misses,
         "REDIS_ASSIGNED_DOMAINS_COUNT": assigned_db_count,
+        "TOTAL_REDIS_KEYS": total_redis_keys,
         "FASTCGI_TOTAL_SIZE_BYTES": total_microcache_bytes,
         "FASTCGI_TOTAL_SIZE_HUMAN": human_bytes(total_microcache_bytes),
         "FASTCGI_TOTAL_FILES": total_microcache_files,
         "FASTCGI_ENABLED_COUNT": fastcgi_enabled_count,
         "TOTAL_MONITORED_DOMAINS": len(domains_list),
         "SLOW_QUERIES_COUNT": slow_query_summary.get("slow_log", {}).get("total_slow_queries_count", 0),
-        "SLOW_LOG_ENABLED": slow_query_summary.get("slow_log", {}).get("enabled", False)
+        "ACTIVE_SLOW_PATTERNS": len(slow_query_summary.get("queries", [])),
+        "SLOW_LOG_ENABLED": slow_query_summary.get("slow_log", {}).get("enabled", False),
+        "MYSQL_QPS": mysql_qps,
+        "MYSQL_QUERIES_TOTAL": mysql_queries_total
     },
     "redis_databases": db_stats,
     "domains": domains_list,

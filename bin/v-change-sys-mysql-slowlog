@@ -54,6 +54,12 @@ touch "$SLOW_LOG_FILE" 2>/dev/null || true
 chown -R mysql:mysql /var/log/mysql 2>/dev/null || true
 chmod 640 "$SLOW_LOG_FILE" 2>/dev/null || true
 
+if [ "$status" = "reset" ] || [ "$status" = "clear" ] || [ "$status" = "flush" ]; then
+	> "$SLOW_LOG_FILE" 2>/dev/null || true
+	echo "[+] MariaDB / MySQL Slow Query Log CLEARED."
+	exit 0
+fi
+
 if [ "$status" = "on" ] || [ "$status" = "yes" ] || [ "$status" = "1" ]; then
 	# Validate long_query_time before it is used in the SET GLOBAL statement
 	# (digits enumerated explicitly to stay locale-independent)

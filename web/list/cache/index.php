@@ -177,6 +177,21 @@ if (!empty($_POST["apply_sql_index"])) {
 	exit();
 }
 
+// Action 8: Reset / Truncate Slow Query Log
+if (!empty($_POST["reset_slow_log"])) {
+	verify_csrf($_POST);
+	if ($is_admin) {
+		exec(HESTIA_CMD . "v-change-sys-mysql-slowlog reset", $r_out, $r_code);
+		if ($r_code == 0) {
+			$_SESSION["ok_msg"] = $is_tr ? "Yavaş sorgu günlüğü (Slow Query Log) başarıyla sıfırlandı ve temizlendi." : _("Slow query log cleared successfully.");
+		} else {
+			$_SESSION["error_msg"] = ($is_tr ? "Slow query log sıfırlanırken hata: " : _("Error clearing slow query log: ")) . implode(" ", $r_out);
+		}
+	}
+	header("Location: /list/cache/");
+	exit();
+}
+
 // Fetch Performance & Cache Governance Data
 exec(HESTIA_CMD . "v-list-cache-governance json", $cache_output, $return_var);
 $cache_data = json_decode(implode("", $cache_output), true) ?: [
