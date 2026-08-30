@@ -150,9 +150,36 @@ docker_app_inventory() {
 	[ -n "$conf_compose" ] || conf_compose="docker-compose.yml"
 	[ -f "$repo_dir/$conf_compose" ] || conf_compose="compose.yml"
 	python3 - "$repo_dir" "$conf_compose" "$app_dir/.env" <<'PYEOF'
-import json, subprocess, sys
+import json, subprocess, sys, os
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 repo, compose_file, env_file = sys.argv[1], sys.argv[2], sys.argv[3]
+
+# Repos commonly reference an env_file that is gitignored and therefore
+# missing in a fresh clone; create empty placeholders so `compose config`
+# can resolve (values still come from the managed app .env via --env-file).
+if yaml is not None:
+    compose_path = os.path.join(repo, compose_file)
+    if os.path.isfile(compose_path):
+        try:
+            doc = yaml.safe_load(open(compose_path)) or {}
+            base = os.path.dirname(compose_path)
+            for svc in (doc.get("services") or {}).values():
+                ef = (svc or {}).get("env_file") or []
+                if isinstance(ef, str):
+                    ef = [ef]
+                for entry in ef:
+                    if not entry or os.path.isabs(entry):
+                        continue
+                    p = os.path.normpath(os.path.join(base, entry))
+                    if not os.path.exists(p):
+                        open(p, "a").close()
+        except yaml.YAMLError:
+            pass
+
 cmd = ["docker", "compose", "--env-file", env_file, "-f", compose_file,
        "config", "--format", "json"]
 p = subprocess.run(cmd, cwd=repo, capture_output=True, text=True)
