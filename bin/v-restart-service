@@ -62,7 +62,10 @@ for service in $service_list; do
 		$BIN/v-update-firewall
 	elif [ "$restart" = "ssl" ] && [ "$service" = "nginx" ]; then
 		service $service upgrade >> $log 2>&1
-	elif [ -z "$restart" -o "$restart" = "no" ] && [ \
+	elif [ "$restart" = "force" ] || [ "$restart" = "hard" ] || [ "$restart" = "hard_restart" ]; then
+		systemctl reset-failed "$service" >> $log 2>&1
+		systemctl restart "$service" >> $log 2>&1
+	elif [ \
 		"$service" = "nginx" -o \
 		"$service" = "apache2" -o \
 		"$service" = "exim4" -o \
@@ -84,7 +87,14 @@ for service in $service_list; do
 		"$service" = "proftpd" -o \
 		"$service" = "ssh" -o \
 		"$service" = "fail2ban" ]; then
-		systemctl reload-or-restart "$service" >> $log 2>&1
+		# Zero-downtime graceful reload for web/proxy/mail services
+		if [ "$service" = "nginx" ]; then
+			nginx -t > /dev/null 2>&1 && systemctl reload "$service" >> $log 2>&1 || systemctl reload-or-restart "$service" >> $log 2>&1
+		elif [ "$service" = "apache2" ]; then
+			apache2ctl configtest > /dev/null 2>&1 && systemctl reload "$service" >> $log 2>&1 || systemctl reload-or-restart "$service" >> $log 2>&1
+		else
+			systemctl reload-or-restart "$service" >> $log 2>&1
+		fi
 	else
 		systemctl reset-failed "$service" >> $log 2>&1
 		systemctl restart "$service" >> $log 2>&1

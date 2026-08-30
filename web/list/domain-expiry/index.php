@@ -101,17 +101,22 @@ if (!empty($_POST["bulk_expiry_action"]) && !empty($_POST["domains"])) {
 
 		if (!empty($d)) {
 			if ($bulk_action === "suspend") {
-				exec(HESTIA_CMD . "v-suspend-web-domain " . quoteshellarg($u) . " " . quoteshellarg($d) . " 'yes'", $out, $rc);
+				exec(HESTIA_CMD . "v-suspend-web-domain " . quoteshellarg($u) . " " . quoteshellarg($d) . " 'no'", $out, $rc);
 			} elseif ($bulk_action === "unsuspend") {
-				exec(HESTIA_CMD . "v-unsuspend-web-domain " . quoteshellarg($u) . " " . quoteshellarg($d) . " 'yes'", $out, $rc);
+				exec(HESTIA_CMD . "v-unsuspend-web-domain " . quoteshellarg($u) . " " . quoteshellarg($d) . " 'no'", $out, $rc);
 			} else {
-				exec(HESTIA_CMD . "v-set-web-domain-expiry " . quoteshellarg($u) . " " . quoteshellarg($d) . " " . quoteshellarg($bulk_action) . " 'yes'", $out, $rc);
+				exec(HESTIA_CMD . "v-set-web-domain-expiry " . quoteshellarg($u) . " " . quoteshellarg($d) . " " . quoteshellarg($bulk_action) . " 'no'", $out, $rc);
 			}
 			if ($rc == 0) {
 				$success_count++;
 			}
 			unset($out);
 		}
+	}
+
+	if ($success_count > 0) {
+		exec(HESTIA_CMD . "v-restart-proxy 'yes'", $r_out, $r_rc);
+		exec(HESTIA_CMD . "v-restart-web 'yes'", $rw_out, $rw_rc);
 	}
 
 	$_SESSION["ok_msg"] = sprintf($is_tr ? "%d domain için işlem başarıyla tamamlandı." : _("%d domains processed successfully."), $success_count);
