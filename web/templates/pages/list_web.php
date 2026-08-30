@@ -14,10 +14,10 @@
 					<a href="/list/waf/" class="button button-secondary">
 						<i class="fas fa-shield-halved icon-blue"></i><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Tehdit Kalkanı & WAF" : _("Threat Shield & WAF")) ?>
 					</a>
+					<a href="/list/domain-expiry/" class="button button-secondary">
+						<i class="fas fa-hourglass-half icon-yellow"></i><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Domain Süreleri" : _("Domain Expirations")) ?>
+					</a>
 				<?php } ?>
-				<a href="/list/domain-expiry/" class="button button-secondary">
-					<i class="fas fa-hourglass-half icon-yellow"></i><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Domain Süreleri" : _("Domain Expirations")) ?>
-				</a>
 			<?php } ?>
 		</div>
 		<div class="toolbar-right">
@@ -321,7 +321,9 @@
 								}
 							}
 						?>
-						<?= $d_exp_badge ?>
+						<?php if (($_SESSION["userContext"] ?? "") === "admin"): ?>
+							<?= $d_exp_badge ?>
+						<?php endif; ?>
 						<?php if (strpos($key, 'pr-') === 0): ?>
 							<span class="badge badge-warning" style="font-size:10px; margin-left:4px; padding:2px 5px;" title="<?= tohtml(__tr("GitHub PR Preview Staging Environment (Protected Access)", "GitHub PR Test Önizleme Ortamı (Korumalı Erişim)")) ?>">
 								<i class="fas fa-code-pull-request"></i> PR

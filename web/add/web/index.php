@@ -86,9 +86,9 @@ if (!empty($_POST["ok"])) {
 		unset($output);
 		$domain_added = empty($_SESSION["error_msg"]);
 
-		// Set custom or preset expiration duration if specified
+		// Set custom or preset expiration duration if specified (Admin only, otherwise defaults to 1y)
 		if ($domain_added) {
-			$v_expiry_input = $_POST["v_expiry"] ?? "1y";
+			$v_expiry_input = (($_SESSION["userContext"] ?? "") === "admin") ? ($_POST["v_expiry"] ?? "1y") : "1y";
 			if ($v_expiry_input === "custom" && !empty($_POST["v_expiry_custom_date"])) {
 				$v_expiry_input = trim($_POST["v_expiry_custom_date"]);
 			}

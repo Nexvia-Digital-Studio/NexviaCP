@@ -55,9 +55,10 @@
 						?>
 					</select>
 				</div>
+				<?php if (($_SESSION["userContext"] ?? "") === "admin") { ?>
 				<div class="u-mb20">
 					<label for="v_expiry" class="form-label">
-						<i class="fas fa-hourglass-half icon-yellow u-mr5"></i><?= tohtml(function_exists('__tr') ? __tr("Domain Validity & Subscription Duration", "Domain Geçerlilik & Lisans Süresi") : _("Domain Validity Duration")) ?>
+						<i class="fas fa-hourglass-half icon-yellow u-mr5"></i><?= tohtml(function_exists('__tr') ? __tr("Domain Validity & Subscription Duration (Admin Only)", "Domain Geçerlilik & Lisans Süresi (Yalnızca Admin)") : _("Domain Validity Duration")) ?>
 					</label>
 					<select class="form-select" name="v_expiry" id="v_expiry" onchange="document.getElementById('custom-expiry-wrap').style.display = (this.value === 'custom') ? 'block' : 'none';">
 						<option value="1y" selected>📅 <?= tohtml(function_exists('__tr') ? __tr("1 Year (Standard Annual Sale - Default)", "1 Yıl (Standart Yıllık Satış - Varsayılan)") : "1 Year") ?></option>
@@ -79,6 +80,7 @@
 						<?= tohtml(function_exists('__tr') ? __tr("When the duration expires, the site and redirection will automatically stop/suspend. Extending duration later restores it immediately.", "Süre dolduğunda site ve yönlendirmesi otomatik durdurulur/askıya alınır. Panele yeni süre girildiğinde site anında tekrar açılır.") : "Site is suspended when duration ends.") ?>
 					</small>
 				</div>
+				<?php } ?>
 				<div class="u-mb20">
 					<label for="v_app_preset" class="form-label">
 						<i class="fas fa-layer-group icon-purple u-mr5"></i><?= tohtml( _("Application Runtime & Proxy Preset (Uygulama Çalıştırma Tipi)")) ?>

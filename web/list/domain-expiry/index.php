@@ -6,6 +6,12 @@ $TAB = "DOMAIN_EXPIRY";
 // Main include
 include $_SERVER["DOCUMENT_ROOT"] . "/inc/main.php";
 
+// Security Guard: Admin only
+if (($_SESSION["userContext"] ?? "") !== "admin") {
+	header("Location: /list/web/");
+	exit();
+}
+
 $is_tr = (($_SESSION['language'] ?? '') === 'tr' || ($_SESSION['LANGUAGE'] ?? '') === 'tr');
 
 // Action 1: Manual Trigger Scan & Auto-Suspend

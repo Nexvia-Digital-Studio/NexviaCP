@@ -39,9 +39,13 @@ unset($output);
 
 $is_tr = (($_SESSION['language'] ?? '') === 'tr' || ($_SESSION['LANGUAGE'] ?? '') === 'tr');
 
-// Action: Quick Expiry Update from Edit page
+// Action: Quick Expiry Update from Edit page (Admin Only)
 if (!empty($_POST["update_expiry_quick"])) {
 	verify_csrf($_POST);
+	if (($_SESSION["userContext"] ?? "") !== "admin") {
+		header("Location: /edit/web/?domain=" . urlencode($v_domain) . "&token=" . $_SESSION["token"]);
+		exit();
+	}
 	$v_exp_input = trim($_POST["quick_expiry_value"] ?? "1y");
 	if ($v_exp_input === "custom" && !empty($_POST["quick_expiry_custom"])) {
 		$v_exp_input = trim($_POST["quick_expiry_custom"]);

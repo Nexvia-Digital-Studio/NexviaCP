@@ -52,6 +52,7 @@
 			<h1 class="u-mb20"><?= tohtml( _("Edit Web Domain")) ?></h1>
 			<?php show_alert_message($_SESSION); ?>
 
+			<?php if (($_SESSION["userContext"] ?? "") === "admin") { ?>
 			<!-- Domain Expiry & Subscription Management Card -->
 			<div class="card u-mb20" style="border-left: 4px solid var(--icon-color-blue, #38bdf8); border: 1px solid var(--border-color, #334155); background: var(--color-background, #fff); border-radius: 8px;">
 				<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--border-color, #334155); flex-wrap: wrap; background: rgba(0,0,0,0.03);">
@@ -131,6 +132,7 @@
 					</form>
 				</div>
 			</div>
+			<?php } ?>
 
 						<?php if (!empty($cf_dns_enabled)) { ?>
 				<div class="card u-mb20" style="border-left: 4px solid #f48120;">
