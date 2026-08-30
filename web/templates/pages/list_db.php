@@ -200,7 +200,8 @@ if ($first_pgsql_db && !empty($_SESSION['PGA_SSO_KEY']) && !ipUsed()) {
 					$spnd_icon_class = 'icon-highlight';
 					$spnd_confirmation = _('Are you sure you want to suspend database %s?') ;
 				}
-				if ($data[$key]['HOST'] != 'localhost' ) $http_host = $data[$key]['HOST'];
+				$is_docker_db = !empty($data[$key]['DOCKER']);
+			if ($data[$key]['HOST'] != 'localhost' ) $http_host = $data[$key]['HOST'];
 				if ($data[$key]['TYPE'] == 'mysql') $db_admin = "phpMyAdmin";
 				if ($data[$key]['TYPE'] == 'mysql') $db_admin_link = "https://".$http_host."/phpmyadmin/";
 				if (($data[$key]['TYPE'] == 'mysql') && (!empty($_SESSION['DB_PMA_ALIAS']))) $db_admin_link = $_SESSION['DB_PMA_ALIAS'];
@@ -217,15 +218,15 @@ if ($first_pgsql_db && !empty($_SESSION['PGA_SSO_KEY']) && !ipUsed()) {
 				data-sort-charset="<?= tohtml($data[$key]["CHARSET"]) ?>">
 				<div class="units-table-cell">
 					<div>
-						<input id="check<?= tohtml($i) ?>" class="js-unit-checkbox" type="checkbox" title="<?= tohtml( _("Select")) ?>" name="database[]" value="<?= tohtml($key) ?>" <?= tohtml($display_mode) ?>>
+						<input id="check<?= tohtml($i) ?>" class="js-unit-checkbox" type="checkbox" title="<?= tohtml( _("Select")) ?>" name="database[]" value="<?= tohtml($key) ?>" <?= tohtml($display_mode) ?><?= $is_docker_db ? " disabled" : "" ?>>
 						<label for="check<?= tohtml($i) ?>" class="u-hide-desktop"><?= tohtml( _("Select")) ?></label>
 					</div>
 				</div>
 				<?= !empty($admin_overview) ? '<div class="units-table-cell u-text-bold">' . tohtml($value["_owner"] ?? "") . '</div>' : "" ?>
 				<div class="units-table-cell units-table-heading-cell u-text-bold">
 					<span class="u-hide-desktop"><?= tohtml( _("Name")) ?>:</span>
-					<?php if ($read_only === "true" || $data[$key]["SUSPENDED"] == "yes") { ?>
-						<?= tohtml($key) ?>
+					<?php if ($read_only === "true" || $data[$key]["SUSPENDED"] == "yes" || $is_docker_db) { ?>
+						<?= tohtml($key) ?><?php if ($is_docker_db): ?><span class="badge badge-info" style="font-size:10px; margin-left:6px; padding:2px 5px;" title="<?= tohtml($data[$key]["APP"]) ?>">🐳 <?= tohtml($data[$key]["APP"]) ?></span><?php endif; ?>
 					<?php } else { ?>
 						<a href="/edit/db/?<?= tohtml(http_build_query(["database" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION["token"]])) ?>" title="<?= tohtml( _("Edit Database")) ?>: <?= tohtml($key) ?>">
 							<?= tohtml($key) ?>
@@ -233,7 +234,17 @@ if ($first_pgsql_db && !empty($_SESSION['PGA_SSO_KEY']) && !ipUsed()) {
 					<?php } ?>
 				</div>
 				<div class="units-table-cell">
-					<?php if (!$read_only) { ?>
+					<?php if ($is_docker_db && ($_SESSION["userContext"] ?? "") === "admin") { ?>
+						<ul class="units-table-row-actions">
+							<li class="units-table-row-action" data-key-action="href">
+								<a class="units-table-row-action-link" href="/list/docker-app/?app=<?= tohtml($data[$key]["APP"]) ?>" title="Docker App">
+									<i class="fas fa-cubes icon-blue"></i>
+									<span class="u-hide-desktop">Docker App</span>
+								</a>
+							</li>
+						</ul>
+					<?php } ?>
+					<?php if (!$read_only && !$is_docker_db) { ?>
 						<ul class="units-table-row-actions">
 							<?php if ($data[$key]["SUSPENDED"] == "no") { ?>
 								<li class="units-table-row-action shortcut-enter" data-key-action="href">

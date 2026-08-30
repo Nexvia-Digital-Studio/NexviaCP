@@ -68,6 +68,33 @@ if (is_admin_overview()) {
 	$data = json_decode(implode("", $output), true) ?: [];
 }
 
+// Docker app databases (informational rows; managed by their compose stack)
+exec(HESTIA_CMD . "v-list-docker-app-databases json 2>/dev/null", $dd_out, $dd_rc);
+if ($dd_rc === 0) {
+	$docker_dbs = json_decode(implode("", $dd_out) ?: "[]", true) ?: [];
+	foreach ($docker_dbs as $dd_key => $dd) {
+		$dd_owners = array_map("trim", explode(",", (string)($dd["OWNER"] ?? "")));
+		if (!is_admin_overview() && !in_array($user, $dd_owners, true)) {
+			continue;
+		}
+		$data["docker:" . $dd_key] = [
+			"DATABASE" => $dd["DATABASE"] ?? $dd_key,
+			"DBUSER" => "postgres",
+			"TYPE" => $dd["TYPE"] ?? "pgsql",
+			"HOST" => "nexvia-" . ($dd["APP"] ?? "app") . "/" . ($dd["SERVICE"] ?? "db"),
+			"CHARSET" => "UTF8",
+			"U_DISK" => (int)($dd["DISK_MB"] ?? 0),
+			"SUSPENDED" => "no",
+			"TIME" => "00:00:00",
+			"DATE" => "1970-01-01",
+			"DOCKER" => "yes",
+			"APP" => (string)($dd["APP"] ?? ""),
+			"_owner" => $dd_owners[0] ?? "",
+		];
+	}
+}
+unset($dd_out);
+
 if ($_SESSION["userSortOrder"] == "name") {
 	ksort($data);
 } else {
