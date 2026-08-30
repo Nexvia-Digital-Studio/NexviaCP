@@ -74,7 +74,13 @@ if ($dd_rc === 0) {
 	$docker_dbs = json_decode(implode("", $dd_out) ?: "[]", true) ?: [];
 	foreach ($docker_dbs as $dd_key => $dd) {
 		$dd_owners = array_map("trim", explode(",", (string)($dd["OWNER"] ?? "")));
-		if (!is_admin_overview() && !in_array($user, $dd_owners, true)) {
+		// $user may be shell-quoted in impersonation mode (quoteshellarg);
+		// strip the wrapping quotes before comparing with registry owners
+		$dd_user_plain = (string)$user;
+		if (preg_match("/^'(.*)'$/s", $dd_user_plain, $dd_m)) {
+			$dd_user_plain = $dd_m[1];
+		}
+		if (!is_admin_overview() && !in_array($dd_user_plain, $dd_owners, true)) {
 			continue;
 		}
 		$data["docker:" . $dd_key] = [
