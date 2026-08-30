@@ -39,27 +39,6 @@ unset($output);
 
 $is_tr = (($_SESSION['language'] ?? '') === 'tr' || ($_SESSION['LANGUAGE'] ?? '') === 'tr');
 
-// Action: Quick Expiry Update from Edit page (Admin Only)
-if (!empty($_POST["update_expiry_quick"])) {
-	verify_csrf($_POST);
-	if (($_SESSION["userContext"] ?? "") !== "admin") {
-		header("Location: /edit/web/?domain=" . urlencode($v_domain) . "&token=" . $_SESSION["token"]);
-		exit();
-	}
-	$v_exp_input = trim($_POST["quick_expiry_value"] ?? "1y");
-	if ($v_exp_input === "custom" && !empty($_POST["quick_expiry_custom"])) {
-		$v_exp_input = trim($_POST["quick_expiry_custom"]);
-	}
-	exec(HESTIA_CMD . "v-set-web-domain-expiry " . $user . " " . quoteshellarg($v_domain) . " " . quoteshellarg($v_exp_input) . " 'yes'", $output, $return_var);
-	if ($return_var == 0) {
-		$_SESSION["ok_msg"] = $is_tr ? "Domain geçerlilik süresi başarıyla güncellendi / uzatıldı." : _("Domain expiry duration updated successfully.");
-	} else {
-		$_SESSION["error_msg"] = ($is_tr ? "Süre güncellenirken hata oluştu: " : _("Error updating expiry: ")) . implode(" ", $output);
-	}
-	header("Location: /edit/web/?domain=" . urlencode($v_domain) . "&token=" . $_SESSION["token"]);
-	exit();
-}
-
 // Action: Save Domain .env Secret (Write-Only)
 if (!empty($_POST["save_env_secret"])) {
 	verify_csrf($_POST);
@@ -118,39 +97,6 @@ $v_ip = $data[$v_domain]["IP"];
 $v_template = $data[$v_domain]["TPL"];
 $v_aliases = str_replace(",", "\n", $data[$v_domain]["ALIAS"]);
 $valiases = explode(",", $data[$v_domain]["ALIAS"]);
-
-$v_created_date = $data[$v_domain]["DATE"] ?? "";
-$v_created_time = $data[$v_domain]["TIME"] ?? "";
-$v_expiry_date = $data[$v_domain]["EXPIRY_DATE"] ?? "";
-$v_expiry_type = $data[$v_domain]["EXPIRY_TYPE"] ?? "";
-$v_suspended = $data[$v_domain]["SUSPENDED"] ?? "no";
-
-if (empty($v_expiry_date)) {
-	if (!empty($v_created_date)) {
-		$v_expiry_date = date("Y-m-d", strtotime($v_created_date . " + 1 year"));
-	} else {
-		$v_expiry_date = date("Y-m-d", strtotime("+1 year"));
-	}
-	$v_expiry_type = "1y";
-}
-
-$v_days_left = 0;
-$v_expiry_status = "active";
-if ($v_expiry_date === "unlimited") {
-	$v_expiry_status = "unlimited";
-	$v_days_left = 99999;
-} else {
-	$exp_ts = strtotime($v_expiry_date);
-	$today_ts = strtotime(date("Y-m-d"));
-	$v_days_left = (int)round(($exp_ts - $today_ts) / 86400);
-	if ($v_days_left < 0) {
-		$v_expiry_status = "expired";
-	} elseif ($v_days_left <= 30) {
-		$v_expiry_status = "expiring_soon";
-	} else {
-		$v_expiry_status = "active";
-	}
-}
 
 $v_ssl = $data[$v_domain]["SSL"];
 if (!empty($v_ssl)) {
