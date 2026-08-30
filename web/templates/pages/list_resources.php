@@ -233,8 +233,8 @@ if (!empty($services)) {
 										<span style="font-weight: 700; font-size: 13.5px; color: <?= $d_mem > 512 ? 'var(--icon-color-orange, #f97316)' : 'var(--color-text, #fff)' ?>;">
 											<?= $d_mem > 0 ? $d_mem . " MB" : "<10 MB" ?>
 										</span>
-										<div style="font-size: 10.5px; color: var(--color-text-muted, #94a3b8);">
-											Max: <?= tohtml($d_high) ?>
+										<div style="font-size: 10.5px; color: var(--color-text-muted, #94a3b8);" title="<?= tohtml($is_tr ? "Tek PHP isteği için izin verilen tavan memory_limit" : "Single worker memory limit") ?>">
+											Limit: <?= tohtml($d_high) ?> / istek
 										</div>
 									</td>
 

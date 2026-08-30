@@ -265,26 +265,54 @@ def read_pressure(user, domain):
     """(mem_psi, ram_bytes, ram_limit_bytes, per_domain?, cpu_psi)."""
     psi, ram, limit, per_domain, cpu_psi = 0.0, 0, 0, False, 0.0
     cg = "/sys/fs/cgroup/system.slice/hestia-app-%s-%s.service" % (user, domain)
-    if not os.path.isdir(cg):
-        cands = sorted(glob.glob("/sys/fs/cgroup/system.slice/php*-fpm.service"))
-        cg = cands[0] if cands else ""
-    else:
+    if os.path.isdir(cg):
         per_domain = True
-    if cg:
         try:
             with open(os.path.join(cg, "memory.current")) as f:
                 ram = int(f.read().strip())
-            if per_domain:
-                with open(os.path.join(cg, "memory.max")) as f:
-                    mx = int(f.read().strip())
-                limit = mx if 0 < mx < (1 << 62) else 0
-                psi = _read_psi_some(os.path.join(cg, "memory.pressure"))
-                cpu_psi = _read_psi_some(os.path.join(cg, "cpu.pressure"))
+            with open(os.path.join(cg, "memory.max")) as f:
+                mx = int(f.read().strip())
+            limit = mx if 0 < mx < (1 << 62) else 0
+            psi = _read_psi_some(os.path.join(cg, "memory.pressure"))
+            cpu_psi = _read_psi_some(os.path.join(cg, "cpu.pressure"))
         except Exception:
             pass
-    if not per_domain:  # shared PHP-FPM: fall back to system pressure, reduced
+    else:
+        # Measure actual process memory for this user/pool
+        try:
+            import pwd
+            uid = pwd.getpwnam(user).pw_uid
+            user_cg = f"/sys/fs/cgroup/user.slice/user-{uid}.slice/memory.current"
+            if os.path.isfile(user_cg):
+                with open(user_cg) as f:
+                    ram = int(f.read().strip())
+            else:
+                total_rss_kb = 0
+                for pid_dir in glob.glob("/proc/[0-9]*"):
+                    try:
+                        stat_path = os.path.join(pid_dir, "status")
+                        if os.path.isfile(stat_path):
+                            with open(stat_path, "r") as f:
+                                content = f.read()
+                            p_uid = None
+                            p_rss = 0
+                            for line in content.splitlines():
+                                if line.startswith("Uid:"):
+                                    p_uid = int(line.split()[1])
+                                elif line.startswith("VmRSS:"):
+                                    p_rss = int(line.split()[1])
+                            if p_uid == uid and p_rss > 0:
+                                total_rss_kb += p_rss
+                    except Exception:
+                        continue
+                if total_rss_kb > 0:
+                    ram = total_rss_kb * 1024
+        except Exception:
+            pass
+
         psi = _read_psi_some("/proc/pressure/memory", 0.5)
         cpu_psi = _read_psi_some("/proc/pressure/cpu", 0.6)
+
     return psi, ram, limit, per_domain, cpu_psi
 
 
