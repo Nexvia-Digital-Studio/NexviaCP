@@ -5,8 +5,11 @@
 # example: v-list-web-domain-apps json
 # example: v-list-web-domain-apps admin json
 #
-# This script inspects all domains across the system for backend apps (.NET, Node.js,
-# pure APIs), returns their listening ports, systemd states, and cgroup resource usage.
+# This script inspects all domains across the system for backend apps (.NET,
+# Node.js, pure APIs), returns their listening ports, states and resource
+# usage. Standalone apps are systemd units (hestia-app-<user>-<domain>);
+# docker-app domains are resolved through the docker app registry and report
+# the compose STATE plus live container memory.
 
 #----------------------------------------------------------#
 #                Variables & Functions                     #
@@ -31,6 +34,47 @@ source_conf "$HESTIA/conf/hestia.conf"
 #----------------------------------------------------------#
 #                       Action                             #
 #----------------------------------------------------------#
+
+# --- Preload docker app registry: domain -> state/service/memory/uptime ---
+declare -A dck_state dck_svc dck_mem dck_up
+if [ -d "$HESTIA/data/docker-apps" ] && command -v docker >/dev/null 2>&1; then
+	# Single docker stats call for every container: "name|mem"
+	declare -A mem_by_name
+	while IFS='|' read -r cname cmem; do
+		[ -n "$cname" ] && mem_by_name["$cname"]="${cmem%% *}"
+	done < <(docker stats --no-stream --format '{{.Name}}|{{.MemUsage}}' 2>/dev/null)
+
+	for acf in "$HESTIA/data/docker-apps"/*/app.conf; do
+		[ -f "$acf" ] || continue
+		dapp=$(basename "$(dirname "$acf")")
+		dapp_state=$(grep -m1 '^STATE=' "$acf" | cut -d"'" -f2)
+		# service -> container name / status via compose labels
+		declare -A name_by_svc stat_by_svc
+		while IFS='|' read -r csvc cname cstat; do
+			[ -n "$csvc" ] || continue
+			name_by_svc["$csvc"]="$cname"
+			stat_by_svc["$csvc"]="$cstat"
+		done < <(docker ps -a --filter "label=com.docker.compose.project=nexvia-$dapp" \
+			--format '{{.Label "com.docker.compose.service"}}|{{.Names}}|{{.Status}}' 2>/dev/null)
+		# registry entries: "user@domain:service:port"
+		for dent in $(grep -m1 '^DOMAINS=' "$acf" | cut -d"'" -f2); do
+			[ -n "$dent" ] || continue
+			dd="${dent#*@}"; dd="${dd%%:*}"
+			dsvc="${dent#*:}"; dsvc="${dsvc%%:*}"
+			[ -n "$dd" ] || continue
+			dck_state["$dd"]="${dapp_state:-unknown}"
+			dck_svc["$dd"]="nexvia-${dapp}/${dsvc}"
+			cn="${name_by_svc[$dsvc]}"
+			if [ -n "$cn" ] && [ -n "${mem_by_name[$cn]}" ]; then
+				dck_mem["$dd"]="${mem_by_name[$cn]}"
+			else
+				dck_mem["$dd"]="0 MB"
+			fi
+			dck_up["$dd"]="${stat_by_svc[$dsvc]:--}"
+		done
+		unset name_by_svc stat_by_svc
+	done
+fi
 
 users=()
 if [ -n "$user_filter" ]; then
@@ -65,13 +109,18 @@ for u in "${users[@]}"; do
 		if [ -n "$app_port" ] && [ "$app_port" != "%app_port%" ] || [ "$tpl" = "dotnet" ] || [ "$tpl" = "node-js" ]; then
 			unit_name="hestia-app-${u}-${domain}"
 			service_status="inactive"
-			cpu_usage="0%"
 			mem_usage="0 MB"
 			uptime="-"
 
-			if systemctl is-active --quiet "$unit_name" 2>/dev/null; then
+			if [ "$app_type" = "docker" ]; then
+				# docker-app domain: real compose state + container memory
+				service_status="${dck_state[$domain]:-unknown}"
+				mem_usage="${dck_mem[$domain]:-0 MB}"
+				uptime="${dck_up[$domain]:--}"
+				unit_name="${dck_svc[$domain]:-docker-app}"
+			elif systemctl is-active --quiet "$unit_name" 2>/dev/null; then
 				service_status="running"
-				
+
 				# Gather systemd / cgroup metrics
 				raw_mem=$(systemctl show "$unit_name" --property=MemoryCurrent 2>/dev/null | cut -d= -f2)
 				if [ -n "$raw_mem" ] && [ "$raw_mem" != "[not set]" ] && [ "$raw_mem" -gt 0 ] 2>/dev/null; then
@@ -92,7 +141,7 @@ for u in "${users[@]}"; do
 			fi
 
 			key="${u}:${domain}"
-			app_list["$key"]="$u|$domain|${app_type:-custom}|${app_port:-N/A}|$service_status|$mem_usage|$uptime"
+			app_list["$key"]="$u|$domain|${app_type:-custom}|${app_port:-N/A}|$service_status|$mem_usage|$uptime|$unit_name"
 			((count++))
 		fi
 	done < "$web_conf"
@@ -102,7 +151,7 @@ if [ "$format" = "json" ]; then
 	echo "{"
 	i=0
 	for key in "${!app_list[@]}"; do
-		IFS='|' read -r u d t p s m up <<< "${app_list[$key]}"
+		IFS='|' read -r u d t p s m up svc <<< "${app_list[$key]}"
 		echo "    \"$d\": {"
 		echo "        \"USER\": \"$u\","
 		echo "        \"DOMAIN\": \"$d\","
@@ -111,7 +160,7 @@ if [ "$format" = "json" ]; then
 		echo "        \"STATUS\": \"$s\","
 		echo "        \"MEMORY\": \"$m\","
 		echo "        \"UPTIME\": \"$up\","
-		echo "        \"SERVICE\": \"hestia-app-${u}-${d}\""
+		echo "        \"SERVICE\": \"$svc\""
 		if [ $((i + 1)) -lt "$count" ]; then
 			echo "    },"
 		else
@@ -124,14 +173,14 @@ else
 	echo "DOMAIN                   USER       TYPE     PORT   STATUS    MEMORY    SERVICE"
 	echo "-----------------------  ---------  -------  -----  --------  --------  -------------------------"
 	for key in "${!app_list[@]}"; do
-		IFS='|' read -r u d t p s m up <<< "${app_list[$key]}"
+		IFS='|' read -r u d t p s m up svc <<< "${app_list[$key]}"
 		d_fmt=$(echo "$d" | cut -c1-23 | awk '{printf "%-23s", $0}')
 		u_fmt=$(echo "$u" | cut -c1-9 | awk '{printf "%-9s", $0}')
 		t_fmt=$(echo "$t" | cut -c1-7 | awk '{printf "%-7s", $0}')
 		p_fmt=$(echo "$p" | cut -c1-5 | awk '{printf "%-5s", $0}')
 		s_fmt=$(echo "$s" | cut -c1-8 | awk '{printf "%-8s", $0}')
 		m_fmt=$(echo "$m" | cut -c1-8 | awk '{printf "%-8s", $0}')
-		echo "$d_fmt  $u_fmt  $t_fmt  $p_fmt  $s_fmt  $m_fmt  hestia-app-${u}-${d}"
+		echo "$d_fmt  $u_fmt  $t_fmt  $p_fmt  $s_fmt  $m_fmt  $svc"
 	done
 fi
 
