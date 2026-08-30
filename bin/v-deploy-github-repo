@@ -311,27 +311,81 @@ chown -R "$user:$user" "$docroot"
 
 echo "[*] Step 3: Detecting application stack..."
 detected_type="php"
+pkg_mgr="npm"
+out_dir="dist"
+detected_orm=""
 
-if [ "$app_mode" = "dotnet" ] || [ "$app_mode" = "api" ] || ls "$docroot"/*.csproj &>/dev/null || ls "$docroot"/*.sln &>/dev/null; then
-	detected_type="dotnet"
-elif [ "$app_mode" = "node" ] || [ -f "$docroot/package.json" ]; then
-	if [ -d "$docroot/dist" ] && [ ! -f "$docroot/server.js" ] && [ ! -f "$docroot/app.js" ] && [ "$app_mode" = "react" ]; then
-		detected_type="react"
-	else
-		detected_type="node"
+# Run rich analyzer if available
+if [ -f "$HESTIA/lib/nexvia-repo-scan.py" ] && command -v python3 &>/dev/null; then
+	scan_json=$(python3 "$HESTIA/lib/nexvia-repo-scan.py" "$docroot" "$branch" 2>/dev/null || echo "{}")
+	if [ -n "$scan_json" ]; then
+		detected_type=$(echo "$scan_json" | python3 -c 'import sys, json; data=json.load(sys.stdin); print(data.get("platform", {}).get("mode") or "php")' 2>/dev/null || echo "php")
+		pkg_mgr=$(echo "$scan_json" | python3 -c 'import sys, json; data=json.load(sys.stdin); comps=data.get("components", []); print(comps[0].get("package_manager") if comps else "npm")' 2>/dev/null || echo "npm")
+		out_dir=$(echo "$scan_json" | python3 -c 'import sys, json; data=json.load(sys.stdin); comps=data.get("components", []); print(comps[0].get("output_dir") if comps else "dist")' 2>/dev/null || echo "dist")
+		detected_orm=$(echo "$scan_json" | python3 -c 'import sys, json; data=json.load(sys.stdin); print(data.get("database", {}).get("orm") or "")' 2>/dev/null || echo "")
 	fi
-elif [ "$app_mode" = "react" ] || [ -d "$docroot/dist" ]; then
-	detected_type="react"
-elif [ -f "$docroot/artisan" ]; then
-	detected_type="laravel"
+fi
+
+# Fallback heuristic if scan didn't resolve
+if [ -z "$detected_type" ] || [ "$detected_type" = "unknown" ]; then
+	if [ "$app_mode" = "dotnet" ] || [ "$app_mode" = "api" ] || ls "$docroot"/*.csproj &>/dev/null || ls "$docroot"/*.sln &>/dev/null; then
+		detected_type="dotnet"
+	elif [ "$app_mode" = "node" ] || [ -f "$docroot/package.json" ]; then
+		if [ -d "$docroot/dist" ] && [ ! -f "$docroot/server.js" ] && [ ! -f "$docroot/app.js" ] && [ "$app_mode" = "react" ]; then
+			detected_type="react"
+		else
+			detected_type="node"
+		fi
+	elif [ "$app_mode" = "react" ] || [ -d "$docroot/dist" ]; then
+		detected_type="react"
+	elif [ -f "$docroot/artisan" ]; then
+		detected_type="laravel"
+	fi
 fi
 
 # Override if app_mode explicitly specified
 if [ "$app_mode" = "php" ]; then
 	detected_type="php"
+elif [ "$app_mode" = "node" ]; then
+	detected_type="node"
+elif [ "$app_mode" = "react" ]; then
+	detected_type="react"
+elif [ "$app_mode" = "dotnet" ]; then
+	detected_type="dotnet"
 fi
 
-echo "[+] Application Stack Detected: $detected_type (Mode: $app_mode)"
+echo "[+] Application Stack Detected: $detected_type (Mode: $app_mode | Pkg: $pkg_mgr | Out: $out_dir)"
+
+# Helper for running Node.js package manager commands under user privileges
+run_node_pkg() {
+	local action="$1"
+	local mgr="$pkg_mgr"
+	if [ "$mgr" = "bun" ] && command -v bun &>/dev/null; then
+		if [ "$action" = "install" ]; then
+			su - "$user" -s /bin/bash -c "cd '$docroot' && bun install" 2>/dev/null || true
+		elif [ "$action" = "build" ]; then
+			su - "$user" -s /bin/bash -c "cd '$docroot' && bun run build" 2>/dev/null || true
+		fi
+	elif [ "$mgr" = "pnpm" ] && command -v pnpm &>/dev/null; then
+		if [ "$action" = "install" ]; then
+			su - "$user" -s /bin/bash -c "cd '$docroot' && pnpm install --frozen-lockfile 2>/dev/null || pnpm install" 2>/dev/null || true
+		elif [ "$action" = "build" ]; then
+			su - "$user" -s /bin/bash -c "cd '$docroot' && pnpm build" 2>/dev/null || true
+		fi
+	elif [ "$mgr" = "yarn" ] && command -v yarn &>/dev/null; then
+		if [ "$action" = "install" ]; then
+			su - "$user" -s /bin/bash -c "cd '$docroot' && yarn install --production=false" 2>/dev/null || true
+		elif [ "$action" = "build" ]; then
+			su - "$user" -s /bin/bash -c "cd '$docroot' && yarn build" 2>/dev/null || true
+		fi
+	elif command -v npm &>/dev/null; then
+		if [ "$action" = "install" ]; then
+			su - "$user" -s /bin/bash -c "cd '$docroot' && npm install --production=false" 2>/dev/null || true
+		elif [ "$action" = "build" ]; then
+			su - "$user" -s /bin/bash -c "cd '$docroot' && npm run build" 2>/dev/null || true
+		fi
+	fi
+}
 
 case "$detected_type" in
 	dotnet)
@@ -347,25 +401,43 @@ case "$detected_type" in
 			fi
 		fi
 		;;
-	node)
-		echo "[*] Configuring Node.js application..."
+	node|next)
+		echo "[*] Configuring Node.js application ($pkg_mgr)..."
 		$BIN/v-change-web-domain-tpl "$user" "$domain" "node-js"
-		if [ -f "$docroot/package.json" ] && command -v npm &>/dev/null; then
-			su - "$user" -s /bin/bash -c "cd '$docroot' && npm install --production" 2>/dev/null || true
+		if [ -f "$docroot/package.json" ]; then
+			run_node_pkg "install"
+			run_node_pkg "build"
+			# Prisma migration hook if detected
+			if [ "$detected_orm" = "prisma" ] || [ -f "$docroot/prisma/schema.prisma" ]; then
+				echo "[*] Running Prisma database setup..."
+				su - "$user" -s /bin/bash -c "cd '$docroot' && npx prisma generate >/dev/null 2>&1 && npx prisma migrate deploy >/dev/null 2>&1" || true
+			fi
 		fi
 		entry_file="app.js"
 		[ -f "$docroot/server.js" ] && entry_file="server.js"
 		[ -f "$docroot/index.js" ] && entry_file="index.js"
-		$BIN/v-add-web-domain-app "$user" "$domain" node "node $entry_file"
+		[ -f "$docroot/dist/main.js" ] && entry_file="dist/main.js"
+		if [ "$detected_type" = "next" ] || [ -d "$docroot/.next" ]; then
+			$BIN/v-add-web-domain-app "$user" "$domain" node "npx next start"
+		else
+			$BIN/v-add-web-domain-app "$user" "$domain" node "node $entry_file"
+		fi
 		;;
 	react)
-		echo "[*] Configuring Static SPA / React frontend..."
+		echo "[*] Configuring Static SPA / Frontend ($pkg_mgr)..."
 		$BIN/v-change-web-domain-tpl "$user" "$domain" "default"
-		if [ -d "$docroot/dist" ]; then
-			cp -rf "$docroot/dist"/* "$docroot"/ 2>/dev/null || true
-		elif [ -f "$docroot/package.json" ] && command -v npm &>/dev/null; then
-			su - "$user" -s /bin/bash -c "cd '$docroot' && npm run build" 2>/dev/null || true
-			[ -d "$docroot/dist" ] && cp -rf "$docroot/dist"/* "$docroot"/ 2>/dev/null || true
+		if [ -f "$docroot/package.json" ]; then
+			run_node_pkg "install"
+			run_node_pkg "build"
+		fi
+		# Copy compiled assets from output directory (out, dist, build)
+		target_out="$docroot/dist"
+		[ -d "$docroot/out" ] && target_out="$docroot/out"
+		[ -d "$docroot/build" ] && [ "$target_out" != "$docroot/out" ] && target_out="$docroot/build"
+		[ -n "$out_dir" ] && [ -d "$docroot/$out_dir" ] && target_out="$docroot/$out_dir"
+		if [ -d "$target_out" ] && [ "$target_out" != "$docroot" ]; then
+			echo "[*] Deploying static build from ${target_out#"$docroot"/}/..."
+			cp -rf "$target_out"/* "$docroot"/ 2>/dev/null || true
 		fi
 		;;
 	laravel)
@@ -375,6 +447,9 @@ case "$detected_type" in
 			su - "$user" -s /bin/bash -c "cd '$docroot' && composer install --no-dev -o" 2>/dev/null || true
 		fi
 		su - "$user" -s /bin/bash -c "cd '$docroot' && php artisan key:generate --force 2>/dev/null" || true
+		if [ -n "$sql_file" ] || [ -f "$docroot/.env" ]; then
+			su - "$user" -s /bin/bash -c "cd '$docroot' && php artisan migrate --force 2>/dev/null" || true
+		fi
 		;;
 	php)
 		echo "[*] Configuring PHP / Native application..."

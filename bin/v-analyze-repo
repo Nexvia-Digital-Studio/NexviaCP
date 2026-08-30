@@ -16,6 +16,17 @@
 # Argument definition
 repo_input=$1
 branch=${2:-main}
+format=${3:-json}
+
+# Support flags in args
+if [ "$repo_input" = "--summary" ] || [ "$repo_input" = "-s" ]; then
+	format="summary"
+	repo_input=$2
+	branch=${3:-main}
+elif [ "$branch" = "summary" ] || [ "$branch" = "--summary" ]; then
+	format="summary"
+	branch="main"
+fi
 
 # Includes
 # shellcheck source=/etc/hestiacp/hestia.conf
@@ -25,7 +36,7 @@ source $HESTIA/func/main.sh
 # load config file
 source_conf "$HESTIA/conf/hestia.conf"
 
-check_args '1' "$#" 'REPO [BRANCH]'
+check_args '1' "$#" 'REPO [BRANCH] [FORMAT]'
 
 # Ensure root
 if [ "x$(id -u)" != 'x0' ]; then
@@ -42,9 +53,19 @@ if [ ! -f "$scanner" ]; then
 	check_result "$E_NOTEXIST" "scanner missing: $scanner"
 fi
 
+run_scan() {
+	local target_dir="$1"
+	local target_br="$2"
+	if [ "$format" = "summary" ]; then
+		python3 "$scanner" "$target_dir" "$target_br" | python3 -c 'import sys, json; data=json.load(sys.stdin); print(data.get("summary_tr", ""))'
+	else
+		python3 "$scanner" "$target_dir" "$target_br"
+	fi
+}
+
 # Local directory mode (tests / pre-cloned repos)
 if [ -d "$repo_input" ]; then
-	python3 "$scanner" "$repo_input" "$branch"
+	run_scan "$repo_input" "$branch"
 	exit $?
 fi
 
@@ -86,5 +107,5 @@ fi
 # Fall back to the repository's default branch name when -b clone failed
 detected_branch=$(git -C "$clone_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "$branch")
 
-python3 "$scanner" "$clone_dir" "$detected_branch"
+run_scan "$clone_dir" "$detected_branch"
 exit $?
