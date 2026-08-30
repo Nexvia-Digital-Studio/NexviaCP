@@ -77,16 +77,13 @@ function formatValue(value, unit, service) {
 
 	const absVal = Math.abs(value);
 
-	// Memory: values are in KB from RRD, convert to MB or GB
+	// Memory: values are already in MB from RRD (via free -m)
 	if (unit === 'MB' || service === 'mem') {
-		if (absVal >= 1048576) {
-			// KB -> GB (1048576 KB = 1 GB)
-			return (value / 1048576).toFixed(1) + ' GB';
-		} else if (absVal >= 1024) {
-			// KB -> MB
-			return (value / 1024).toFixed(0) + ' MB';
+		if (absVal >= 1024) {
+			// MB -> GB
+			return (value / 1024).toFixed(1) + ' GB';
 		}
-		return value.toFixed(0) + ' KB';
+		return value.toFixed(0) + ' MB';
 	}
 
 	// Network: values are in bytes/sec from RRD

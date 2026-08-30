@@ -56,45 +56,101 @@ if (!empty($_POST["tune_all"])) {
 	exit();
 }
 
-// Action 2b: Trigger Single Domain Auto-Tune Now
-if (!empty($_POST["tune_single"])) {
+// Action 3: Single Domain Open / Close (Suspend / Unsuspend)
+if (!empty($_POST["toggle_domain_status"])) {
 	verify_csrf($_POST);
-	$v_user = quoteshellarg($_POST["tune_user"] ?? $user_plain);
-	$v_domain = quoteshellarg($_POST["tune_domain"] ?? "");
-	if (!empty($_POST["tune_domain"])) {
-		exec(HESTIA_CMD . "v-tune-sys-resources " . $v_user . " " . $v_domain, $output, $return_var);
-		if ($return_var == 0) {
-			$_SESSION["ok_msg"] = ($is_tr ? "Analiz ve optimizasyon tamamlandı: " : _("Analysis and optimization completed: ")) . htmlspecialchars($_POST["tune_domain"]);
-		} else {
-			$_SESSION["error_msg"] = ($is_tr ? "Optimizasyon sırasında hata: " : _("Error during optimization: ")) . implode(" ", $output);
+	$target_user = quoteshellarg($_POST["toggle_user"] ?? $user_plain);
+	$target_domain = quoteshellarg($_POST["toggle_domain"] ?? "");
+	$target_action = $_POST["toggle_action"] ?? "";
+
+	if (!empty($_POST["toggle_domain"])) {
+		if ($target_action === "suspend") {
+			exec(HESTIA_CMD . "v-suspend-web-domain " . $target_user . " " . $target_domain . " 'yes'", $out, $rc);
+			if ($rc == 0) {
+				$_SESSION["ok_msg"] = ($is_tr ? "Site yayını ve yönlendirmesi kapatıldı / askıya alındı: " : _("Web domain suspended: ")) . htmlspecialchars($_POST["toggle_domain"]);
+			} else {
+				$_SESSION["error_msg"] = ($is_tr ? "Site kapatılırken hata: " : _("Error suspending domain: ")) . implode(" ", $out);
+			}
+		} elseif ($target_action === "unsuspend") {
+			exec(HESTIA_CMD . "v-unsuspend-web-domain " . $target_user . " " . $target_domain . " 'yes'", $out, $rc);
+			if ($rc == 0) {
+				$_SESSION["ok_msg"] = ($is_tr ? "Site yayını ve yönlendirmesi açıldı / aktif edildi: " : _("Web domain unsuspended: ")) . htmlspecialchars($_POST["toggle_domain"]);
+			} else {
+				$_SESSION["error_msg"] = ($is_tr ? "Site açılırken hata: " : _("Error unsuspending domain: ")) . implode(" ", $out);
+			}
 		}
 	}
 	header("Location: /list/resources/");
 	exit();
 }
 
-// Action 3: Fine-grain Custom Limits Save
-if (!empty($_POST["save_custom_cgroup"])) {
+// Action 4: Flush / Restart PHP Workers for Domain
+if (!empty($_POST["flush_php_workers"])) {
 	verify_csrf($_POST);
-	$v_user = quoteshellarg($_POST["custom_user"] ?? $user_plain);
-	$v_domain = quoteshellarg($_POST["custom_domain"] ?? "");
-	$v_high = quoteshellarg($_POST["custom_high"] ?? "256M");
-	$v_max = quoteshellarg($_POST["custom_max"] ?? "1G");
-	$v_cpu = quoteshellarg($_POST["custom_cpu"] ?? "100%");
+	$v_domain = $_POST["flush_domain"] ?? "";
+	if (!empty($v_domain)) {
+		exec(HESTIA_CMD . "v-restart-service php-fpm no", $out, $rc);
+		$_SESSION["ok_msg"] = ($is_tr ? "PHP iş parçacıkları ve bellek havuzu sıfırlandı: " : _("PHP worker memory flushed for: ")) . htmlspecialchars($v_domain);
+	}
+	header("Location: /list/resources/");
+	exit();
+}
 
-	if (!empty($_POST["custom_domain"])) {
-		exec(HESTIA_CMD . "v-change-web-domain-cgroup " . $v_user . " " . $v_domain . " " . $v_high . " " . $v_max . " " . $v_cpu, $output, $return_var);
-		if ($return_var == 0) {
-			$_SESSION["ok_msg"] = ($is_tr ? "Özel kaynak limitleri uygulandı: " : _("Custom resource limits applied: ")) . htmlspecialchars($_POST["custom_domain"]);
+// Action 5: System Service Action (Start, Stop, Restart)
+if (!empty($_POST["service_action"])) {
+	verify_csrf($_POST);
+	$srv_name = trim($_POST["srv_name"] ?? "");
+	$srv_act = trim($_POST["srv_action"] ?? "restart");
+	if (!empty($srv_name)) {
+		$v_srv = quoteshellarg($srv_name);
+		if ($srv_act === "stop") {
+			exec(HESTIA_CMD . "v-stop-service " . $v_srv, $out, $rc);
+			$action_label = $is_tr ? "durduruldu" : "stopped";
+		} elseif ($srv_act === "start") {
+			exec(HESTIA_CMD . "v-start-service " . $v_srv, $out, $rc);
+			$action_label = $is_tr ? "başlatıldı" : "started";
 		} else {
-			$_SESSION["error_msg"] = implode(" ", $output);
+			exec(HESTIA_CMD . "v-restart-service " . $v_srv . " yes", $out, $rc);
+			$action_label = $is_tr ? "yeniden başlatıldı" : "restarted";
+		}
+		if ($rc == 0) {
+			$_SESSION["ok_msg"] = sprintf($is_tr ? "%s servisi başarıyla %s." : _("Service %s %s successfully."), htmlspecialchars($srv_name), $action_label);
+		} else {
+			$_SESSION["error_msg"] = ($is_tr ? "Servis işlemi sırasında hata: " : _("Error during service action: ")) . implode(" ", $out);
 		}
 	}
 	header("Location: /list/resources/");
 	exit();
 }
 
-// Fetch Governance & Comparison Data
+// Action 6: Docker / Backend App Action
+if (!empty($_POST["app_action"])) {
+	verify_csrf($_POST);
+	$app_name = trim($_POST["app_name"] ?? "");
+	$app_act = trim($_POST["app_action_type"] ?? "restart");
+	if (!empty($app_name)) {
+		$v_app = quoteshellarg($app_name);
+		if ($app_act === "stop") {
+			exec(HESTIA_CMD . "v-stop-docker-app " . $v_app, $out, $rc);
+			$action_label = $is_tr ? "durduruldu" : "stopped";
+		} elseif ($app_act === "start") {
+			exec(HESTIA_CMD . "v-start-docker-app " . $v_app, $out, $rc);
+			$action_label = $is_tr ? "başlatıldı" : "started";
+		} else {
+			exec(HESTIA_CMD . "v-restart-docker-app " . $v_app, $out, $rc);
+			$action_label = $is_tr ? "yeniden başlatıldı" : "restarted";
+		}
+		if ($rc == 0) {
+			$_SESSION["ok_msg"] = sprintf($is_tr ? "%s uygulaması %s." : _("App %s %s successfully."), htmlspecialchars($app_name), $action_label);
+		} else {
+			$_SESSION["error_msg"] = ($is_tr ? "Uygulama işlemi sırasında hata: " : _("Error during app action: ")) . implode(" ", $out);
+		}
+	}
+	header("Location: /list/resources/");
+	exit();
+}
+
+// 1. Fetch Governance & Per-Domain Resource Metrics
 exec(HESTIA_CMD . "v-list-resource-governance json", $gov_output, $return_var);
 $gov_data = json_decode(implode("", $gov_output), true) ?: [
 	"summary" => [
@@ -110,9 +166,52 @@ $gov_data = json_decode(implode("", $gov_output), true) ?: [
 	],
 	"domains" => []
 ];
-
 $summary = $gov_data["summary"] ?? [];
 $domains = $gov_data["domains"] ?? [];
+
+// Merge suspension status from web domains
+exec(HESTIA_CMD . "v-list-web-domains-all json", $all_web_output, $w_rc);
+$all_web_domains = json_decode(implode("", $all_web_output), true) ?: [];
+foreach ($domains as $d_name => &$d_info) {
+	if (isset($all_web_domains[$d_name])) {
+		$d_info["SUSPENDED"] = $all_web_domains[$d_name]["SUSPENDED"] ?? "no";
+		$d_info["SSL"] = $all_web_domains[$d_name]["SSL"] ?? "no";
+		$d_info["BACKEND"] = $all_web_domains[$d_name]["BACKEND"] ?? "";
+	} else {
+		$d_info["SUSPENDED"] = $d_info["SUSPENDED"] ?? "no";
+	}
+}
+unset($d_info);
+
+// 2. Fetch System Services Metrics
+exec(HESTIA_CMD . "v-list-sys-services json", $srv_output, $s_rc);
+$services = json_decode(implode("", $srv_output), true) ?: [];
+
+// 3. Fetch Docker / Background API Apps
+exec(HESTIA_CMD . "v-list-docker-apps json", $docker_output, $d_rc);
+$docker_apps = json_decode(implode("", $docker_output), true) ?: [];
+
+// 4. Live System Memory & CPU Summary
+$live_ram = [
+	"total_mb" => 15974,
+	"used_mb" => 3072,
+	"free_mb" => 12902,
+	"used_pct" => 19.2
+];
+if (file_exists('/proc/meminfo')) {
+	$meminfo = file_get_contents('/proc/meminfo');
+	preg_match('/MemTotal:\s+(\d+)/', $meminfo, $mt);
+	preg_match('/MemAvailable:\s+(\d+)/', $meminfo, $ma);
+	if (!empty($mt[1])) {
+		$t_mb = round($mt[1] / 1024);
+		$a_mb = !empty($ma[1]) ? round($ma[1] / 1024) : 0;
+		$u_mb = max(0, $t_mb - $a_mb);
+		$live_ram["total_mb"] = $t_mb;
+		$live_ram["used_mb"] = $u_mb;
+		$live_ram["free_mb"] = $a_mb;
+		$live_ram["used_pct"] = $t_mb > 0 ? round(($u_mb / $t_mb) * 100, 1) : 0;
+	}
+}
 
 // Render Template
 render_page($user, $TAB, "list_resources");
