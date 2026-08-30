@@ -572,44 +572,121 @@ def parse_compose(root, compose_rel):
     """Extract services, ports, health, links and risks from a compose file."""
     cfg, err = compose_config(root, compose_rel, root)
     services, warnings = [], []
+    comm, ports_map = [], {}
+
     if cfg is None:
-        # fallback: shallow section-aware scan
+        # Pure-Python fallback parser when docker CLI is not present/running
         text = read_text(os.path.join(root, compose_rel))
         section = ""
         cur = None
+        sub_key = ""
         for line in text.splitlines():
-            if not line.strip() or line.strip().startswith("#"):
+            sline = line.strip()
+            if not sline or sline.startswith("#"):
                 continue
             if not line[0].isspace():
-                section = line.split(":")[0].strip()
+                section = sline.split(":")[0].strip()
                 cur = None
+                sub_key = ""
                 continue
             if section != "services":
                 continue
             ind = len(line) - len(line.lstrip())
-            keyval = line.strip()
+            keyval = sline
             if ind == 2 and keyval.endswith(":"):
                 cur = {"name": keyval[:-1], "image": "", "build": "", "ports": [],
                        "publishes": False, "healthcheck": False,
-                       "depends_on": [], "db": False}
+                       "depends_on": [], "db": False, "volumes": [],
+                       "privileged": False, "network_mode": "", "pid": ""}
                 services.append(cur)
+                sub_key = ""
             elif cur is not None and ind >= 4:
-                m = re.match(r"(image|healthcheck):\s*(.+)$", keyval)
-                if m and m.group(1) == "image":
-                    cur["image"] = m.group(2).strip()
+                if keyval.startswith("image:"):
+                    cur["image"] = keyval.split(":", 1)[1].strip().strip("'\"")
                     cur["db"] = bool(DB_IMAGES.search(cur["image"]))
-                elif m:
+                elif keyval.startswith("build:"):
+                    b_val = keyval.split(":", 1)[1].strip().strip("'\"")
+                    if b_val:
+                        cur["build"] = b_val
+                    sub_key = "build"
+                elif keyval.startswith("context:") and sub_key == "build":
+                    cur["build"] = keyval.split(":", 1)[1].strip().strip("'\"")
+                elif keyval.startswith("healthcheck:"):
                     cur["healthcheck"] = True
-                if keyval.startswith("- "):
-                    seg = keyval[2:].strip()
-                    if re.match(r'^"?\d+[:-]', seg):
-                        cur["publishes"] = True
+                elif keyval.startswith("privileged:"):
+                    cur["privileged"] = "true" in keyval.lower()
+                elif keyval.startswith("network_mode:"):
+                    cur["network_mode"] = keyval.split(":", 1)[1].strip().strip("'\"")
+                elif keyval.startswith("pid:"):
+                    cur["pid"] = keyval.split(":", 1)[1].strip().strip("'\"")
+                elif keyval.endswith(":"):
+                    sub_key = keyval[:-1].strip()
+                elif keyval.startswith("- "):
+                    item = keyval[2:].strip().strip("'\"")
+                    if sub_key == "ports" or re.match(r'^\d+[:-]', item):
+                        parts = item.split(":")
+                        if len(parts) == 2:
+                            pub, tgt = parts[0], parts[1]
+                            cur["ports"].append({"target": tgt, "published": pub, "host_ip": ""})
+                            cur["publishes"] = True
+                        elif len(parts) == 3:
+                            hip, pub, tgt = parts[0], parts[1], parts[2]
+                            cur["ports"].append({"target": tgt, "published": pub, "host_ip": hip})
+                            cur["publishes"] = True
+                        else:
+                            cur["ports"].append({"target": item, "published": "", "host_ip": ""})
+                    elif sub_key == "depends_on":
+                        cur["depends_on"].append(item)
+                    elif sub_key == "volumes":
+                        cur["volumes"].append(item)
+            elif cur is not None and ind >= 6 and sub_key == "depends_on" and keyval.endswith(":"):
+                dep_name = keyval[:-1].strip()
+                if dep_name not in cur["depends_on"]:
+                    cur["depends_on"].append(dep_name)
+
         warnings.append({"level": "warn",
                          "message": "Compose dosyası docker ile doğrulanamadı (basit tarama yapıldı)",
                          "hint": " ".join(err or [])})
-        return services, [], warnings
 
-    comm, ports_map = [], {}
+        for s in services:
+            image = s["image"]
+            name = s["name"]
+            if image.endswith(":latest") or image.endswith(":main"):
+                warnings.append({"level": "warn",
+                                 "message": f"{name}: image etiketi sabit değil ({image})",
+                                 "hint": "Sürümü sabitleyin (örn. postgres:16.4); latest kullanımı güncellemede davranış değiştirir."})
+            if s.get("privileged"):
+                warnings.append({"level": "error",
+                                 "message": f"{name}: privileged:true — kurulum FORCE ister",
+                                 "hint": "Gerçekten gerekli mi? Normalde kaldırılmalı."})
+            for mount in (s.get("volumes") or []):
+                vol = mount if isinstance(mount, str) else ""
+                if "docker.sock" in vol:
+                    warnings.append({"level": "error",
+                                     "message": f"{name}: docker.sock bağlanıyor — kurulum FORCE ister",
+                                     "hint": "Container host'un kontrolünü ele geçirebilir; kaldırın."})
+            if s.get("network_mode") == "host" or s.get("pid") == "host":
+                warnings.append({"level": "error",
+                                 "message": f"{name}: host network/pid modu — kurulum FORCE ister",
+                                 "hint": "İzolasyonu tamamen kaldırır; publish+domain eşlemesi kullanın."})
+            if not s.get("healthcheck") and not s["db"]:
+                warnings.append({"level": "info",
+                                 "message": f"{name}: healthcheck yok",
+                                 "hint": "healthcheck eklerseniz deploy, servis gerçekten sağlıklı olduğunda 'running' işaretlenir (--wait)."})
+
+        for s in services:
+            for dep in s["depends_on"]:
+                comm.append({"from": s["name"], "to": dep,
+                             "via": "compose ağı (servis adı DNS)",
+                             "note": f"{s['name']} → {dep}: başlatma sırası/bağımlılık"})
+        env_file = os.path.join(root, ".env.example")
+        for var in (parse_env_file(env_file) if os.path.isfile(env_file) else []):
+            m = re.search(r"https?://([a-zA-Z0-9_-]+)", var.get("example") or "")
+            if m and m.group(1) in {s["name"] for s in services}:
+                comm.append({"from": "*", "to": m.group(1), "via": var["example"],
+                             "note": f"{var['key']} bu servise işaret ediyor"})
+        return services, comm, warnings
+
     svc_cfg = cfg.get("services") or {}
     for name, svc in sorted(svc_cfg.items()):
         ports, publishes = [], False
@@ -663,14 +740,14 @@ def parse_compose(root, compose_rel):
     for s in services:
         for dep in s["depends_on"]:
             comm.append({"from": s["name"], "to": dep,
-                          "via": "compose ağı (servis adı DNS)",
-                          "note": f"{s['name']} → {dep}: başlatma sırası/bağımlılık"})
+                         "via": "compose ağı (servis adı DNS)",
+                         "note": f"{s['name']} → {dep}: başlatma sırası/bağımlılık"})
     env_file = os.path.join(root, ".env.example")
     for var in (parse_env_file(env_file) if os.path.isfile(env_file) else []):
         m = re.search(r"https?://([a-zA-Z0-9_-]+)", var.get("example") or "")
         if m and m.group(1) in {s["name"] for s in services}:
             comm.append({"from": "*", "to": m.group(1), "via": var["example"],
-                          "note": f"{var['key']} bu servise işaret ediyor"})
+                         "note": f"{var['key']} bu servise işaret ediyor"})
     return services, comm, warnings
 
 
@@ -727,7 +804,7 @@ def scan_risks(root):
                               "hint": "Büyük medya/ikili dosyalar depoyu yavaşlatır; CDN/object storage kullanın."})
     if not os.path.isfile(os.path.join(root, "README.md")):
         risks.append({"level": "info", "message": "README.md yok",
-                       "hint": "Kurulum ve .env gereksinimlerini 5 satırla anlatan bir README ekleyin."})
+                      "hint": "Kurulum ve .env gereksinimlerini 5 satırla anlatan bir README ekleyin."})
     if total > DIR_SIZE_WARN_MB * 1024 * 1024:
         risks.append({"level": "warn",
                       "message": f"Repo boyutu büyük (~{total // (1024 * 1024)} MB)",
@@ -735,16 +812,11 @@ def scan_risks(root):
     return risks
 
 
-def main():
-    flags = [a for a in sys.argv[1:] if a.startswith("--")]
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-
-    root = os.path.abspath(args[0]) if len(args) > 0 else "."
-    branch = args[1] if len(args) > 1 else ""
-
+def scan_repo(root, branch=""):
+    """Scan a repository directory and emit a complete deployment plan dict."""
+    root = os.path.abspath(root)
     if not os.path.isdir(root):
-        print(json.dumps({"ok": False, "error": f"repo dir not found: {root}"}, ensure_ascii=False))
-        return
+        return {"ok": False, "error": f"repo dir not found: {root}"}
 
     compose_rel = find_compose(root)
     result = {"ok": True, "branch": branch, "components": [], "communication": [],
@@ -872,7 +944,17 @@ def main():
     db = " · veritabanı otomatik" if result["database"].get("auto") else ""
     seeds_s = " · seed verisi var" if result["seeds"] else ""
     result["summary_tr"] = f"{plat}{extra}{db}{seeds_s}"
+    return result
 
+
+def main():
+    flags = [a for a in sys.argv[1:] if a.startswith("--")]
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+
+    root = os.path.abspath(args[0]) if len(args) > 0 else "."
+    branch = args[1] if len(args) > 1 else ""
+
+    result = scan_repo(root, branch)
     if "--summary" in flags:
         print(result.get("summary_tr", ""))
     else:
