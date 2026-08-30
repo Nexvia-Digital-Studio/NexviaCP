@@ -5,7 +5,13 @@
 $pma_host = $http_host;
 // In local dev/Docker or IP access, pick the first configured domain or map web port 9080
 if (filter_var($http_host, FILTER_VALIDATE_IP) || $http_host === "localhost" || $http_host === "127.0.0.1") {
-	$found_domains = glob("/home/" . ($user ?? "admin") . "/web/*");
+	// $user arrives shell-quoted ("'admin'") — strip the quotes or the glob
+	// never matches anything.
+	$user_dir = $user ?? "admin";
+	if (preg_match("/^'(.*)'$/s", $user_dir, $m)) {
+		$user_dir = $m[1];
+	}
+	$found_domains = glob("/home/" . $user_dir . "/web/*");
 	if (!empty($found_domains) && is_dir($found_domains[0])) {
 		$pma_host = basename($found_domains[0]) . ":9080";
 	} elseif ($port == "8083") {

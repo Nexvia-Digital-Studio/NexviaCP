@@ -163,10 +163,25 @@ fi
 env_backup="$tmp_dir/env_backup"
 [ -f "$docroot/.env" ] && cp "$docroot/.env" "$env_backup"
 
+# Preserve the per-domain webhook receiver (provisioned by v-add-web-domain
+# with its HMAC secret) — the docroot wipe below would destroy it and the
+# webhook at https://<domain>/deploy.php would 404 forever after.
+deploy_php_backup=""
+[ -f "$docroot/deploy.php" ] && deploy_php_backup="$tmp_dir/deploy.php.bak"
+[ -n "$deploy_php_backup" ] && cp "$docroot/deploy.php" "$deploy_php_backup"
+
 # Move files to docroot
 rm -rf "$docroot"/* "$docroot"/.[!.]* 2>/dev/null || true
 cp -r "$tmp_clone"/* "$docroot"/ 2>/dev/null || true
 cp -r "$tmp_clone"/.[!.]* "$docroot"/ 2>/dev/null || true
+
+# Restore the webhook receiver (or install it from the skeleton if this
+# domain predates the feature / lost it in an earlier deploy).
+if [ -n "$deploy_php_backup" ]; then
+	cp -f "$deploy_php_backup" "$docroot/deploy.php"
+elif [ ! -f "$docroot/deploy.php" ] && [ -f "$WEBTPL/skel/public_html/deploy.php" ]; then
+	cp -f "$WEBTPL/skel/public_html/deploy.php" "$docroot/deploy.php"
+fi
 
 # Strip token from remote URL in git config for security
 git -C "$docroot" remote set-url origin "$repo_url" 2>/dev/null || true
@@ -629,7 +644,17 @@ esac
 chown -R "$user:$user" "$docroot"
 find "$docroot" -type d -exec chmod 755 {} + 2>/dev/null || true
 find "$docroot" -type f -exec chmod 644 {} + 2>/dev/null || true
-[ -f "$docroot/.env" ] && chmod 600 "$docroot/.env"
+# Secret-bearing files must not stay world-readable after the blanket 644:
+# .env, scanner backups (.env.bak-*) and the webhook receiver deploy.php.
+for secret in "$docroot"/.env "$docroot"/.env.bak-* "$docroot"/deploy.php; do
+	if [ -f "$secret" ] && [ ! -L "$secret" ]; then
+		chmod 600 "$secret"
+	fi
+done
+if [ -f "$docroot/deploy.php" ] && [ ! -L "$docroot/deploy.php" ]; then
+	chown "$user:${WEB_RGROUPS:-www-data}" "$docroot/deploy.php"
+	chmod 640 "$docroot/deploy.php"
+fi
 [ -d "$docroot/.git" ] && chmod -R 700 "$docroot/.git"
 
 # Restart web server

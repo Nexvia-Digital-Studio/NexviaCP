@@ -68,10 +68,13 @@ case "$action" in
 		;;
 esac
 
-# Re-apply PR access rules to all active PR environments
-for u_dir in "$HOMEDIR"/*; do
-	[ ! -d "$u_dir/data" ] && continue
-	pr_conf="$u_dir/data/pr_environments.conf"
+# Re-apply PR access rules to all active PR environments.
+# NOTE: pr_environments.conf lives under $HESTIA/data/users/<user>/ (written
+# by v-deploy-github-pr via $USER_DATA), NOT under /home/<user>/data — the old
+# path never matched and whitelist changes were never re-applied.
+for u_dir in "$HESTIA/data/users"/*; do
+	[ ! -d "$u_dir" ] && continue
+	pr_conf="$u_dir/pr_environments.conf"
 	[ ! -f "$pr_conf" ] && continue
 	user=$(basename "$u_dir")
 	while IFS= read -r line; do

@@ -80,6 +80,11 @@ fi
 if [ ! -d "$docroot/.git" ]; then
 	echo "[*] Initializing git repository for $domain..."
 	tmp_clone=$(mktemp -d)
+	# mktemp creates a 0700 root-owned dir while user_exec (setpriv) drops to
+	# the domain user — the user cannot traverse it, so the clone would always
+	# fail. Hand the dir over to the user first.
+	chown "$user:$user" "$tmp_clone"
+	chmod 700 "$tmp_clone"
 	user_exec git clone --branch "${branch:-main}" --depth 1 "$repo_url" "$tmp_clone/repo" >/dev/null 2>&1
 	if [ $? -ne 0 ]; then
 		rm -rf "$tmp_clone"
@@ -96,9 +101,13 @@ user_exec git -C "$docroot" remote add origin "$repo_url"
 user_exec git -C "$docroot" fetch origin "${branch:-main}" >/dev/null 2>&1 || true
 user_exec git -C "$docroot" checkout -B "${branch:-main}" "origin/${branch:-main}" -f >/dev/null 2>&1 || true
 
-# Restore the webhook receiver if it was clobbered by the clone.
+# Restore the webhook receiver if it was clobbered by the clone; install it
+# from the skeleton when missing (domains provisioned before this feature, or
+# wiped by v-deploy-github-repo, have no deploy.php at all).
 if [ -n "$preserve_deploy_php" ] && [ ! -f "$docroot/deploy.php" ]; then
 	printf '%s' "$preserve_deploy_php" > "$docroot/deploy.php"
+elif [ ! -f "$docroot/deploy.php" ] && [ -f "$WEBTPL/skel/public_html/deploy.php" ]; then
+	cp -f "$WEBTPL/skel/public_html/deploy.php" "$docroot/deploy.php"
 fi
 
 # (Re)generate deploy.sh with the correct branch baked in.
@@ -143,9 +152,12 @@ if [ -f "$deploy_php" ]; then
 	fi
 fi
 
-# Persist repo URL + branch in domain config.
+# Persist repo URL + branch in domain config. Strip embedded credentials from
+# the stored value — the token lives only in .git/config (user-owned, 700);
+# deploys fetch via remote origin anyway.
+git_repo_clean=$(printf '%s' "$repo_url" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://[^/@]+@##')
 add_object_key 'web' 'DOMAIN' "$domain" 'GIT_REPO' 'TIME'
-update_object_value 'web' 'DOMAIN' "$domain" '$GIT_REPO' "$repo_url"
+update_object_value 'web' 'DOMAIN' "$domain" '$GIT_REPO' "$git_repo_clean"
 add_object_key 'web' 'DOMAIN' "$domain" 'GIT_BRANCH' 'TIME'
 update_object_value 'web' 'DOMAIN' "$domain" '$GIT_BRANCH' "${branch:-main}"
 

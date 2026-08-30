@@ -1330,7 +1330,7 @@ if (!empty($_POST["save"])) {
 			}
 
 			$v_ftp_user_data["v_ftp_user"] = preg_replace(
-				"/^" . $user . "_/i",
+				"/^" . preg_quote($user_plain, "/") . "_/i",
 				"",
 				$v_ftp_user_data["v_ftp_user"],
 			);
@@ -1394,7 +1394,7 @@ if (!empty($_POST["save"])) {
 							: $_SESSION["APP_NAME"];
 						$template = get_email_template(
 							"ftpaccount_created",
-							$data[$user]["LANGUAGE"],
+							$_SESSION["language"] ?? "",
 						);
 						if (!empty($template)) {
 							preg_match("/<subject>(.*?)<\/subject>/si", $template, $matches);
@@ -1563,7 +1563,7 @@ if (!empty($_POST["save"])) {
 					$from_name = !empty($_SESSION["FROM_NAME"])
 						? $_SESSION["FROM_NAME"]
 						: $_SESSION["APP_NAME"];
-					$template = get_email_template("ftpaccount_created", $data[$user]["LANGUAGE"]);
+					$template = get_email_template("ftpaccount_created", $_SESSION["language"] ?? "");
 					if (!empty($template)) {
 						preg_match("/<subject>(.*?)<\/subject>/si", $template, $matches);
 						$subject = $matches[1];

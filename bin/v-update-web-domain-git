@@ -32,8 +32,14 @@ fi
 echo "[*] Updating git repository in $docroot..."
 cd "$docroot" || exit 1
 
-# Pull latest commits as user
+# Pull latest commits as user — a failed pull must abort the deploy instead
+# of reporting success with a stale tree.
 su - "$user" -s /bin/bash -c "cd '$docroot' && git pull" 2>&1
+pull_rc=$?
+if [ $pull_rc -ne 0 ]; then
+	echo "[!] ERROR: git pull failed for $domain (exit $pull_rc) — aborting update."
+	check_result "$E_CONNECT" "git pull failed :: $domain (exit $pull_rc)"
+fi
 
 # Build if necessary
 if [ -f "$docroot/composer.json" ] && command -v composer &>/dev/null; then
@@ -55,7 +61,19 @@ fi
 chown -R "$user:$user" "$docroot"
 find "$docroot" -type d -exec chmod 755 {} + 2>/dev/null || true
 find "$docroot" -type f -exec chmod 644 {} + 2>/dev/null || true
-[ -f "$docroot/.env" ] && [ ! -L "$docroot/.env" ] && chmod 600 "$docroot/.env"
+# Secret-bearing files must NOT stay world-readable after the blanket 644:
+# - .env and scanner backups (.env.bak-*) carry DB credentials / APP_KEY
+# - deploy.php embeds the per-domain HMAC deploy secret
+for secret in "$docroot"/.env "$docroot"/.env.bak-* "$docroot"/deploy.php; do
+	if [ -f "$secret" ] && [ ! -L "$secret" ]; then
+		chmod 600 "$secret"
+	fi
+done
+# deploy.php must additionally stay readable by the web server group.
+if [ -f "$docroot/deploy.php" ] && [ ! -L "$docroot/deploy.php" ]; then
+	chown "$user:${WEB_RGROUPS:-www-data}" "$docroot/deploy.php"
+	chmod 640 "$docroot/deploy.php"
+fi
 [ -d "$docroot/.git" ] && [ ! -L "$docroot/.git" ] && chmod -R 700 "$docroot/.git"
 
 # Restart isolated app service if configured

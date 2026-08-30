@@ -64,8 +64,8 @@ json_list() {
 		"LANGUAGE": "'$LANGUAGE'",
 		"LOGIN_STYLE": "'$LOGIN_STYLE'",
 		"MAIL_SYSTEM": "'$MAIL_SYSTEM'",
-		"PHPMYADMIN_KEY": "'$PHPMYADMIN_KEY'",
-		"PGA_SSO_KEY": "'$PGA_SSO_KEY'",
+		"PHPMYADMIN_KEY": "'$([ -n "${PHPMYADMIN_KEY:-}" ] && echo yes || echo no)'",
+		"PGA_SSO_KEY": "'$([ -n "${PGA_SSO_KEY:-}" ] && echo yes || echo no)'",
 		"PLUGIN_APP_INSTALLER": "'$PLUGIN_APP_INSTALLER'",
 		"PLUGIN_FILE_MANAGER": "'$PLUGIN_FILE_MANAGER'",
 		"PMA_RESTRICT_ACCESS": "'$PMA_RESTRICT_ACCESS'",
@@ -93,7 +93,7 @@ json_list() {
 		"ROOT_USER": "'$ROOT_USER'",
 		"SERVER_SMTP_ADDR": "'$SERVER_SMTP_ADDR'",
 		"SERVER_SMTP_HOST": "'$SERVER_SMTP_HOST'",
-		"SERVER_SMTP_PASSWD": "'$SERVER_SMTP_PASSWD'",
+		"SERVER_SMTP_PASSWD": "'$([ -n "${SERVER_SMTP_PASSWD:-}" ] && echo yes || echo no)'",
 		"SERVER_SMTP_PORT": "'$SERVER_SMTP_PORT'",
 		"SERVER_SMTP_SECURITY": "'$SERVER_SMTP_SECURITY'",
 		"SERVER_SMTP_USER": "'$SERVER_SMTP_USER'",
@@ -111,7 +111,7 @@ json_list() {
 		"PORTAINER_SUPPORT": "'$PORTAINER_SUPPORT'",
 		"DOCKER_HARDENING": "'$DOCKER_HARDENING'",
 		"DNS_API_PROVIDER": "'$DNS_API_PROVIDER'",
-		"CF_API_TOKEN": "'$CF_API_TOKEN'",
+		"CF_API_TOKEN": "'$([ -n "${CF_API_TOKEN:-}" ] && echo yes || echo no)'",
 		"CF_ZONE_ID": "'$CF_ZONE_ID'",
 		"CF_ACCOUNT_ID": "'$CF_ACCOUNT_ID'",
 		"CF_AUTO_ZONE": "'$CF_AUTO_ZONE'",
@@ -249,7 +249,7 @@ shell_list() {
 		echo "SMTP Server Account Port:          $SERVER_SMTP_PORT"
 		echo "SMTP Server Account Security:      $SERVER_SMTP_SECURITY"
 		echo "SMTP Server Account Username:      $SERVER_SMTP_USER"
-		echo "SMTP Server Account Password:      $SERVER_SMTP_PASSWD"
+		echo "SMTP Server Account Password:      '$([ -n "${SERVER_SMTP_PASSWD:-}" ] && echo set || echo unset)'"
 		echo "SMTP Server Account Address:       $SERVER_SMTP_ADDR"
 	fi
 

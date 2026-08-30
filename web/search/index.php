@@ -34,7 +34,9 @@ if ($_SESSION["userContext"] === "admin" && $_SESSION["look"] == "") {
 		exec(HESTIA_CMD . "v-search-object " . $q . " json", $output, $return_var);
 	}
 } else {
-	$user = quoteshellarg($_SESSION["user"]);
+	// Loginas (look != "") or a regular user: main.php already set $user to
+	// the effective account (quoted); re-assigning from $_SESSION["user"]
+	// would search the REAL admin's objects while browsing as someone else.
 	exec(HESTIA_CMD . "v-search-user-object " . $user . " " . $q . " json", $output, $return_var);
 }
 

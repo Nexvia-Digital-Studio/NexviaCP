@@ -24,9 +24,19 @@ echo "[*] [$(date +'%Y-%m-%d %H:%M:%S')] Invoked (Target: ${1:-all})"
 
 target_repo=$(echo "$1" | sed 's/[^a-zA-Z0-9._-]//g')
 
+# Serialize concurrent webhook runs: parallel syncs on the same docroot would
+# race (simultaneous git pull / chmod passes).
+lock_file="/var/log/hestia/github-webhook.lock"
+exec 9>"$lock_file"
+if ! flock -n 9; then
+	echo "[!] Another sync is already running; skipping this run."
+	exit 0
+fi
+
 echo "[*] [$(date +'%Y-%m-%d %H:%M:%S')] Scanning domains for GitHub sync (Target: ${target_repo:-all})..."
 
 sync_pids=()
+sync_domains=()
 max_jobs=4
 running_jobs=0
 
@@ -37,6 +47,16 @@ for u_dir in "$HOMEDIR"/*; do
 	for d_dir in "$u_dir/web"/*; do
 		[ ! -d "$d_dir/public_html/.git" ] && continue
 		domain=$(basename "$d_dir")
+
+		# Kill-switch: domains whose git integration was disabled with
+		# v-delete-web-domain-git have GIT_REPO emptied — a bare .git dir must
+		# NOT keep them on the webhook sync path. (Read the user's web.conf
+		# directly: get_object_value is bound to $USER_DATA and resolves to the
+		# wrong file inside this multi-user loop.)
+		domain_repo=$(sed -n "s/^DOMAIN='$domain' .*GIT_REPO='\([^']*\)'.*$/\1/p" "$HESTIA/data/users/$user/web.conf" 2>/dev/null | head -1)
+		if [ -z "$domain_repo" ]; then
+			continue
+		fi
 
 		# Check remote origin URL (dropped to user to avoid dubious ownership)
 		remote_url=$(su - "$user" -s /bin/bash -c "git -C '$d_dir/public_html' config --get remote.origin.url 2>/dev/null")
@@ -49,9 +69,17 @@ for u_dir in "$HOMEDIR"/*; do
 		fi
 
 		echo "[*] Triggering update for domain: $domain (User: $user)..."
-		# Run update in parallel subshell
-		($BIN/v-update-web-domain-git "$user" "$domain" >/dev/null 2>&1) &
+		# Run update in parallel subshell; record failures for the summary.
+		(
+			$BIN/v-update-web-domain-git "$user" "$domain" >/dev/null 2>&1
+			rc=$?
+			if [ $rc -ne 0 ]; then
+				echo "[!] FAILED: v-update-web-domain-git $user $domain (exit $rc)"
+			fi
+			exit $rc
+		) &
 		sync_pids+=($!)
+		sync_domains+=("$user/$domain")
 		running_jobs=$((running_jobs + 1))
 
 		if [ "$running_jobs" -ge "$max_jobs" ]; then
@@ -61,12 +89,20 @@ for u_dir in "$HOMEDIR"/*; do
 	done
 done
 
-# Wait for all remaining domain updates to complete
+# Wait for all remaining domain updates to complete and count failures
+failed=0
 if [ ${#sync_pids[@]} -gt 0 ]; then
-	for pid in "${sync_pids[@]}"; do
-		wait "$pid" 2>/dev/null || true
+	for i in "${!sync_pids[@]}"; do
+		if ! wait "${sync_pids[$i]}" 2>/dev/null; then
+			failed=$((failed + 1))
+		fi
 	done
 fi
 
-echo "[+] SUCCESS: All connected domains (${#sync_pids[@]} sites) updated from GitHub in parallel with zero downtime."
+total=${#sync_pids[@]}
+if [ "$failed" -gt 0 ]; then
+	echo "[!] FINISHED WITH ERRORS: $failed of $total domain update(s) FAILED (see lines above)."
+	exit 1
+fi
+echo "[+] SUCCESS: All connected domains (${total} sites) updated from GitHub in parallel with zero downtime."
 exit 0

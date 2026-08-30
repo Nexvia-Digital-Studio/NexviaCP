@@ -23,7 +23,9 @@ if (!empty($_POST["action_sync_db"])) {
 	} else {
 		$err_text = trim(implode(" ", $s_out));
 		if (stripos($err_text, "doesn't exist") !== false || stripos($err_text, "bulunamadı") !== false) {
-			$_SESSION["error_msg"] = $is_tr ? "Hesap henüz oluşturulmamış veya sistemde bulunamadı ($user)." : sprintf(_("User account '%s' does not exist yet."), $user);
+			// $user is shell-quoted — strip quotes for display only.
+			$user_disp = preg_match("/^'(.*)'$/s", $user, $m) ? $m[1] : $user;
+			$_SESSION["error_msg"] = $is_tr ? "Hesap henüz oluşturulmamış veya sistemde bulunamadı ($user_disp)." : sprintf(_("User account '%s' does not exist yet."), $user_disp);
 		} else {
 			$_SESSION["error_msg"] = $err_text ?: ($is_tr ? "Veritabanları taranırken bir hata oluştu." : _("An error occurred while scanning databases."));
 		}

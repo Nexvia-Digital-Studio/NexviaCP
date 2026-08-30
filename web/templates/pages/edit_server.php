@@ -504,7 +504,8 @@
 								class="form-control js-password-input"
 								name="v_cf_api_token"
 								id="v_cf_api_token"
-								value="<?= tohtml($_SESSION["CF_API_TOKEN"] ?? "") ?>"
+								value=""
+								placeholder="<?= !empty($_SESSION["CF_API_TOKEN"]) ? tohtml(_("Token saved — enter a new one only to replace it")) : "" ?>"
 							>
 						</div>
 						<div class="u-mb10">

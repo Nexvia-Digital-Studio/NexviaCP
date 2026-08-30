@@ -33,8 +33,14 @@ if (is_array($data)) {
 	$data = array_reverse($data);
 	unset($output);
 
-	// Render page
-	if ($user === "system") {
+	// Render page — $user is shell-quoted, so strip the quotes before
+	// comparing (a raw === "system" never matches "'system'").
+	if (preg_match("/^'(.*)'$/s", $user, $m)) {
+		$user_display = $m[1];
+	} else {
+		$user_display = $user;
+	}
+	if ($user_display === "system") {
 		$user = "'" . $_SESSION["user"] . "'";
 	}
 } else {

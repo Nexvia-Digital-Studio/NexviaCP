@@ -153,24 +153,32 @@ done
 #                       Hestia                             #
 #----------------------------------------------------------#
 
-# Save domain metadata in web.conf
-if [ -z "$REDIS_DB" ]; then
+# Save domain metadata in web.conf.
+# NOTE: the add_object_key guards must check the value STORED IN web.conf
+# ($config), not the shell variables — REDIS_HOST/REDIS_PORT are defaulted
+# earlier in this script, so `[ -z "$REDIS_HOST" ]` is never true and the
+# keys were silently never persisted.
+cur_redis_db=$(get_object_value 'web' 'DOMAIN' "$domain" '$REDIS_DB')
+if [ -z "$cur_redis_db" ]; then
 	add_object_key "web" 'DOMAIN' "$domain" 'REDIS_DB' 'ALIAS'
 fi
 update_object_value 'web' 'DOMAIN' "$domain" '$REDIS_DB' "$redis_db"
 
-if [ -z "$REDIS_HOST" ]; then
+cur_redis_host=$(get_object_value 'web' 'DOMAIN' "$domain" '$REDIS_HOST')
+if [ -z "$cur_redis_host" ]; then
 	add_object_key "web" 'DOMAIN' "$domain" 'REDIS_HOST' 'ALIAS'
 fi
 update_object_value 'web' 'DOMAIN' "$domain" '$REDIS_HOST' "$REDIS_HOST"
 
-if [ -z "$REDIS_PORT" ]; then
+cur_redis_port=$(get_object_value 'web' 'DOMAIN' "$domain" '$REDIS_PORT')
+if [ -z "$cur_redis_port" ]; then
 	add_object_key "web" 'DOMAIN' "$domain" 'REDIS_PORT' 'ALIAS'
 fi
 update_object_value 'web' 'DOMAIN' "$domain" '$REDIS_PORT' "$REDIS_PORT"
 
 if [ -n "$REDIS_SOCKET" ]; then
-	if [ -z "$REDIS_SOCKET" ]; then
+	cur_redis_socket=$(get_object_value 'web' 'DOMAIN' "$domain" '$REDIS_SOCKET')
+	if [ -z "$cur_redis_socket" ]; then
 		add_object_key "web" 'DOMAIN' "$domain" 'REDIS_SOCKET' 'ALIAS'
 	fi
 	update_object_value 'web' 'DOMAIN' "$domain" '$REDIS_SOCKET' "$REDIS_SOCKET"
