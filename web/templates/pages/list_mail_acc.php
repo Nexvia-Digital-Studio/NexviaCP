@@ -327,40 +327,43 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 	</div>
 
 	<!-- Native Mail & SMTP Connection Dialog -->
-	<dialog x-ref="dialog" class="shortcuts" style="max-width: 600px; width: 92%; padding: 0;">
-		<div class="shortcuts-header">
-			<div class="shortcuts-title" style="display: flex; align-items: center; gap: 8px;">
+	<dialog x-ref="dialog" class="shortcuts" style="max-width: 680px; width: 95%; padding: 0; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
+		<div class="shortcuts-header" style="padding: 14px 20px; border-bottom: 1px solid rgba(255,255,255,0.15); display: flex; justify-content: space-between; align-items: center;">
+			<div class="shortcuts-title" style="display: flex; align-items: center; gap: 8px; font-size: 1rem; font-weight: 600;">
 				<i class="fas fa-envelope icon-lightblue"></i>
 				<span x-text="selectedAccount + '@' + selectedDomain"></span>
 			</div>
 			<div
 				x-on:click="$refs.dialog.close()"
 				class="shortcuts-close"
-				style="cursor: pointer;"
+				style="cursor: pointer; padding: 4px;"
 			>
 				<i class="fas fa-xmark"></i>
 			</div>
 		</div>
 
-		<div class="shortcuts-inner" style="padding: 24px;">
+		<div style="padding: 20px; max-height: calc(85vh - 70px); overflow-y: auto; display: flex; flex-direction: column; gap: 18px;">
 			<!-- Şifre Değiştirme -->
-			<form method="post" :action="'/edit/mail/?domain=' + encodeURIComponent(selectedDomain) + '&account=' + encodeURIComponent(selectedAccount)" class="u-mb20">
+			<form method="post" :action="'/edit/mail/?domain=' + encodeURIComponent(selectedDomain) + '&account=' + encodeURIComponent(selectedAccount)" style="background: rgba(255,255,255,0.04); padding: 14px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.08);">
 				<input type="hidden" name="token" :value="token">
 				<input type="hidden" name="save" value="save">
 				<input type="hidden" name="v_account" :value="selectedAccount">
 				<input type="hidden" name="v_domain" :value="selectedDomain">
 
-				<h2 class="u-text-H3 u-mb10"><?= _("Change Password") ?></h2>
-				<div class="u-mb10">
-					<label class="form-label" for="modal_v_password"><?= _("New Password") ?></label>
-					<div style="display: flex; gap: 8px;">
-						<div class="u-pos-relative" style="flex: 1;">
+				<h2 class="u-text-H3 u-mb10" style="margin-top: 0; font-size: 0.95rem; display: flex; align-items: center; gap: 6px;">
+					<i class="fas fa-key icon-blue"></i> <?= _("Change Password") ?>
+				</h2>
+				<div>
+					<label class="form-label u-mb5" for="modal_v_password"><?= _("New Password") ?></label>
+					<div style="display: flex; gap: 8px; width: 100%;">
+						<div style="flex: 1;">
 							<input
 								:type="showPassword ? 'text' : 'password'"
 								name="v_password"
 								id="modal_v_password"
 								x-model="newPassword"
 								class="form-control"
+								style="width: 100%; box-sizing: border-box;"
 								placeholder="<?= _("Enter new password") ?>"
 								required
 							>
@@ -370,73 +373,96 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 							x-on:click="generatePass()"
 							class="button button-secondary"
 							title="<?= _("Generate") ?>"
+							style="flex-shrink: 0;"
 						>
 							<i class="fas fa-arrows-rotate icon-green"></i>
 						</button>
-						<button type="submit" class="button">
+						<button type="submit" class="button" style="flex-shrink: 0;">
 							<i class="fas fa-floppy-disk icon-purple"></i> <?= _("Save") ?>
 						</button>
 					</div>
 				</div>
 			</form>
 
-			<h2 class="u-text-H3 u-mb10"><?= _("Common Account Settings") ?></h2>
-			<div class="u-mb10">
-				<label class="form-label"><?= _("Username") ?></label>
+			<!-- 2 Sütunlu Bilgi Izgarası -->
+			<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px;">
+				
+				<!-- Sol Sütun: Bağlantı Bilgileri -->
+				<div>
+					<h2 class="u-text-H3 u-mb10" style="font-size: 0.95rem;"><?= _("Common Account Settings") ?></h2>
+					<div class="u-mb10">
+						<label class="form-label u-mb5"><?= _("Username") ?></label>
+						<div class="clipboard">
+							<input type="text" class="form-control clipboard-input js-copy-input" :value="selectedAccount + '@' + selectedDomain" readonly>
+							<button type="button" class="clipboard-button" x-on:click="copyText(selectedAccount + '@' + selectedDomain)" title="<?= _("Copy to clipboard") ?>">
+								<i class="fas fa-copy"></i>
+							</button>
+						</div>
+					</div>
+
+					<div class="u-mb10">
+						<label class="form-label u-mb5"><?= _("Hostname") ?></label>
+						<div class="clipboard">
+							<input type="text" class="form-control clipboard-input js-copy-input" :value="'mail.' + selectedDomain" readonly>
+							<button type="button" class="clipboard-button" x-on:click="copyText('mail.' + selectedDomain)" title="<?= _("Copy to clipboard") ?>">
+								<i class="fas fa-copy"></i>
+							</button>
+						</div>
+					</div>
+				</div>
+
+				<!-- Sağ Sütun: Port ve Şifreleme -->
+				<div>
+					<h2 class="u-text-H3 u-mb10" style="font-size: 0.95rem;"><?= _("SMTP & IMAP Settings") ?></h2>
+					<ul class="values-list" style="margin-bottom: 0;">
+						<li class="values-list-item">
+							<span class="values-list-label"><?= _("Authentication") ?></span>
+							<span class="values-list-value"><?= _("Normal password") ?></span>
+						</li>
+						<li class="values-list-item">
+							<span class="values-list-label">SMTP STARTTLS</span>
+							<span class="values-list-value"><?= _("Port") ?> 587</span>
+						</li>
+						<li class="values-list-item">
+							<span class="values-list-label">SMTP SSL/TLS</span>
+							<span class="values-list-value"><?= _("Port") ?> 465</span>
+						</li>
+						<li class="values-list-item">
+							<span class="values-list-label">IMAP SSL/TLS</span>
+							<span class="values-list-value"><?= _("Port") ?> 993</span>
+						</li>
+					</ul>
+				</div>
+
+			</div>
+
+			<!-- Siteniz İçin .env Yapılandırması -->
+			<div>
+				<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+					<label class="form-label" style="margin-bottom: 0;"><i class="fas fa-code"></i> <?= _("App Configuration (.env)") ?></label>
+					<span x-show="copied" x-cloak style="font-size: 11px; color: var(--icon-color-green); font-weight: 600;"><i class="fas fa-check"></i> <?= _("Copied!") ?></span>
+				</div>
 				<div class="clipboard">
-					<input type="text" class="form-control clipboard-input js-copy-input" :value="selectedAccount + '@' + selectedDomain" readonly>
-					<button type="button" class="clipboard-button" x-on:click="copyText(selectedAccount + '@' + selectedDomain)" title="<?= _("Copy to clipboard") ?>">
+					<textarea
+						class="form-control clipboard-input js-copy-input"
+						rows="3"
+						readonly
+						style="font-family: monospace; font-size: 11px; resize: none; width: 100%; line-height: 1.4;"
+						x-text="'SMTP_HOST=mail.' + selectedDomain + '\nSMTP_PORT=587\nSMTP_USERNAME=' + selectedAccount + '@' + selectedDomain + '\nSMTP_SECURE=tls\nSMTP_FROM_EMAIL=' + selectedAccount + '@' + selectedDomain"
+					></textarea>
+					<button
+						type="button"
+						class="clipboard-button"
+						x-on:click="copyText('SMTP_HOST=mail.' + selectedDomain + '\nSMTP_PORT=587\nSMTP_USERNAME=' + selectedAccount + '@' + selectedDomain + '\nSMTP_SECURE=tls\nSMTP_FROM_EMAIL=' + selectedAccount + '@' + selectedDomain)"
+						title="<?= _("Copy to clipboard") ?>"
+					>
 						<i class="fas fa-copy"></i>
 					</button>
 				</div>
 			</div>
 
-			<div class="u-mb20">
-				<label class="form-label"><?= _("Hostname") ?></label>
-				<div class="clipboard">
-					<input type="text" class="form-control clipboard-input js-copy-input" :value="'mail.' + selectedDomain" readonly>
-					<button type="button" class="clipboard-button" x-on:click="copyText('mail.' + selectedDomain)" title="<?= _("Copy to clipboard") ?>">
-						<i class="fas fa-copy"></i>
-					</button>
-				</div>
-			</div>
-
-			<h2 class="u-text-H3 u-mb10"><?= _("SMTP Settings") ?></h2>
-			<ul class="values-list u-mb20">
-				<li class="values-list-item">
-					<span class="values-list-label"><?= _("Authentication") ?></span>
-					<span class="values-list-value"><?= _("Normal password") ?></span>
-				</li>
-				<li class="values-list-item">
-					<span class="values-list-label">STARTTLS</span>
-					<span class="values-list-value"><?= _("Port") ?> 587</span>
-				</li>
-				<li class="values-list-item">
-					<span class="values-list-label">SSL/TLS</span>
-					<span class="values-list-value"><?= _("Port") ?> 465</span>
-				</li>
-			</ul>
-
-			<h2 class="u-text-H3 u-mb10"><?= _("App Configuration (.env)") ?></h2>
-			<div class="clipboard u-mb20">
-				<textarea
-					class="form-control clipboard-input js-copy-input"
-					rows="4"
-					readonly
-					style="font-family: monospace; font-size: 11px; resize: none;"
-					x-text="'SMTP_HOST=mail.' + selectedDomain + '\nSMTP_PORT=587\nSMTP_USERNAME=' + selectedAccount + '@' + selectedDomain + '\nSMTP_SECURE=tls\nSMTP_FROM_EMAIL=' + selectedAccount + '@' + selectedDomain"
-				></textarea>
-				<button
-					type="button"
-					class="clipboard-button"
-					x-on:click="copyText('SMTP_HOST=mail.' + selectedDomain + '\nSMTP_PORT=587\nSMTP_USERNAME=' + selectedAccount + '@' + selectedDomain + '\nSMTP_SECURE=tls\nSMTP_FROM_EMAIL=' + selectedAccount + '@' + selectedDomain)"
-					title="<?= _("Copy to clipboard") ?>"
-				>
-					<i class="fas fa-copy"></i>
-				</button>
-			</div>
-
-			<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 20px;">
+			<!-- Alt Butonlar -->
+			<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);">
 				<a
 					class="button button-secondary"
 					:href="'https://' + (webmailAlias || 'webmail') + '.' + selectedDomain + '/?_user=' + encodeURIComponent(selectedAccount + '@' + selectedDomain) + '&email=' + encodeURIComponent(selectedAccount + '@' + selectedDomain)"
