@@ -151,6 +151,32 @@ if (!empty($_POST["enable_slow_log"])) {
 	exit();
 }
 
+// Action 7: Safely Apply Suggested SQL Index to Database
+if (!empty($_POST["apply_sql_index"])) {
+	verify_csrf($_POST);
+	$target_db = trim($_POST["target_db"] ?? "");
+	$target_user = trim($_POST["target_user"] ?? $user);
+	$index_sql = trim($_POST["index_sql"] ?? "");
+
+	if ($is_admin || $target_user === $user) {
+		if (!empty($target_db) && !empty($index_sql)) {
+			$cmd = HESTIA_CMD . "v-apply-mysql-index " . quoteshellarg($target_user) . " " . quoteshellarg($target_db) . " " . quoteshellarg($index_sql);
+			exec($cmd, $a_out, $a_code);
+			if ($a_code == 0) {
+				$_SESSION["ok_msg"] = $is_tr ? ("İndeks başarıyla uygulandı: " . implode(" ", $a_out)) : (_("Index created successfully: ") . implode(" ", $a_out));
+			} else {
+				$_SESSION["error_msg"] = $is_tr ? ("İndeks oluşturulurken hata: " . implode(" ", $a_out)) : (_("Error creating index: ") . implode(" ", $a_out));
+			}
+		} else {
+			$_SESSION["error_msg"] = $is_tr ? "Veritabanı veya indeks komutu eksik." : _("Missing database or SQL statement.");
+		}
+	} else {
+		$_SESSION["error_msg"] = $is_tr ? "Erişim reddedildi." : _("Access denied.");
+	}
+	header("Location: /list/cache/");
+	exit();
+}
+
 // Fetch Performance & Cache Governance Data
 exec(HESTIA_CMD . "v-list-cache-governance json", $cache_output, $return_var);
 $cache_data = json_decode(implode("", $cache_output), true) ?: [

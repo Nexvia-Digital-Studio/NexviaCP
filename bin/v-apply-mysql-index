@@ -1,0 +1,219 @@
+﻿#!/bin/bash
+# info: safely apply a validated CREATE INDEX recommendation to MySQL, MariaDB, or PostgreSQL (Native & Docker)
+# options: USER DATABASE_NAME INDEX_SQL [DB_TYPE]
+#
+# example: v-apply-mysql-index admin mercan_pos "CREATE INDEX idx_orders_customer_id ON orders (customer_id);"
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+# load config file
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+user=$1
+database=$2
+index_sql=$3
+explicit_type=$4
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '3' "$#" 'USER DATABASE_NAME INDEX_SQL'
+is_format_valid 'user'
+check_hestia_demo_mode
+
+# Reject internal system databases
+case "$(echo "$database" | tr '[:upper:]' '[:lower:]')" in
+	information_schema|performance_schema|mysql|sys|template0|template1)
+		echo "ERROR: Cannot create indexes on internal system catalog schema ($database)." >&2
+		exit 1
+		;;
+esac
+
+# Clean SQL string
+clean_sql=$(echo "$index_sql" | tr -d '\r\n' | sed -e 's/[[:space:]]\+/ /g' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
+# Strict SQL safety check: Must ONLY be a CREATE [UNIQUE] INDEX statement
+if ! echo "$clean_sql" | grep -iqE '^CREATE[[:space:]]+(UNIQUE[[:space:]]+)?INDEX[[:space:]]+([A-Z_]+[[:space:]]+)?([`"a-zA-Z0-9_]+)[[:space:]]+ON[[:space:]]+([`"a-zA-Z0-9_]+)[[:space:]]*\([`"a-zA-Z0-9_,[:space:]]+\)[[:space:]]*;?$'; then
+	echo "ERROR: Invalid or unsafe index SQL syntax. Only standard CREATE INDEX statements are permitted." >&2
+	exit 2
+fi
+
+# Reject dangerous keywords
+if echo "$clean_sql" | grep -iqE '\b(DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE|GRANT|REVOKE|EXEC|UNION|SLEEP|BENCHMARK)\b'; then
+	echo "ERROR: Prohibited SQL operations detected in statement." >&2
+	exit 3
+fi
+
+# Extract index name, table name and columns
+idx_name=$(echo "$clean_sql" | grep -ioE 'INDEX[[:space:]]+([A-Z_]+[[:space:]]+)?([`"a-zA-Z0-9_]+)' | awk '{print $NF}' | tr -d '`"')
+tbl_name=$(echo "$clean_sql" | grep -ioE 'ON[[:space:]]+[`"a-zA-Z0-9_]+' | awk '{print $2}' | tr -d '`"')
+cols_raw=$(echo "$clean_sql" | sed -e 's/.*(\(.*\)).*/\1/' | tr -d '`"')
+
+if [ -z "$idx_name" ] || [ -z "$tbl_name" ]; then
+	echo "ERROR: Unable to parse index name or target table name from statement." >&2
+	exit 4
+fi
+
+# -------------------------------------------------------------------------
+# DETECT DATABASE ENGINE & RUNTIME (PostgreSQL / MySQL / Docker)
+# -------------------------------------------------------------------------
+
+db_engine=""
+docker_container=""
+
+# 1. Check user db.conf if database is registered in panel
+if [ -f "$HESTIA/data/users/$user/db.conf" ]; then
+	stored_type=$(grep -F "DB='$database'" "$HESTIA/data/users/$user/db.conf" 2>/dev/null | grep -o "TYPE='[^']*'" | cut -d"'" -f2)
+	if [ "$stored_type" = "pgsql" ] || [ "$stored_type" = "postgresql" ]; then
+		db_engine="pgsql"
+	elif [ "$stored_type" = "mysql" ] || [ "$stored_type" = "mariadb" ]; then
+		db_engine="mysql"
+	fi
+fi
+
+# 2. If not determined, check Docker containers (PostgreSQL / MySQL containers)
+if [ -z "$db_engine" ] && command -v docker >/dev/null 2>&1; then
+	# Check for running PostgreSQL containers
+	for c_id in $(docker ps -q --filter "ancestor=postgres" --filter "name=postgres" --filter "name=pgsql" 2>/dev/null); do
+		if docker exec "$c_id" psql -U postgres -lqt 2>/dev/null | cut -d \| -f 1 | tr -d ' ' | grep -qx "$database"; then
+			db_engine="docker-pgsql"
+			docker_container="$c_id"
+			break
+		fi
+	done
+
+	# Check for running MySQL / MariaDB containers
+	if [ -z "$db_engine" ]; then
+		for c_id in $(docker ps -q --filter "ancestor=mysql" --filter "ancestor=mariadb" --filter "name=mysql" --filter "name=mariadb" 2>/dev/null); do
+			if docker exec "$c_id" mysql -e "SHOW DATABASES;" 2>/dev/null | grep -qx "$database"; then
+				db_engine="docker-mysql"
+				docker_container="$c_id"
+				break
+			fi
+		done
+	fi
+fi
+
+# 3. If explicit_type was provided or fallback to native
+if [ -n "$explicit_type" ] && [ -z "$db_engine" ]; then
+	db_engine="$explicit_type"
+elif [ -z "$db_engine" ]; then
+	# Check if native pgsql has this db
+	if command -v psql >/dev/null 2>&1 && sudo -u postgres psql -lqt 2>/dev/null | cut -d \| -f 1 | tr -d ' ' | grep -qx "$database"; then
+		db_engine="pgsql"
+	else
+		db_engine="mysql"
+	fi
+fi
+
+# -------------------------------------------------------------------------
+# EXECUTE ON POSTGRESQL (NATIVE OR DOCKER)
+# -------------------------------------------------------------------------
+if [ "$db_engine" = "pgsql" ] || [ "$db_engine" = "docker-pgsql" ] || [ "$db_engine" = "postgresql" ]; then
+	# Build safe Postgres CREATE INDEX CONCURRENTLY statement
+	pg_sql="CREATE INDEX CONCURRENTLY IF NOT EXISTS \"$idx_name\" ON \"$tbl_name\" ($cols_raw);"
+	
+	if [ "$db_engine" = "docker-pgsql" ] && [ -n "$docker_container" ]; then
+		# Execute inside docker container
+		exec_out=$(docker exec -i "$docker_container" psql -U postgres -d "$database" -c "$pg_sql" 2>&1)
+		exec_rc=$?
+	else
+		# Execute via native psql
+		if [ -f "$HESTIA/conf/pgsql.conf" ]; then
+			source "$HESTIA/conf/pgsql.conf"
+			export PGPASSWORD="$PASSWORD"
+			exec_out=$(psql -h "$HOST" -U "$USER" -d "$database" -c "$pg_sql" 2>&1)
+			exec_rc=$?
+			unset PGPASSWORD
+		else
+			exec_out=$(sudo -u postgres psql -d "$database" -c "$pg_sql" 2>&1)
+			exec_rc=$?
+		fi
+	fi
+
+	if [ $exec_rc -ne 0 ]; then
+		echo "ERROR: Failed to create index in PostgreSQL ($database): $exec_out" >&2
+		exit 7
+	fi
+
+	$BIN/v-log-action "system" "Info" "Database" "AI Index created successfully on PostgreSQL (Database: $database, Table: $tbl_name, Index: $idx_name)."
+	echo "OK: Index '$idx_name' created successfully on PostgreSQL table '$tbl_name' (Database: $database)."
+	exit 0
+fi
+
+# -------------------------------------------------------------------------
+# EXECUTE ON MYSQL / MARIADB (NATIVE OR DOCKER)
+# -------------------------------------------------------------------------
+
+if [ "$db_engine" = "docker-mysql" ] && [ -n "$docker_container" ]; then
+	# Check if index already exists in container
+	idx_exists=$(docker exec -i "$docker_container" mysql -N -e "SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA='$database' AND TABLE_NAME='$tbl_name' AND INDEX_NAME='$idx_name' LIMIT 1;" 2>/dev/null)
+	if [ "$idx_exists" = "1" ]; then
+		echo "OK: Index '$idx_name' already exists on table '$tbl_name' in Docker database '$database'."
+		exit 0
+	fi
+
+	exec_out=$(docker exec -i "$docker_container" mysql "$database" -e "$clean_sql" 2>&1)
+	exec_rc=$?
+else
+	# Prepare Native MySQL connection
+	mysql_cnf=""
+	MYSQL_CMD="mysql"
+	if [ -f /root/.my.cnf ]; then
+		MYSQL_CMD="mysql --defaults-file=/root/.my.cnf"
+	elif [ -f "$HESTIA/conf/mysql.conf" ]; then
+		source "$HESTIA/conf/mysql.conf"
+		if [ -n "$HOST" ] && [ -n "$USER" ]; then
+			mysql_cnf=$(mktemp -t nxv_idx_XXXXXX)
+			{
+				echo "[client]"
+				echo "host='$HOST'"
+				echo "user='$USER'"
+				echo "password='$PASSWORD'"
+			} > "$mysql_cnf"
+			chmod 600 "$mysql_cnf"
+			MYSQL_CMD="mysql --defaults-extra-file=$mysql_cnf"
+		fi
+	fi
+	trap 'rm -f "$mysql_cnf"' EXIT
+
+	# 1. Verify that database exists
+	db_exists=$($MYSQL_CMD -N -e "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$database' LIMIT 1;" 2>/dev/null)
+	if [ "$db_exists" != "1" ]; then
+		echo "ERROR: Target database '$database' does not exist on this MySQL server." >&2
+		exit 5
+	fi
+
+	# 2. Verify that table exists in database
+	tbl_exists=$($MYSQL_CMD -N -e "SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA='$database' AND TABLE_NAME='$tbl_name' LIMIT 1;" 2>/dev/null)
+	if [ "$tbl_exists" != "1" ]; then
+		echo "ERROR: Target table '$tbl_name' does not exist in database '$database'." >&2
+		exit 6
+	fi
+
+	# 3. Check if index already exists
+	idx_exists=$($MYSQL_CMD -N -e "SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA='$database' AND TABLE_NAME='$tbl_name' AND INDEX_NAME='$idx_name' LIMIT 1;" 2>/dev/null)
+	if [ "$idx_exists" = "1" ]; then
+		echo "OK: Index '$idx_name' already exists on table '$tbl_name' in database '$database'."
+		exit 0
+	fi
+
+	# 4. Execute CREATE INDEX safely
+	exec_out=$($MYSQL_CMD "$database" -e "$clean_sql" 2>&1)
+	exec_rc=$?
+fi
+
+if [ $exec_rc -ne 0 ]; then
+	echo "ERROR: Failed to create index in MySQL: $exec_out" >&2
+	exit 7
+fi
+
+# Log action
+$BIN/v-log-action "system" "Info" "Database" "AI Index created successfully (Database: $database, Table: $tbl_name, Index: $idx_name)."
+echo "OK: Index '$idx_name' created successfully on table '$tbl_name' (Database: $database)."
+exit 0

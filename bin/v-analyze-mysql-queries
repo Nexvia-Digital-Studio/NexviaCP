@@ -27,10 +27,11 @@ source_conf "$HESTIA/conf/hestia.conf"
 check_hestia_demo_mode
 
 #----------------------------------------------------------#
+#----------------------------------------------------------#
 #                       Action                             #
 #----------------------------------------------------------#
 
-python3 - "$log_file_arg" "$limit_arg" "$format" << 'PYEOF'
+python3 - "$log_file_arg" "$limit_arg" "$format" "$HOMEDIR" "$HESTIA" << 'PYEOF'
 import sys
 import os
 import re
@@ -41,6 +42,94 @@ import subprocess
 log_arg = sys.argv[1] if len(sys.argv) > 1 else "auto"
 limit = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 10
 output_format = sys.argv[3] if len(sys.argv) > 3 else "json"
+homedir = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] else "/home"
+hestia = sys.argv[5] if len(sys.argv) > 5 and sys.argv[5] else "/usr/local/hestia"
+
+def get_db_domain_mapping(homedir, hestia):
+    """Map MySQL database names to their owner user and web domain."""
+    db_map = {}
+    
+    # 1. Read all user db.conf files
+    for u_conf in glob.glob(os.path.join(hestia, "data", "users", "*", "db.conf")):
+        u = os.path.basename(os.path.dirname(u_conf))
+        try:
+            with open(u_conf, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    m = re.search(r"DB='([^']*)'", line)
+                    if m:
+                        db_name = m.group(1)
+                        db_map[db_name] = {"user": u, "domain": ""}
+        except Exception:
+            pass
+
+    # 2. Inspect .env and wp-config.php and appsettings.json to find exact domain mapping
+    for u_dir in glob.glob(os.path.join(homedir, "*")):
+        u = os.path.basename(u_dir)
+        for w_dir in glob.glob(os.path.join(u_dir, "web", "*")):
+            dname = os.path.basename(w_dir)
+            if not os.path.isdir(w_dir):
+                continue
+            
+            # Check .env (Laravel / Node / Python)
+            for env_cand in (os.path.join(w_dir, "public_html", ".env"), os.path.join(w_dir, ".env")):
+                if os.path.isfile(env_cand):
+                    try:
+                        with open(env_cand, "r", encoding="utf-8", errors="ignore") as f:
+                            cnt = f.read()
+                            m = re.search(r'DB_DATABASE=["\']?([^"\'\s\r\n]+)["\']?', cnt)
+                            if m:
+                                matched_db = m.group(1).strip()
+                                if matched_db:
+                                    db_map[matched_db] = {"user": u, "domain": dname}
+                    except Exception:
+                        pass
+            
+            # Check wp-config.php (WordPress)
+            wp_cfg = os.path.join(w_dir, "public_html", "wp-config.php")
+            if os.path.isfile(wp_cfg):
+                try:
+                    with open(wp_cfg, "r", encoding="utf-8", errors="ignore") as f:
+                        cnt = f.read()
+                        m = re.search(r"define\s*\(\s*['\"]DB_NAME['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)", cnt)
+                        if m:
+                            matched_db = m.group(1).strip()
+                            if matched_db:
+                                db_map[matched_db] = {"user": u, "domain": dname}
+                except Exception:
+                    pass
+
+            # Check appsettings.json (.NET)
+            for app_cand in (os.path.join(w_dir, "public_html", "appsettings.json"), os.path.join(w_dir, "appsettings.json")):
+                if os.path.isfile(app_cand):
+                    try:
+                        with open(app_cand, "r", encoding="utf-8", errors="ignore") as f:
+                            cnt = f.read()
+                            m = re.search(r'Database=([^;"]+)', cnt, re.IGNORECASE)
+                            if m:
+                                matched_db = m.group(1).strip()
+                                if matched_db:
+                                    db_map[matched_db] = {"user": u, "domain": dname}
+                    except Exception:
+                        pass
+                        
+    # 3. Associate fallback domain for any DB with empty domain
+    for db_name, info in db_map.items():
+        if not info["domain"]:
+            u = info["user"]
+            u_domains = [os.path.basename(p) for p in glob.glob(os.path.join(homedir, u, "web", "*")) if os.path.isdir(p)]
+            if len(u_domains) == 1:
+                info["domain"] = u_domains[0]
+            elif u_domains:
+                for d in u_domains:
+                    if any(part and part.lower() in d.lower() for part in db_name.split('_')):
+                        info["domain"] = d
+                        break
+                if not info["domain"]:
+                    info["domain"] = u_domains[0]
+                    
+    return db_map
+
+db_domain_map = get_db_domain_mapping(homedir, hestia)
 
 # Candidate log locations
 candidate_logs = [
@@ -194,6 +283,29 @@ def analyze_query_for_indexes(sample_sql, avg_rows_examined, avg_rows_sent, avg_
     # Calculate Scan Efficiency Ratio
     scan_ratio = avg_rows_examined / max(avg_rows_sent, 1.0)
     
+    is_sys_db = (db_name.lower() in ("information_schema", "performance_schema", "mysql", "sys") 
+                 or "information_schema" in table_name.lower() 
+                 or "performance_schema" in table_name.lower())
+
+    if is_sys_db:
+        return {
+            "table": table_name,
+            "statement_type": stmt_type,
+            "index_name": "",
+            "index_columns": [],
+            "suggested_sql": "",
+            "ai_explanation": "MySQL/MariaDB dahili sistem kataloğu sorgusudur. Dahili tablolar sanal bellek motoru üzerinde çalıştığı için manuel indeks gerekmez/oluşturulamaz.",
+            "scan_ratio": round(scan_ratio, 2),
+            "is_system_db": True
+        }
+
+    # Limit composite index to max 3-4 key columns for optimal B-Tree performance
+    target_index_cols = indexed_columns[:3] if indexed_columns else ["id"]
+    idx_name = f"idx_{table_name}_{'_'.join(target_index_cols)}"[:64]
+    cols_joined = ", ".join([f"`{c}`" for c in target_index_cols])
+    
+    suggested_sql = f"CREATE INDEX `{idx_name}` ON `{table_name}` ({cols_joined});"
+    
     # Formulate AI Insight
     reasons = []
     if scan_ratio > 20:
@@ -217,7 +329,8 @@ def analyze_query_for_indexes(sample_sql, avg_rows_examined, avg_rows_sent, avg_
         "index_columns": target_index_cols,
         "suggested_sql": suggested_sql,
         "ai_explanation": ai_explanation,
-        "scan_ratio": round(scan_ratio, 2)
+        "scan_ratio": round(scan_ratio, 2),
+        "is_system_db": False
     }
 
 # Parse slow query log
@@ -315,8 +428,33 @@ if log_exists and log_size > 0:
     except Exception:
         pass
 
-# Rank aggregated queries by total execution time
-ranked_queries = sorted(parsed_queries.values(), key=lambda x: x["total_time"], reverse=True)[:limit]
+# Rank aggregated queries by total execution time, filtering out system schemas and trivial queries
+valid_queries = []
+for q in parsed_queries.values():
+    db_name = q["db"]
+    # Check if DB name is embedded in SQL e.g. FROM `dbname`.`tablename`
+    db_sql_m = re.search(r'\bFROM\s+[`]?([a-zA-Z0-9_]+)[`]?\.[`]?([a-zA-Z0-9_]+)[`]?', q["sample_query"], re.IGNORECASE)
+    if db_sql_m:
+        db_from_sql = db_sql_m.group(1)
+        if db_name in ("default", "", "mysql") or db_from_sql.lower() in ("information_schema", "performance_schema", "mysql", "sys"):
+            db_name = db_from_sql
+
+    # Exclude internal MySQL system schemas
+    if db_name.lower() in ("information_schema", "performance_schema", "mysql", "sys") or "information_schema" in q["sample_query"].lower():
+        continue
+    
+    count = max(q["count"], 1)
+    avg_time = q["total_time"] / count
+    avg_examined = q["total_rows_examined"] / count
+    
+    # Filter out trivial fast queries (<0.01s with small row examination)
+    if avg_time < 0.01 and avg_examined < 500:
+        continue
+        
+    q["resolved_db"] = db_name
+    valid_queries.append(q)
+
+ranked_queries = sorted(valid_queries, key=lambda x: x["total_time"], reverse=True)[:limit]
 
 query_results = []
 for q in ranked_queries:
@@ -325,11 +463,19 @@ for q in ranked_queries:
     avg_lock = q["total_lock_time"] / count
     avg_sent = q["total_rows_sent"] / count
     avg_examined = q["total_rows_examined"] / count
+    db_name = q.get("resolved_db", q["db"])
+
+    recommendation = analyze_query_for_indexes(q["sample_query"], avg_examined, avg_sent, avg_time, db_name)
     
-    recommendation = analyze_query_for_indexes(q["sample_query"], avg_examined, avg_sent, avg_time, q["db"])
-    
+    db_info = db_domain_map.get(db_name, {})
+    domain_name = db_info.get("domain", "")
+    user_name = db_info.get("user", "")
+
     query_results.append({
-        "database": q["db"],
+        "database": db_name,
+        "domain": domain_name,
+        "user": user_name,
+        "is_system_db": False,
         "count": count,
         "total_time_sec": round(q["total_time"], 4),
         "avg_time_sec": round(avg_time, 4),

@@ -388,10 +388,26 @@
 					<div style="border: 1px solid var(--border-color, #334155); border-radius: 8px; padding: 15px; background: var(--color-background-accent, rgba(0,0,0,0.02));">
 						<div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
 							<div>
-								<span style="font-weight:bold; font-size:14px; color:var(--icon-color-blue, #38bdf8);">
-									#<?= ($idx + 1) ?> [<?= tohtml($q["database"] ?? "mysql") ?>] <?= tohtml($q["table"] ?? "") ?>
-								</span>
-								<span style="font-size:11px; margin-left:8px; color:var(--color-text-muted);">
+								<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+									<span style="font-weight:bold; font-size:14px; color:var(--icon-color-blue, #38bdf8);">
+										#<?= ($idx + 1) ?> 🗄️ <?= tohtml($q["database"] ?? "mysql") ?> <span style="color:var(--color-text-muted);">.</span> <?= tohtml($q["table"] ?? "") ?>
+									</span>
+									<?php if (!empty($q["domain"]) && $q["domain"] !== "MySQL Dahili Sistem"): ?>
+										<a href="http://<?= tohtml($q["domain"]) ?>" target="_blank" rel="noopener" class="badge badge-purple" style="font-size:11px; padding:2px 8px; text-decoration:none;">
+											<i class="fas fa-globe u-mr5"></i> <?= tohtml($q["domain"]) ?>
+										</a>
+									<?php elseif (!empty($q["is_system_db"])): ?>
+										<span class="badge badge-secondary" style="font-size:11px; padding:2px 8px; color:var(--icon-color-orange, #f97316);">
+											<i class="fas fa-microchip u-mr5"></i> <?= tohtml($is_tr ? "MySQL Dahili Şema" : "System Schema") ?>
+										</span>
+									<?php endif; ?>
+									<?php if (!empty($q["user"]) && $q["user"] !== "system"): ?>
+										<small style="color:var(--color-text-muted); font-size:11px;">
+											<i class="fas fa-user u-mr5"></i><?= tohtml($q["user"]) ?>
+										</small>
+									<?php endif; ?>
+								</div>
+								<span style="font-size:11px; margin-top:3px; display:inline-block; color:var(--color-text-muted);">
 									<?= (int)$q["count"] ?>x <?= tohtml(__tr("executions", "çalıştırıldı")) ?>
 								</span>
 							</div>
@@ -422,13 +438,25 @@
 
 						<!-- Suggested SQL Index Fix -->
 						<?php if (!empty($suggested_sql)) { ?>
-							<div style="display:flex; align-items:center; justify-content:space-between; background: rgba(34, 197, 94, 0.08); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 6px; padding: 8px 12px; gap:10px;">
-								<div style="font-family: monospace; font-size: 12px; font-weight: bold; color: var(--icon-color-green, #22c55e); overflow-x:auto;">
+							<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; background: rgba(34, 197, 94, 0.08); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 6px; padding: 10px 14px; gap:12px;">
+								<div style="font-family: monospace; font-size: 12px; font-weight: bold; color: var(--icon-color-green, #22c55e); overflow-x:auto; flex:1; min-width:280px;">
 									<?= tohtml($suggested_sql) ?>
 								</div>
-								<button type="button" class="button button-secondary button-small" onclick="navigator.clipboard.writeText('<?= addslashes($suggested_sql) ?>'); alert('<?= tohtml(__tr("SQL index command copied to clipboard!", "SQL indeks komutu panoya kopyalandı!")) ?>');" style="white-space:nowrap; padding: 4px 10px; font-size:11px;">
-									<i class="fas fa-copy"></i> <?= tohtml(__tr("Copy SQL", "Kopyala")) ?>
-								</button>
+								<div style="display:flex; gap:8px; align-items:center;">
+									<button type="button" class="button button-secondary button-small" onclick="navigator.clipboard.writeText('<?= addslashes($suggested_sql) ?>'); alert('<?= tohtml(__tr("SQL index command copied to clipboard!", "SQL indeks komutu panoya kopyalandı!")) ?>');" style="white-space:nowrap; padding: 5px 10px; font-size:11.5px;">
+										<i class="fas fa-copy"></i> <?= tohtml(__tr("Copy SQL", "Kopyala")) ?>
+									</button>
+									<form method="post" action="/list/cache/" style="display:inline;" onsubmit="return confirm('<?= tohtml(__tr("Are you sure you want to create and apply this index to database [", "Bu indeksi [")) . addslashes(tohtml($q["database"] ?? "")) . tohtml(__tr("]? Table will be indexed safely without downtime.", "] veritabanına uygulamak istediğinize emin misiniz?")) ?>');">
+										<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
+										<input type="hidden" name="apply_sql_index" value="1">
+										<input type="hidden" name="target_db" value="<?= tohtml($q["database"] ?? "") ?>">
+										<input type="hidden" name="target_user" value="<?= tohtml($q["user"] ?? $user) ?>">
+										<input type="hidden" name="index_sql" value="<?= tohtml($suggested_sql) ?>">
+										<button type="submit" class="button button-primary button-small" style="background:#16a34a; border-color:#16a34a; white-space:nowrap; padding: 5px 12px; font-size:11.5px; font-weight:bold;">
+											<i class="fas fa-bolt"></i> <?= tohtml(__tr("Apply Index Now", "İndeksi Uygula (Çalıştır)")) ?>
+										</button>
+									</form>
+								</div>
 							</div>
 						<?php } ?>
 

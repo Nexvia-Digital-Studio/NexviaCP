@@ -61,7 +61,7 @@ if [ "$status" = "on" ] || [ "$status" = "yes" ] || [ "$status" = "1" ]; then
 		echo "ERROR: Invalid LONG_QUERY_TIME '$long_time' (expected a number such as 1 or 0.5)."
 		exit "${E_INVALID:-2}"
 	fi
-	if ! $MYSQL_CMD -e "SET GLOBAL slow_query_log = 'ON'; SET GLOBAL slow_query_log_file = '$SLOW_LOG_FILE'; SET GLOBAL long_query_time = $long_time; SET GLOBAL log_queries_not_using_indexes = 'ON';" 2>/dev/null; then
+	if ! $MYSQL_CMD -e "SET GLOBAL slow_query_log = 'ON'; SET GLOBAL slow_query_log_file = '$SLOW_LOG_FILE'; SET GLOBAL long_query_time = $long_time; SET GLOBAL log_queries_not_using_indexes = 'OFF'; SET GLOBAL min_examined_row_limit = 50;" 2>/dev/null; then
 		echo "[-] FAILED: MariaDB / MySQL rejected the slow query log settings (check connection and privileges)."
 		exit 1
 	fi

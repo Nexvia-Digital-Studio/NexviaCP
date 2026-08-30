@@ -309,7 +309,7 @@ slow_query_summary = {
 analyzer_script = os.path.join(bin_dir, "v-analyze-mysql-queries")
 if os.path.isfile(analyzer_script) and os.access(analyzer_script, os.X_OK):
     try:
-        a_res = subprocess.run([analyzer_script, "auto", "5", "json"], capture_output=True, text=True, timeout=5)
+        a_res = subprocess.run([analyzer_script, "auto", "5", "json", homedir, hestia], capture_output=True, text=True, timeout=5)
         if a_res.returncode == 0 and a_res.stdout.strip().startswith("{"):
             slow_query_summary = json.loads(a_res.stdout)
     except Exception:
