@@ -1,16 +1,17 @@
 #!/bin/bash
-# info: purge Redis database keys and flush Nginx fastcgi/proxy microcache for a domain
+# info: purge Redis database keys, flush Nginx fastcgi/proxy microcache and Cloudflare CDN for a domain
 # options: USER DOMAIN [CACHE_TYPE]
 #
 # example: v-purge-web-domain-cache admin mysite.com all
 #
 # CACHE_TYPE options:
-#   all     : Flush Redis DB + Nginx FastCGI microcache + Proxy cache + OPcache (default)
-#   redis   : Flush only domain's dedicated Redis database keys
-#   nginx   : Flush Nginx FastCGI and proxy microcache
-#   fastcgi : Flush Nginx FastCGI microcache only
-#   proxy   : Flush Nginx Proxy cache only
-#   opcache : Reload PHP-FPM / reset OPcache
+#   all       : Flush Redis DB + Nginx FastCGI microcache + Proxy cache + OPcache + Cloudflare CDN (default)
+#   redis     : Flush only domain's dedicated Redis database keys
+#   nginx     : Flush Nginx FastCGI and proxy microcache
+#   fastcgi   : Flush Nginx FastCGI microcache only
+#   proxy     : Flush Nginx Proxy cache only
+#   opcache   : Reload PHP-FPM / reset OPcache
+#   cloudflare: Purge the Cloudflare CDN cache (purge_everything) for the domain's zone
 
 #----------------------------------------------------------#
 #                Variables & Functions                     #
@@ -80,7 +81,7 @@ redis_exec() {
 # 1. PURGE REDIS CACHE
 if [[ "$cache_type" == "all" || "$cache_type" == "redis" ]]; then
 	redis_target_db="$REDIS_DB"
-	
+
 	# Fallback: check .env if REDIS_DB not in web.conf
 	if [ -z "$redis_target_db" ] && [ -f "$HOMEDIR/$user/web/$domain/public_html/.env" ]; then
 		redis_target_db=$(grep -E "^REDIS_DB=" "$HOMEDIR/$user/web/$domain/public_html/.env" 2>/dev/null | cut -d '=' -f2 | tr -d '"' | tr -d "'" | tr -d ' ')
@@ -152,6 +153,63 @@ if [[ "$cache_type" == "all" || "$cache_type" == "opcache" ]]; then
 		fi
 	done
 	purged_items+=("PHP OPcache reloaded")
+fi
+
+# 5. PURGE CLOUDFLARE CDN
+# Must run AFTER the origin caches above are clean: purging the edge first
+# would let Cloudflare re-fetch the stale copy from the origin.
+if [[ "$cache_type" == "all" || "$cache_type" == "cloudflare" ]]; then
+	if [ -n "$CF_API_TOKEN" ] && command -v curl >/dev/null 2>&1; then
+		# Resolve the zone: subdomains live in their apex zone, so walk up
+		# until a matching zone is found (api.example.com -> example.com).
+		zone_id=""
+		zone_name=""
+		probe="$domain"
+		while [ -n "$probe" ]; do
+			zid=$(curl -sS -m 15 -H "Authorization: Bearer $CF_API_TOKEN" \
+				"https://api.cloudflare.com/client/v4/zones?name=$probe" 2>/dev/null \
+				| python3 -c 'import json,sys
+try:
+    d = json.load(sys.stdin)
+    r = d.get("result") or []
+    print(r[0]["id"] if r else "")
+except Exception:
+    print("")')
+			if [ -n "$zid" ]; then
+				zone_id="$zid"
+				zone_name="$probe"
+				break
+			fi
+			case "$probe" in
+				*.*) probe="${probe#*.}" ;;
+				*) probe="" ;;
+			esac
+		done
+
+		if [ -n "$zone_id" ]; then
+			cf_ok=$(curl -sS -m 20 -X POST \
+				-H "Authorization: Bearer $CF_API_TOKEN" \
+				-H "Content-Type: application/json" \
+				--data '{"purge_everything":true}' \
+				"https://api.cloudflare.com/client/v4/zones/$zone_id/purge_cache" 2>/dev/null \
+				| python3 -c 'import json,sys
+try:
+    d = json.load(sys.stdin)
+    print("1" if d.get("success") else "0:" + json.dumps(d.get("errors", [])))
+except Exception:
+    print("0:invalid response")')
+			if [ "x$cf_ok" = 'x1' ]; then
+				purged_items+=("Cloudflare CDN purged (zone: $zone_name)")
+			else
+				echo "[!] Cloudflare purge FAILED for zone $zone_name: ${cf_ok#0:}"
+				purged_items+=("Cloudflare purge FAILED — check API token permissions (Zone.Cache Purge)")
+			fi
+		else
+			purged_items+=("Cloudflare (no zone for $domain — skipped)")
+		fi
+	else
+		purged_items+=("Cloudflare (no CF_API_TOKEN — skipped)")
+	fi
 fi
 
 # Logging

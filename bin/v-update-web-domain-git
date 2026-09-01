@@ -32,6 +32,10 @@ fi
 echo "[*] Updating git repository in $docroot..."
 cd "$docroot" || exit 1
 
+# Remember the deployed commit: caches are purged below only when the pull
+# actually moves HEAD, so "Already up to date." webhooks stay free.
+old_head=$(su - "$user" -s /bin/bash -c "cd '$docroot' && git rev-parse HEAD" 2>/dev/null)
+
 # Pull latest commits as user — a failed pull must abort the deploy instead
 # of reporting success with a stale tree.
 su - "$user" -s /bin/bash -c "cd '$docroot' && git pull" 2>&1
@@ -81,6 +85,16 @@ unit_name="hestia-app-${user}-${domain}"
 if systemctl is-active --quiet "$unit_name" 2>/dev/null; then
 	echo "[*] Restarting application service: $unit_name..."
 	systemctl restart "$unit_name" 2>/dev/null || true
+fi
+
+# Purge CDN/application caches when the deploy actually changed the tree, so
+# visitors (and plain F5 refreshes) always see the new commit immediately.
+new_head=$(su - "$user" -s /bin/bash -c "cd '$docroot' && git rev-parse HEAD" 2>/dev/null)
+if [ -n "$old_head" ] && [ "$old_head" != "$new_head" ]; then
+	echo "[*] New commit deployed ($old_head -> $new_head) — purging caches..."
+	$BIN/v-purge-web-domain-cache "$user" "$domain" || true
+else
+	echo "[*] No new commits (already up to date) — cache purge skipped."
 fi
 
 echo "[+] SUCCESS: Domain $domain updated from GitHub."
