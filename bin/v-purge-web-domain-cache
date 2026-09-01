@@ -118,7 +118,9 @@ if [[ "$cache_type" == "all" || "$cache_type" == "nginx" || "$cache_type" == "fa
 			find "$dir" -mindepth 1 -delete 2>/dev/null || rm -rf "$dir"/* 2>/dev/null
 			mkdir -p "$dir"
 			chown www-data:root "$dir" 2>/dev/null || chown nginx:root "$dir" 2>/dev/null || true
-			chmod 640 "$dir" 2>/dev/null || true
+			# Directories need the execute bit (750) — 640 made the cache dir
+			# untraversable for nginx and turned every request into a 500.
+			chmod 750 "$dir" 2>/dev/null || true
 			purged_items+=("FastCGI microcache cleared ($dir)")
 		fi
 	done
