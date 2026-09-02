@@ -1,0 +1,95 @@
+#!/bin/bash
+# info: list web domains of all users
+# options: [FORMAT]
+#
+# example: v-list-web-domains-all json
+#
+# Admin overview helper: merges every user's web domains
+# into a single list; each entry carries the _OWNER field.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+format=${1-json}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+# JSON list function
+json_list() {
+	objects=0
+	for u in $(ls $HESTIA/data/users/ 2>/dev/null); do
+		[ -f "$HESTIA/data/users/$u/web.conf" ] || continue
+		objects=$((objects + $(grep -c "^DOMAIN=" "$HESTIA/data/users/$u/web.conf")))
+	done
+	echo "{"
+	i=1
+	for u in $(ls $HESTIA/data/users/ 2>/dev/null); do
+		[ -f "$HESTIA/data/users/$u/web.conf" ] || continue
+		while read str; do
+			parse_object_kv_list "$str"
+			echo "	\"$DOMAIN\": {"
+			echo "		\"IP\": \"$IP\","
+			echo "		\"TPL\": \"$TPL\","
+			echo "		\"ALIAS\": \"$ALIAS\","
+			echo "		\"SSL\": \"$SSL\","
+			echo "		\"LETSENCRYPT\": \"$LETSENCRYPT\","
+			echo "		\"BACKEND\": \"$BACKEND\","
+			echo "		\"PROXY\": \"$PROXY\","
+			echo "		\"SUSPENDED\": \"$SUSPENDED\","
+			echo "		\"U_DISK\": \"$U_DISK\","
+			echo "		\"U_BANDWIDTH\": \"$U_BANDWIDTH\","
+			echo "		\"_OWNER\": \"$u\","
+			echo "		\"TIME\": \"$TIME\","
+			echo "		\"DATE\": \"$DATE\""
+			if [ "$i" -lt "$objects" ]; then
+				echo "	},"
+			else
+				echo "	}"
+			fi
+			i=$((i + 1))
+		done < "$HESTIA/data/users/$u/web.conf"
+	done
+	echo "}"
+}
+
+# Shell list function
+shell_list() {
+	echo "DOMAIN   OWNER   IP   SSL   BACKEND   SUSPENDED"
+	for u in $(ls $HESTIA/data/users/ 2>/dev/null); do
+		[ -f "$HESTIA/data/users/$u/web.conf" ] || continue
+		while read str; do
+			parse_object_kv_list "$str"
+			echo "$DOMAIN   $u   $IP   $SSL   $BACKEND   $SUSPENDED"
+		done < "$HESTIA/data/users/$u/web.conf"
+	done
+}
+
+# Plain list function
+plain_list() {
+	for u in $(ls $HESTIA/data/users/ 2>/dev/null); do
+		[ -f "$HESTIA/data/users/$u/web.conf" ] || continue
+		while read str; do
+			parse_object_kv_list "$str"
+			echo -e "$DOMAIN\t$u\t$IP\t$SSL\t$BACKEND\t$SUSPENDED"
+		done < "$HESTIA/data/users/$u/web.conf"
+	done
+}
+
+#----------------------------------------------------------#
+#                    Action                                 #
+#----------------------------------------------------------#
+
+case $format in
+	json) json_list ;;
+	plain) plain_list ;;
+	shell) shell_list ;;
+	*) check_result "$E_INVALID" "invalid format $format" ;;
+esac

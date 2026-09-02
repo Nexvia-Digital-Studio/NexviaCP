@@ -25,6 +25,14 @@ if (!empty($data["config"]["LANGUAGE"])) {
 	$_SESSION["language"] = "en";
 }
 
+// Use white-label sender identity for CLI notifications too
+if (!empty($data["config"]["FROM_EMAIL"])) {
+	$_SESSION["FROM_EMAIL"] = $data["config"]["FROM_EMAIL"];
+}
+if (!empty($data["config"]["FROM_NAME"])) {
+	$_SESSION["FROM_NAME"] = $data["config"]["FROM_NAME"];
+}
+
 //define vars
 //make hostname detection a bit more feature proof
 $hostname = get_hostname();
