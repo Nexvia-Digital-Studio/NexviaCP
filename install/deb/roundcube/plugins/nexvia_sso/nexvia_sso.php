@@ -20,6 +20,8 @@ class nexvia_sso extends rcube_plugin
 		$this->add_hook('startup', [$this, 'startup']);
 		$this->add_hook('authenticate', [$this, 'authenticate']);
 		$this->add_hook('login_after', [$this, 'after_login']);
+		$this->add_hook('imap_connect', [$this, 'imap_connect']);
+		$this->add_hook('smtp_connect', [$this, 'smtp_connect']);
 	}
 
 	public function startup($args)
@@ -74,13 +76,32 @@ class nexvia_sso extends rcube_plugin
 
 	public function after_login($args)
 	{
-		// display the real account name, not the master-user login string
+		// Display (and identity) use the real account name, while IMAP/SMTP
+		// keep authenticating through the master user — see imap_connect.
 		$u = isset($_SESSION['username']) ? $_SESSION['username'] : '';
 		$p = strpos($u, '*nexviamaster');
 		if ($p !== false) {
 			$_SESSION['username'] = substr($u, 0, $p);
+			$_SESSION['password'] = rcube::get_instance()->encrypt($_SESSION['password']);
+			$_SESSION['nexvia_sso'] = true;
 		}
 
+		return $args;
+	}
+
+	public function imap_connect($args)
+	{
+		if (!empty($_SESSION['nexvia_sso']) && strpos($args['user'], '*nexviamaster') === false) {
+			$args['user'] .= '*nexviamaster';
+		}
+		return $args;
+	}
+
+	public function smtp_connect($args)
+	{
+		if (!empty($_SESSION['nexvia_sso']) && isset($args['smtp_user']) && strpos($args['smtp_user'], '*nexviamaster') === false) {
+			$args['smtp_user'] .= '*nexviamaster';
+		}
 		return $args;
 	}
 
