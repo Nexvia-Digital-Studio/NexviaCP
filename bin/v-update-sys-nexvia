@@ -122,6 +122,26 @@ if [ -d "/etc/dovecot/conf.d" ]; then
 	systemctl reload dovecot 2>/dev/null || true
 fi
 
+# Ensure webmail SSO (roundcube present) stays installed/updated
+if [ -d /var/lib/roundcube ] && [ -x "$HESTIA/bin/v-add-sys-webmail-sso" ]; then
+	"$HESTIA/bin/v-add-sys-webmail-sso" >/dev/null 2>&1 || true
+	echo "[+] Webmail SSO ensured."
+fi
+
+# Ensure sudoers snippet (no sudo perm-error mails) with visudo validation
+if [ -f "$HESTIA/install/deb/sudoers.d/nexvia-no-sudo-mail" ]; then
+	if ! cmp -s "$HESTIA/install/deb/sudoers.d/nexvia-no-sudo-mail" /etc/sudoers.d/nexvia-no-sudo-mail; then
+		cp "$HESTIA/install/deb/sudoers.d/nexvia-no-sudo-mail" /etc/sudoers.d/nexvia-no-sudo-mail
+		chmod 440 /etc/sudoers.d/nexvia-no-sudo-mail
+		if ! visudo -c >/dev/null 2>&1; then
+			rm -f /etc/sudoers.d/nexvia-no-sudo-mail
+			echo "[!] sudoers snippet rejected by visudo, skipped."
+		else
+			echo "[+] sudoers no-mail snippet ensured."
+		fi
+	fi
+fi
+
 # Reload panel services gracefully in background so HTTP response is returned cleanly
 echo "[*] Scheduling graceful service reload..."
 (sleep 1 && (pkill -HUP -f "hestia-nginx: master process" 2>/dev/null; systemctl reload hestia 2>/dev/null || systemctl restart hestia 2>/dev/null)) >/dev/null 2>&1 &

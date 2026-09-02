@@ -220,7 +220,7 @@
 									<li class="units-table-row-action" data-key-action="href">
 										<a
 											class="units-table-row-action-link"
-											href="https://<?= tohtml($webmail) ?>.<?= tohtml($key) ?>/"
+											href="/webmail-sso/?domain=<?= tohtml($key) ?>"
 											target="_blank"
 											title="<?= tohtml( _("Open Webmail")) ?>"
 										>
@@ -246,7 +246,7 @@
 											<li class="units-table-row-action" data-key-action="href">
 												<a
 													class="units-table-row-action-link"
-													href="https://<?= tohtml($webmail) ?>.<?= tohtml($key) ?>/"
+													href="/webmail-sso/?domain=<?= tohtml($key) ?>"
 													target="_blank"
 													title="<?= tohtml( _("Open Webmail")) ?>"
 												>

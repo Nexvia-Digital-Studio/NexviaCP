@@ -1,0 +1,107 @@
+#!/bin/bash
+# info: install passwordless webmail SSO (roundcube + dovecot master user)
+# options: NONE
+#
+# Idempotent: generates missing secrets only once, installs the roundcube
+# plugin, activates it and wires the dovecot master passdb.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+[ -d /var/lib/roundcube ] || check_result "$E_NOTEXIST" "roundcube is not installed"
+
+changed="no"
+
+# 1) HMAC token key
+if [ ! -s /etc/roundcube/nexvia-sso-hmac.key ]; then
+	openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | head -c 43 > /etc/roundcube/nexvia-sso-hmac.key
+	chmod 640 /etc/roundcube/nexvia-sso-hmac.key
+	chown root:hestiamail /etc/roundcube/nexvia-sso-hmac.key
+	changed="yes"
+fi
+
+# 2) Dovecot master user + plain secret for roundcube IMAP auth
+new_master="no"
+if [ ! -s /etc/roundcube/nexvia-sso.secret ]; then
+	MPASS=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | head -c 48)
+	echo "$MPASS" > /etc/roundcube/nexvia-sso.secret
+	new_master="yes"
+fi
+chmod 640 /etc/roundcube/nexvia-sso.secret
+chown root:hestiamail /etc/roundcube/nexvia-sso.secret
+
+if [ "$new_master" = "yes" ]; then
+	MPASS=$(cat /etc/roundcube/nexvia-sso.secret)
+	HASH=$(doveadm pw -s BLF-CRYPT -p "$MPASS")
+	echo "nexviamaster:$HASH" > /etc/dovecot/nexvia-master-users
+	chown dovecot:dovecot /etc/dovecot/nexvia-master-users
+	chmod 600 /etc/dovecot/nexvia-master-users
+	changed="yes"
+fi
+
+# 3) Dovecot master passdb config
+if [ ! -f /etc/dovecot/conf.d/90-nexvia-sso.conf ]; then
+	if [ -f "$HESTIA/install/deb/dovecot/conf.d/90-nexvia-sso.conf" ]; then
+		cp "$HESTIA/install/deb/dovecot/conf.d/90-nexvia-sso.conf" /etc/dovecot/conf.d/
+	else
+		cat > /etc/dovecot/conf.d/90-nexvia-sso.conf << 'DOVECOT'
+# Nexvia webmail SSO: master user (token carries NO password)
+auth_master_user_separator = *
+passdb nexvia_sso_master {
+  driver = passwd-file
+  passwd_file_path = /etc/dovecot/nexvia-master-users
+  master = yes
+}
+DOVECOT
+	fi
+	changed="yes"
+fi
+
+# 4) Roundcube plugin
+mkdir -p /var/lib/roundcube/plugins/nexvia_sso
+if [ -f "$HESTIA/install/deb/roundcube/plugins/nexvia_sso/nexvia_sso.php" ]; then
+	cp "$HESTIA/install/deb/roundcube/plugins/nexvia_sso/nexvia_sso.php" /var/lib/roundcube/plugins/nexvia_sso/
+elif [ ! -f /var/lib/roundcube/plugins/nexvia_sso/nexvia_sso.php ]; then
+	check_result "$E_NOTEXIST" "roundcube plugin source missing"
+fi
+chown root:root /var/lib/roundcube/plugins/nexvia_sso/nexvia_sso.php
+chmod 644 /var/lib/roundcube/plugins/nexvia_sso/nexvia_sso.php
+
+# 5) Activate plugin in roundcube config (idempotent)
+python3 - << 'PYEOF'
+import re
+path = '/etc/roundcube/config.inc.php'
+src = open(path).read()
+if 'nexvia_sso' not in src:
+    m = re.search(r'(\$config\["plugins"\]\s*=\s*)\[([^\]]*)\]', src)
+    if m:
+        cur = m.group(2).strip().rstrip(',')
+        add = '"nexvia_sso"' if not cur else cur + ', "nexvia_sso"'
+        src = src[:m.start()] + m.group(1) + '[' + add + ']' + src[m.end():]
+        open(path, 'w').write(src)
+PYEOF
+
+# 6) Apply service state
+if [ "$changed" = "yes" ]; then
+	doveconf -n > /dev/null || check_result "$E_INVALID" "dovecot config invalid"
+	systemctl reload dovecot
+fi
+
+# Logging
+log_history "installed webmail SSO (passwordless panel login)"
+log_event "$OK" "$ARGUMENTS"
+
+exit

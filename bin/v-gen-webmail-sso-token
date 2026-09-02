@@ -1,0 +1,78 @@
+#!/bin/bash
+# info: generate short-lived webmail SSO token (HMAC signed, no password inside)
+# options: USER DOMAIN [ACCOUNT]
+#
+# example: v-gen-webmail-sso-token alice example.com bob
+#
+# The token payload is "<account>@<domain>;<expiry>" signed with HMAC-SHA256.
+# It never contains account passwords.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+user=$1
+domain=$2
+account=${3:-}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Validation                            #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER DOMAIN [ACCOUNT]'
+USER_DATA=$HESTIA/data/users/$user
+is_user_format_valid "$user"
+is_domain_format_valid "$domain"
+
+# Domain must be a mail domain of this user
+if ! grep -q "^DOMAIN='$domain'" "$USER_DATA/mail.conf" 2>/dev/null; then
+	# admin overview: resolve the real owner of the domain
+	found=""
+	if [ "$user" = "admin" ]; then
+		for u in $(ls $HESTIA/data/users/ 2>/dev/null); do
+			if [ -f "$HESTIA/data/users/$u/mail.conf" ] && grep -q "^DOMAIN='$domain'" "$HESTIA/data/users/$u/mail.conf"; then
+				found=$u
+				break
+			fi
+		done
+	fi
+	if [ -n "$found" ]; then
+		user=$found
+		USER_DATA=$HESTIA/data/users/$user
+	else
+		check_result "$E_NOTEXIST" "mail domain $domain does not exist"
+	fi
+fi
+
+# Resolve account: explicit or first of the domain
+acc_file="$HOMEDIR/$user/conf/mail/$domain/accounts"
+if [ -z "$account" ]; then
+	account=$(head -n1 "$acc_file" 2>/dev/null | cut -d: -f1)
+fi
+if [ -z "$account" ] || ! grep -q "^$account:" "$acc_file" 2>/dev/null; then
+	check_result "$E_NOTEXIST" "mail account $account does not exist"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+key=$(cat /etc/roundcube/nexvia-sso-hmac.key 2>/dev/null)
+if [ -z "$key" ]; then
+	check_result "$E_NOTEXIST" "webmail sso key is missing"
+fi
+
+exp=$(($(date +%s) + 60))
+payload="$account@$domain;$exp"
+sig=$(printf '%s' "$payload" | openssl dgst -sha256 -hmac "$key" -hex | sed 's/^.*= //')
+b64=$(printf '%s' "$payload" | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+echo "$b64.$sig"
