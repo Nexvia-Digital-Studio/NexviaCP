@@ -585,7 +585,9 @@ function load_hestia_config() {
 	// Secret config values must never land in the session of every user.
 	// They are replaced by a "<KEY>_SET" boolean so the UI can still render
 	// a "configured" state without exposing the raw credential.
-	$secret_keys = ["GITHUB_TOKEN"];
+	// PHPMYADMIN_KEY/PGA_SSO_KEY are also secrets: SSO pages fetch the raw
+	// value on demand via v-get-sys-sso-key instead of the session.
+	$secret_keys = ["GITHUB_TOKEN", "PHPMYADMIN_KEY", "PGA_SSO_KEY"];
 	foreach ($sys_arr as $key => $value) {
 		if (in_array($key, $secret_keys, true)) {
 			$_SESSION[$key . "_SET"] = !empty($value);

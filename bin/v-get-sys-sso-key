@@ -1,0 +1,43 @@
+#!/bin/bash
+# info: print the raw phpMyAdmin/phpPgAdmin SSO signing key
+# options: TYPE(pma|pga)
+#
+# v-list-sys-config masks PHPMYADMIN_KEY/PGA_SSO_KEY and load_hestia_config()
+# keeps them out of the user session. Pages that must SIGN SSO tokens
+# (list/db) fetch the real value on demand through this helper.
+# Exit codes: 0 key printed, 1 bad usage, 2 key not configured.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+type=$1
+
+# Includes
+source /etc/hestiacp/hestia.conf
+source $HESTIA/func/main.sh
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verification                          #
+#----------------------------------------------------------#
+
+if [ "$type" != "pma" ] && [ "$type" != "pga" ]; then
+    echo "Usage: v-get-sys-sso-key pma|pga"
+    exit 1
+fi
+
+#----------------------------------------------------------#
+#                        Action                            #
+#----------------------------------------------------------#
+
+key_var="PHPMYADMIN_KEY"
+[ "$type" = "pga" ] && key_var="PGA_SSO_KEY"
+
+key_val=${!key_var}
+if [ -z "$key_val" ]; then
+    # SSO not configured — caller renders the plain (non-SSO) link
+    exit 2
+fi
+echo "$key_val"

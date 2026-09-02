@@ -754,7 +754,7 @@
 									<option value="no">
 										<?= tohtml( _("Disabled")) ?>
 									</option>
-									<option value="yes" <?= tohtml($_SESSION["PHPMYADMIN_KEY"] != "" ? "selected" : "") ?>>
+									<option value="yes" <?= tohtml(!empty($_SESSION["PHPMYADMIN_KEY_SET"]) ? "selected" : "") ?>>
 										<?= tohtml( _("Enabled")) ?>
 									</option>
 								</select>
@@ -770,7 +770,7 @@
 									class="form-select"
 									name="v_pma_restrict"
 									id="v_pma_restrict"
-									<?php echo $_SESSION["PHPMYADMIN_KEY"] == "" ? "disabled" : ""; ?>
+									<?php echo empty($_SESSION["PHPMYADMIN_KEY_SET"]) ? "disabled" : ""; ?>
 								>
 									<option value="no">
 										<?= tohtml( _("Disabled")) ?>
@@ -875,7 +875,7 @@
 									<option value="no">
 										<?= tohtml( _("Disabled")) ?>
 									</option>
-									<option value="yes" <?= tohtml(($_SESSION["PGA_SSO_KEY"] ?? "") != "" ? "selected" : "") ?>>
+									<option value="yes" <?= tohtml(!empty($_SESSION["PGA_SSO_KEY_SET"]) ? "selected" : "") ?>>
 										<?= tohtml( _("Enabled")) ?>
 									</option>
 								</select>

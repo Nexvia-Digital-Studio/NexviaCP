@@ -8,6 +8,21 @@ include $_SERVER["DOCUMENT_ROOT"] . "/inc/main.php";
 
 $is_tr = (($_SESSION['language'] ?? '') === 'tr' || ($_SESSION['LANGUAGE'] ?? '') === 'tr');
 
+// SSO signing keys are masked out of the session (load_hestia_config keeps
+// only <KEY>_SET booleans); pages that sign tokens read the raw value on
+// demand through this root-side helper.
+$v_pma_sso_key = "";
+exec(HESTIA_CMD . "v-get-sys-sso-key pma", $k_out, $k_rc);
+if ($k_rc === 0 && !empty($k_out[0])) {
+	$v_pma_sso_key = trim($k_out[0]);
+}
+$v_pga_sso_key = "";
+exec(HESTIA_CMD . "v-get-sys-sso-key pga", $k_out, $k_rc);
+if ($k_rc === 0 && !empty($k_out[0])) {
+	$v_pga_sso_key = trim($k_out[0]);
+}
+unset($k_out, $k_rc);
+
 // Action 1: Sync & Auto-Discover Unmapped Databases (admin only — adopting
 // databases into an account must never be triggerable by regular users)
 if (!empty($_POST["action_sync_db"])) {

@@ -569,19 +569,19 @@ if (!empty($_POST["save"])) {
 	// Set phpMyAdmin SSO key
 	if (empty($_SESSION["error_msg"])) {
 		if (!empty($_POST["v_phpmyadmin_key"])) {
-			if ($_POST["v_phpmyadmin_key"] == "yes" && $_SESSION["PHPMYADMIN_KEY"] == "") {
+			if ($_POST["v_phpmyadmin_key"] == "yes" && empty($_SESSION["PHPMYADMIN_KEY_SET"])) {
 				exec(HESTIA_CMD . "v-add-sys-pma-sso quiet", $output, $return_var);
 				check_return_code($return_var, $output);
 				unset($output);
 				if (empty($_SESSION["error_msg"])) {
-					$_SESSION["PHPMYADMIN_KEY"] != "";
+					$_SESSION["PHPMYADMIN_KEY_SET"] = true;
 				}
-			} elseif ($_POST["v_phpmyadmin_key"] == "no" && $_SESSION["PHPMYADMIN_KEY"] != "") {
+			} elseif ($_POST["v_phpmyadmin_key"] == "no" && !empty($_SESSION["PHPMYADMIN_KEY_SET"])) {
 				exec(HESTIA_CMD . "v-delete-sys-pma-sso quiet", $output, $return_var);
 				check_return_code($return_var, $output);
 				unset($output);
 				if (empty($_SESSION["error_msg"])) {
-					$_SESSION["PHPMYADMIN_KEY"] = "";
+					$_SESSION["PHPMYADMIN_KEY_SET"] = false;
 				}
 			}
 		}
@@ -590,26 +590,20 @@ if (!empty($_POST["save"])) {
 	// NexviaCP: Set phpPgAdmin SSO key
 	if (empty($_SESSION["error_msg"])) {
 		if (!empty($_POST["v_phppgadmin_key"])) {
-			$cur_pga_key = $_SESSION["PGA_SSO_KEY"] ?? "";
-			if ($_POST["v_phppgadmin_key"] == "yes" && $cur_pga_key == "") {
+			$cur_pga_key = !empty($_SESSION["PGA_SSO_KEY_SET"]);
+			if ($_POST["v_phppgadmin_key"] == "yes" && !$cur_pga_key) {
 				exec(HESTIA_CMD . "v-add-sys-pga-sso quiet", $output, $return_var);
 				check_return_code($return_var, $output);
 				unset($output);
 				if (empty($_SESSION["error_msg"])) {
-					// Reload the config value so the UI reflects the new key.
-					exec(HESTIA_CMD . "v-list-sys-config json", $output, $return_var);
-					if ($return_var === 0) {
-						$cfg = json_decode(implode("", $output), true);
-						$_SESSION["PGA_SSO_KEY"] = $cfg["config"]["PGA_SSO_KEY"]["value"] ?? "";
-					}
-					unset($output);
+					$_SESSION["PGA_SSO_KEY_SET"] = true;
 				}
-			} elseif ($_POST["v_phppgadmin_key"] == "no" && $cur_pga_key != "") {
+			} elseif ($_POST["v_phppgadmin_key"] == "no" && $cur_pga_key) {
 				exec(HESTIA_CMD . "v-delete-sys-pga-sso quiet", $output, $return_var);
 				check_return_code($return_var, $output);
 				unset($output);
 				if (empty($_SESSION["error_msg"])) {
-					$_SESSION["PGA_SSO_KEY"] = "";
+					$_SESSION["PGA_SSO_KEY_SET"] = false;
 				}
 			}
 		}

@@ -35,38 +35,44 @@ if (!empty($data) && is_array($data)) {
 	foreach ($data as $db_name => $db_info) {
 		if (!$first_mysql_db && ($db_info['TYPE'] ?? '') === 'mysql' && ($db_info['SUSPENDED'] ?? '') !== 'yes') {
 			$first_mysql_db = $db_name;
+			$first_mysql_db_owner = ($db_info['_owner'] ?? '') ?: $user_plain;
 		}
 		if (!$first_pgsql_db && ($db_info['TYPE'] ?? '') === 'pgsql' && ($db_info['SUSPENDED'] ?? '') !== 'yes') {
 			$first_pgsql_db = $db_name;
+			$first_pgsql_db_owner = ($db_info['_owner'] ?? '') ?: $user_plain;
 		}
 	}
 }
 
 $top_pma_link = $db_myadmin_link;
-if ($first_mysql_db && !empty($_SESSION['PHPMYADMIN_KEY']) && !ipUsed()) {
+// In the admin overview the token must be signed for the OWNER of the
+// database, not the browsing admin — v-add-database-temp-user would fail.
+$top_pma_sso_user = ($first_mysql_db_owner ?? '') ?: $user_plain;
+if ($first_mysql_db && !empty($v_pma_sso_key) && !ipUsed()) {
 	$time = time();
 	$hestia_sso_token = password_hash(
-		$first_mysql_db . $user_plain . $_SESSION['user_combined_ip'] . $time . $_SESSION['PHPMYADMIN_KEY'],
+		$first_mysql_db . $top_pma_sso_user . $_SESSION['user_combined_ip'] . $time . $v_pma_sso_key,
 		PASSWORD_DEFAULT,
 	);
 	$top_pma_link = $db_myadmin_link . "hestia-sso.php?" . http_build_query([
 		"database" => $first_mysql_db,
-		"user" => $user_plain,
+		"user" => $top_pma_sso_user,
 		"exp" => $time,
 		"hestia_token" => $hestia_sso_token,
 	]);
 }
 
 $top_pga_link = $db_pgadmin_link;
-if ($first_pgsql_db && !empty($_SESSION['PGA_SSO_KEY']) && !ipUsed()) {
+$top_pga_sso_user = ($first_pgsql_db_owner ?? '') ?: $user_plain;
+if ($first_pgsql_db && !empty($v_pga_sso_key) && !ipUsed()) {
 	$time = time();
 	$hestia_pga_sso_token = password_hash(
-		$first_pgsql_db . $user_plain . $_SESSION['user_combined_ip'] . $time . $_SESSION['PGA_SSO_KEY'],
+		$first_pgsql_db . $top_pga_sso_user . $_SESSION['user_combined_ip'] . $time . $v_pga_sso_key,
 		PASSWORD_DEFAULT,
 	);
 	$top_pga_link = $db_pgadmin_link . "hestia-sso.php?" . http_build_query([
 		"database" => $first_pgsql_db,
-		"user" => $user_plain,
+		"user" => $top_pga_sso_user,
 		"exp" => $time,
 		"token" => $hestia_pga_sso_token,
 	]);
@@ -82,12 +88,12 @@ if ($first_pgsql_db && !empty($_SESSION['PGA_SSO_KEY']) && !ipUsed()) {
 					<i class="fas fa-circle-plus icon-green"></i><?= tohtml( _("Add Database")) ?>
 				</a>
 				<?php if ($_SESSION["DB_SYSTEM"] === "mysql" || $_SESSION["DB_SYSTEM"] === "mysql,pgsql" || $_SESSION["DB_SYSTEM"] === "pgsql,mysql") { ?>
-					<a class="button button-secondary <?= tohtml(ipUsed() ? "button-suspended" : "") ?>" href="<?= tohtml($top_pma_link) ?>" target="_blank" title="<?= tohtml($first_mysql_db && !empty($_SESSION['PHPMYADMIN_KEY']) ? "phpMyAdmin (SSO: " . $first_mysql_db . ")" : "phpMyAdmin") ?>">
+					<a class="button button-secondary <?= tohtml(ipUsed() ? "button-suspended" : "") ?>" href="<?= tohtml($top_pma_link) ?>" target="_blank" title="<?= tohtml($first_mysql_db && !empty($v_pma_sso_key) ? "phpMyAdmin (SSO: " . $first_mysql_db . ")" : "phpMyAdmin") ?>">
 						<i class="fas fa-database icon-orange"></i>phpMyAdmin
 					</a>
 				<?php } ?>
 				<?php if ($_SESSION["DB_SYSTEM"] === "pgsql" || $_SESSION["DB_SYSTEM"] === "mysql,pgsql" || $_SESSION["DB_SYSTEM"] === "pgsql,mysql") { ?>
-					<a class="button button-secondary <?= tohtml(ipUsed() ? "button-suspended" : "") ?>" href="<?= tohtml($top_pga_link) ?>" target="_blank" title="<?= tohtml($first_pgsql_db && !empty($_SESSION['PGA_SSO_KEY']) ? "phpPgAdmin (SSO: " . $first_pgsql_db . ")" : "phpPgAdmin") ?>">
+					<a class="button button-secondary <?= tohtml(ipUsed() ? "button-suspended" : "") ?>" href="<?= tohtml($top_pga_link) ?>" target="_blank" title="<?= tohtml($first_pgsql_db && !empty($v_pga_sso_key) ? "phpPgAdmin (SSO: " . $first_pgsql_db . ")" : "phpPgAdmin") ?>">
 						<i class="fas fa-database icon-orange"></i>phpPgAdmin
 					</a>
 				<?php } ?>
@@ -264,15 +270,17 @@ if ($first_pgsql_db && !empty($_SESSION['PGA_SSO_KEY']) && !ipUsed()) {
 									</a>
 								</li>
 							<?php } ?>
-								<?php if ($data[$key]['TYPE'] == 'mysql' && isset($_SESSION['PHPMYADMIN_KEY']) && $_SESSION['PHPMYADMIN_KEY'] != '' && !ipUsed()) { $time = time(); ?>
+								<?php if ($data[$key]['TYPE'] == 'mysql' && !empty($v_pma_sso_key) && !ipUsed()) { $time = time(); ?>
 									<?php
+									// Admin overview: sign for the DB owner, not the browsing admin
+									$sso_row_user = ($value['_owner'] ?? '') ?: $user_plain;
 										$hestia_sso_token = password_hash(
-											$key . $user_plain . $_SESSION['user_combined_ip'] . $time . $_SESSION['PHPMYADMIN_KEY'],
+											$key . $sso_row_user . $_SESSION['user_combined_ip'] . $time . $v_pma_sso_key,
 											PASSWORD_DEFAULT,
 										);
 										$hestia_sso_url = $db_myadmin_link . "hestia-sso.php?" . http_build_query([
 											"database" => $key,
-											"user" => $user_plain,
+											"user" => $sso_row_user,
 											"exp" => $time,
 											"hestia_token" => $hestia_sso_token,
 										]);
@@ -288,15 +296,17 @@ if ($first_pgsql_db && !empty($_SESSION['PGA_SSO_KEY']) && !ipUsed()) {
 								</a>
 							</li>
 						<?php } ?>
-							<?php if ($data[$key]['TYPE'] == 'pgsql' && isset($_SESSION['PGA_SSO_KEY']) && $_SESSION['PGA_SSO_KEY'] != '' && !ipUsed()) { $time = time(); ?>
+							<?php if ($data[$key]['TYPE'] == 'pgsql' && !empty($v_pga_sso_key) && !ipUsed()) { $time = time(); ?>
 								<?php
+								// Admin overview: sign for the DB owner, not the browsing admin
+								$sso_pga_row_user = ($value['_owner'] ?? '') ?: $user_plain;
 									$hestia_pga_sso_token = password_hash(
-										$key . $user_plain . $_SESSION['user_combined_ip'] . $time . $_SESSION['PGA_SSO_KEY'],
+										$key . $sso_pga_row_user . $_SESSION['user_combined_ip'] . $time . $v_pga_sso_key,
 										PASSWORD_DEFAULT,
 									);
 									$hestia_pga_sso_url = $db_pgadmin_link . "hestia-sso.php?" . http_build_query([
 										"database" => $key,
-										"user" => $user_plain,
+										"user" => $sso_pga_row_user,
 										"exp" => $time,
 										"token" => $hestia_pga_sso_token,
 									]);
