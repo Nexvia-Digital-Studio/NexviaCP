@@ -20,13 +20,13 @@ class nexvia_sso extends rcube_plugin
 		$this->add_hook('startup', [$this, 'startup']);
 		$this->add_hook('authenticate', [$this, 'authenticate']);
 		$this->add_hook('login_after', [$this, 'after_login']);
-		$this->add_hook('imap_connect', [$this, 'imap_connect']);
+		$this->add_hook('storage_connect', [$this, 'storage_connect']);
 		$this->add_hook('smtp_connect', [$this, 'smtp_connect']);
 	}
 
 	public function startup($args)
 	{
-		if (!isset($_GET['_nxvsso']) || !empty($_SESSION['user_id'])) {
+		if (!isset($_GET['_nxvsso'])) {
 			return $args;
 		}
 
@@ -34,7 +34,7 @@ class nexvia_sso extends rcube_plugin
 		$data = $this->verify($_GET['_nxvsso']);
 
 		if ($data === false) {
-			if ($rcmail->task == 'login') {
+			if (empty($_SESSION['user_id']) && $rcmail->task == 'login') {
 				$rcmail->output->show_message('Oturum bağlantısı geçersiz veya süresi geçmiş. Lütfen giriş yapın.', 'error');
 			}
 			return $args;
@@ -44,6 +44,12 @@ class nexvia_sso extends rcube_plugin
 		$master = $master === false ? '' : trim($master);
 		if ($master === '') {
 			return $args;
+		}
+
+		// A valid token always wins over whatever session the browser holds:
+		// a stale/broken session must not lock the user out of the SSO button.
+		if (!empty($_SESSION['user_id'])) {
+			$rcmail->kill_session();
 		}
 
 		// Stage credentials in-process: index.php purges the session before
@@ -76,22 +82,25 @@ class nexvia_sso extends rcube_plugin
 
 	public function after_login($args)
 	{
-		// Display (and identity) use the real account name, while IMAP/SMTP
-		// keep authenticating through the master user — see imap_connect.
+		// Display (and identities) use the real account name, while IMAP/SMTP
+		// keep authenticating through the master user — see storage_connect.
+		// $_SESSION['password'] already holds rcmail::encrypt(master secret)
+		// at this point; encrypting again would corrupt every reconnect.
 		$u = isset($_SESSION['username']) ? $_SESSION['username'] : '';
 		$p = strpos($u, '*nexviamaster');
 		if ($p !== false) {
 			$_SESSION['username'] = substr($u, 0, $p);
-			$_SESSION['password'] = rcube::get_instance()->encrypt($_SESSION['password']);
 			$_SESSION['nexvia_sso'] = true;
 		}
 
 		return $args;
 	}
 
-	public function imap_connect($args)
+	public function storage_connect($args)
 	{
-		if (!empty($_SESSION['nexvia_sso']) && strpos($args['user'], '*nexviamaster') === false) {
+		// Roundcube 1.7 fires 'storage_connect' (NOT 'imap_connect') for every
+		// IMAP connection, including reconnects on later requests.
+		if (!empty($_SESSION['nexvia_sso']) && isset($args['user']) && strpos($args['user'], '*nexviamaster') === false) {
 			$args['user'] .= '*nexviamaster';
 		}
 		return $args;
@@ -99,7 +108,9 @@ class nexvia_sso extends rcube_plugin
 
 	public function smtp_connect($args)
 	{
-		if (!empty($_SESSION['nexvia_sso']) && isset($args['smtp_user']) && strpos($args['smtp_user'], '*nexviamaster') === false) {
+		// '%u' is substituted after this hook in rcube_smtp::smtp_mail(),
+		// so appending the suffix to '%u' yields <account>*nexviamaster.
+		if (!empty($_SESSION['nexvia_sso']) && !empty($args['smtp_user']) && strpos($args['smtp_user'], '*nexviamaster') === false) {
 			$args['smtp_user'] .= '*nexviamaster';
 		}
 		return $args;
