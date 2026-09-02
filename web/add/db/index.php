@@ -176,7 +176,9 @@ if (!empty($_POST["ok"])) {
 		}
 
 		$hostname = get_hostname();
-		$from = !empty($_SESSION["FROM_EMAIL"]) ? $_SESSION["FROM_EMAIL"] : "noreply@" . $hostname;
+		$from = !empty($_SESSION["NEXVIA_WELCOME_FROM"])
+			? $_SESSION["NEXVIA_WELCOME_FROM"]
+			: (!empty($_SESSION["FROM_EMAIL"]) ? $_SESSION["FROM_EMAIL"] : "noreply@" . $hostname);
 		$from_name = !empty($_SESSION["FROM_NAME"])
 			? $_SESSION["FROM_NAME"]
 			: $_SESSION["APP_NAME"];

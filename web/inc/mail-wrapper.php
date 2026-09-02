@@ -32,6 +32,9 @@ if (!empty($data["config"]["FROM_EMAIL"])) {
 if (!empty($data["config"]["FROM_NAME"])) {
 	$_SESSION["FROM_NAME"] = $data["config"]["FROM_NAME"];
 }
+if (!empty($data["config"]["NEXVIA_WELCOME_FROM"])) {
+	$_SESSION["NEXVIA_WELCOME_FROM"] = $data["config"]["NEXVIA_WELCOME_FROM"];
+}
 
 //define vars
 //make hostname detection a bit more feature proof

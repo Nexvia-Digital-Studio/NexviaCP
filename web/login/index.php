@@ -371,6 +371,17 @@ function authenticate_user($user, $password, $twofa = "") {
 					? $data[$user]["LANGUAGE"]
 					: "en";
 
+				// Load mail sender identity for panel-generated emails
+				exec(HESTIA_CMD . "v-list-sys-config json", $nxv_cfg_out, $nxv_cfg_rc);
+				if ($nxv_cfg_rc == 0) {
+					$nxv_cfg = json_decode(implode("", $nxv_cfg_out), true);
+					foreach (["FROM_EMAIL", "FROM_NAME", "NEXVIA_WELCOME_FROM"] as $nxv_k) {
+						if (!empty($nxv_cfg["config"][$nxv_k])) {
+							$_SESSION[$nxv_k] = $nxv_cfg["config"][$nxv_k];
+						}
+					}
+				}
+
 				// Regenerate session id to prevent session fixation
 				session_regenerate_id(true);
 
