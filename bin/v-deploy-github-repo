@@ -640,6 +640,45 @@ case "$detected_type" in
 		;;
 esac
 
+# Register the domain for webhook auto-sync. Without GIT_REPO in the domain
+# config the v-sync-github-repos kill-switch skips the site, so pushes land at
+# the panel webhook but deploy nothing (seen live on weareclean.com.tr: sync
+# reported "SUCCESS (0 sites)" while the site never updated). v-add-web-domain
+# -git also sets a pullable origin (credentials embedded for private repos),
+# deploys deploy.sh and injects the per-domain deploy secret into deploy.php.
+# Local-path sources (test fixtures) have no remote to sync — skip them.
+register_url=""
+case "$repo_url" in
+	https://github.com/*)
+		register_url="$repo_url"
+		if [ -n "$GITHUB_TOKEN" ] && [[ "$GITHUB_TOKEN" =~ ^[A-Za-z0-9_]+$ ]]; then
+			register_url="https://${GITHUB_TOKEN}@${repo_url#https://}"
+		fi
+		;;
+	http://*|https://*|git@*|ssh://*)
+		register_url="$repo_url"
+		;;
+esac
+if [ -n "$register_url" ]; then
+	# The clone above may have fallen back from the requested branch to the
+	# repo default — register the branch that is actually checked out.
+	sync_branch=$(su - "$user" -s /bin/bash -c "git -C '$docroot' rev-parse --abbrev-ref HEAD" 2>/dev/null)
+	if [ -z "$sync_branch" ] || [ "$sync_branch" = "HEAD" ]; then
+		sync_branch="${branch:-main}"
+	fi
+	echo "[*] Registering domain for GitHub auto-sync (branch: $sync_branch)..."
+	sync_out=$($BIN/v-add-web-domain-git "$user" "$domain" "$register_url" "$sync_branch" 2>&1)
+	sync_rc=$?
+	if [ $sync_rc -eq 0 ]; then
+		echo "[+] Auto-sync enabled: pushes to ${repo_url%.git} will now deploy $domain automatically."
+	else
+		echo "[!] WARNING: auto-sync registration failed (exit $sync_rc) — the site is deployed, but pushes will NOT auto-deploy."
+		echo "    Fix manually with: v-add-web-domain-git $user $domain <repo-url-with-credentials>"
+		echo "$sync_out" | grep -v '^    Secret:' | sed 's/^/    /'
+		log_event "$E_PARSING" "git auto-sync registration failed for $domain (deploy itself completed)"
+	fi
+fi
+
 # Final Permissions Hardening
 chown -R "$user:$user" "$docroot"
 find "$docroot" -type d -exec chmod 755 {} + 2>/dev/null || true

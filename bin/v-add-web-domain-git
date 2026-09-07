@@ -166,6 +166,16 @@ chown -R "$user:$user" "$docroot"
 find "$docroot" -type d -exec chmod 755 {} \;
 find "$docroot" -type f -exec chmod 644 {} \; 2>/dev/null || true
 
+# Secret-bearing files must not stay world-readable after the blanket 644
+# (parity with the hardening in v-update-web-domain-git). .env carries DB
+# credentials / APP_KEY; .git/config may embed the pull credentials.
+for secret in "$docroot"/.env "$docroot"/.env.bak-*; do
+	if [ -f "$secret" ] && [ ! -L "$secret" ]; then
+		chmod 600 "$secret"
+	fi
+done
+[ -d "$docroot/.git" ] && [ ! -L "$docroot/.git" ] && chmod -R 700 "$docroot/.git"
+
 # Harden the webhook receiver: deploy.php contains the HMAC secret that can
 # trigger code deployment, so it must NOT be world-readable. 644 would let any
 # other tenant (or any local process) read the secret. Restrict to owner + the
