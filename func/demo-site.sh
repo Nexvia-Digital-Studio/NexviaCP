@@ -178,7 +178,8 @@ demo_purge_cache() {
 		domain=$(basename "$conf" .ssl.conf)
 		for uc in "$HESTIA"/data/users/*/web.conf; do
 			if grep -q "^DOMAIN='$domain' " "$uc" 2>/dev/null; then
-				owner=$(basename "$(dirname "$(dirname "$uc")")")
+				# /usr/local/hestia/data/users/<user>/web.conf -> <user>
+				owner=$(basename "$(dirname "$uc")")
 				break
 			fi
 		done
