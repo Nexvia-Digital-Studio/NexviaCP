@@ -50,10 +50,23 @@ demo_sanitize_name() {
 # PHP can write caches/uploads inside its own demo tree). The GitHub token
 # is fed via GIT_ASKPASS, never in the URL or on the command line.
 demo_git() {
-	local use_token=0 a askpass="" rc
+	local use_token=0 a askpass="" rc dir_next=0 repo_dir=""
 	for a in "$@"; do
 		[[ "$a" =~ ^https://github\.com/ ]] && use_token=1
+		# On fetch/reset the remote URL is NOT an argument — it lives in the
+		# repo's .git/config. Probe the -C <dir> repo for a github remote,
+		# otherwise private-repo fetches run without credentials and 401.
+		if [ "$dir_next" = "1" ]; then
+			repo_dir="$a"
+			dir_next=0
+		elif [ "$a" = "-C" ]; then
+			dir_next=1
+		fi
 	done
+	if [ "$use_token" = "0" ] && [ -n "$repo_dir" ] \
+		&& grep -q 'https://github\.com/' "$repo_dir/.git/config" 2>/dev/null; then
+		use_token=1
+	fi
 	if [ "$use_token" = "1" ] && [ -n "$GITHUB_TOKEN" ]; then
 		askpass=$(mktemp /tmp/nexvia-demo-askpass.XXXXXX)
 		printf '#!/bin/sh\nprintf "%%s\\n" "$NEXVIA_GIT_TOKEN"\n' > "$askpass"
