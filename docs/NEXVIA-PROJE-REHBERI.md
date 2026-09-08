@@ -681,6 +681,47 @@ Bir deploy bozulursa ilk bakılacak yer `deploy.log` (compose'un ham çıktısı
 | **LE + Cloudflare API** | Domain ekleme/sertifika/DNS tamamen panelden. |
 | **🧪 Demo Siteler** | Panelden **Demo Siteler** sayfası: bir GitHub reposunu saniyeler içinde `https://panel.nexviastudio.com/<ad>-<rastgele16>/` adresinde gizli DEMO olarak yayınlar (düz HTML + PHP; derleme/DB yok). URL rastgele olduğu için bilmeyen bulamaz; repoya push atınca demo otomatik güncellenir. CLI: `v-add-demo-site kullanıcı repo [dal] [ad] [altklasör]`, `v-list-demo-sites`, `v-update-demo-site`, `v-delete-demo-site`. **Demo repolarında bağlantılar/assetler göreli yol olmalı** (`css/x.css` ✔, `/css/x.css` ✘ — kök dizin sanıp panel alan adına düşer) ve kökte `index.html`/`index.php` bulunmalı; site repo içindeki bir klasördeyse alt klasör parametresini kullanın. PHP, izole `nexviademo` kullanıcılı ayrı php-fpm havuzunda `open_basedir` hapsinde çalışır (DB bağlanmaz). |
 
+### 🧪 7.1 Demo Siteler — Müşteri Demosunu 2 Dakikada Gizli URL'de Yayınlama
+
+Müşteriye "şu linke bak" diye göndermek için tasarlandı: site kök domain + TLS + DNS derdi olmadan
+panelin kendi alan adı altında, **rastgele 16 haneli kod içeren gizli bir URL'de** yayınlanır.
+URL'yi bilen herkes demoya bakabilir; bilmeyen tahmin edemez (64 bit rastgelelik + arama
+motorlarına `noindex` başlığı).
+
+**Panelden yayınlama (önerilen yol):**
+1. Üst bardaki **🧪 Demo Siteler** menüsü → **Yeni Demo Yayınla**
+2. Adminler organizasyon repo listesinden seçer; herkes **herhangi bir GitHub linki**
+   yapıştırabilir (`/tree/dal` linki dalı da otomatik seçer). Özel (private) org repoları da
+   çalışır — sunucudaki GitHub token'ı ile çeker.
+3. İsteğe bağlı: dal, demo adı (URL'de görünen kısım, örn `onlymutfak`), alt klasör.
+4. **Demoyu Yayınla** → 5-10 saniye → URL ekranda. Kopyala butonu ile müşteriye gönder.
+
+**CLI ile aynı işler:** `v-add-demo-site kullanıcı repo [dal] [ad] [altklasör]` ·
+`v-list-demo-sites` · `v-update-demo-site kullanıcı slug` · `v-delete-demo-site kullanıcı slug`
+
+**Demo reposu nasıl hazırlanır (önemli — burada yazanlar şart):**
+
+| Kural | Doğru | Yanlış | Sebep |
+|---|---|---|---|
+| Yollar göreli olmalı | `css/main.css`, `./sayfa2.html`, `../img/x.png` | `/css/main.css`, `https://panel.../...` | Demo bir **alt dizinde** yaşar (`/onlymutfak-a1b2…/`); mutlak yol panel köküne düşer, asset 404 verir |
+| Giriş dosyası kökte | `index.html` veya `index.php` repoda kökte | sadece `home.html` | nginx kök index arar; yoksa uyarı döner |
+| Site klasördeyse alt klasör belirt | panelde "Alt klasör" alanına `web`, `dist`… | repoyu yeniden düzenlemek | yayınlama o klasörden yapılır, repo el değmemiş kalır |
+| Veritabanı gerektirmesin | sayfalar statik içerikle açılsın, form butonları `href` ile gezinsin | kurulum sihirbazı, DB zorunlu, `install.lock` kontrolü | Demolar DB'siz çalışır; DB şartlayan site (ör. install.php'ye yönlendiren) demoda gezilemez hale gelir |
+| Derleme adımı olmasın | hazır HTML/PHP dosyaları | `npm run build` sonrası `dist/` (dist repo'da YOKSA) | demo akışı derleme yapmaz; derlenmiş çıktı repodaysa sorun yok (alt klasör=`dist`) |
+
+PHP demolar için ek notlar: PHP 8.5'te izole bir havuzda çalışır (`nexviademo` kullanıcısı,
+`open_basedir` sadece demo ağacına açık) — oturum (session), cache yazma, `mail()` gibi düz
+işlevler çalışır; MySQL/PDO bağlantısı kurulamaz (DB hata sayfası basan site tasarımı demo için
+uygun değilden bunu repoda düzeltmek gerekir).
+
+**Otomatik güncelleme:** demoya bağlı repoya push atınca mevcut webhook zinciri demoyu da
+günceller (domain siteleriyle aynı akış). Panelden **Güncelle** butonu da aynı işi anında yapar.
+
+**Güvenlik ve sınırlar:** erişim kontrolü URL'nin gizliliğidir — URL'yi sadece göstermek
+istediğiniz kişiye paylaşın. `.git`, `.env`, `.sql` vb. dosyalar HTTP üzerinden 403 kapalıdır;
+PHP dosyalarının kaynağı asla sızdırılmaz (çalıştırılır). Demolar panel istatistiklerine (trafik/
+bant genişliği) dahil değildir; logları `/var/log/nginx/demos.access.log`'dadır.
+
 ---
 
 ## 🚑 8. Sık Karşılaşılan Sorunlar — Teşhis ve Çözüm
@@ -697,6 +738,10 @@ Bir deploy bozulursa ilk bakılacak yer `deploy.log` (compose'un ham çıktısı
 | Docker app "rejected" | privileged / docker.sock / host network | Kaldır ya da FORCE=yes + gerekçe (6.3) |
 | Domain açıldı ama sertifika yok (NPM altında) | 80/443 loopback'e çekilmiş, http-01 çalışmıyor | NPM yerine servis→domain eşlemesi (6.6) |
 | Deploy uzun sürüyor / başlamıyor gibi | Build ağır; durum `deploying` | `deploy.log` izle; panelde durum `failed` ise çıktının son satırları sebep gösterir |
+| Demo açılıyor ama CSS/JS/resim yok | Asset yolları **mutlak** (`/css/…`) — demo alt dizinde yaşar | Repoda yolları **göreli** yap (`css/…`, `./x`, `../x`) → push/Güncelle (7.1) |
+| PHP demo anasayfa `install.php`'ye yönleniyor / DB hatası basıyor | Site kodu veritabanı/kurulum şartlıyor | Demo için DB'siz akış ekle (sayfalar statik içerikle açılsın); bu site kodunda çözülür (7.1) |
+| Demo URL'si 404 | Demo silinmiş ya da slug yanlış yazılmış | Panel Demo Siteler sayfasından güncel URL'yi kopyala (URL'de sondaki `/` dahil) |
+| "no index.(html\|php)" uyarısı aldı | Repoda kökte giriş dosyası yok | Sitedeki klasörü "Alt klasör" alanına yaz (örn. `web`) veya repoya kök index ekle |
 
 ---
 
@@ -714,6 +759,10 @@ Bir deploy bozulursa ilk bakılacak yer `deploy.log` (compose'un ham çıktısı
 **.NET:** csproj kökte · UseUrls yok · appsettings'te secret yok
 **Docker:** compose kökte · sabit etiketler · restart policy · healthcheck · volume'lar ·
 `.env.example` · preflight'ten geçen güvenli tanım · servis→domain planı
+
+**Demo reposu (🧪):** tüm yollar göreli (`css/…` değil `/css/…`) · kökte `index.html`/`index.php`
+(veya alt klasör panelde belirtilir) · DB/kurulum sihirbazı yok · derlenmiş çıktı repodaysa alt
+klasör olarak göster · bu listeyi geçen repo panelden **tek tıkla** gizli demo URL'sinde yayınlanır
 
 Bu listeleri geçen bir repo, panelde **tek tıkla** kurulur, güncellenir ve gerekirse
 tek komutla önceki sürümüne döner.

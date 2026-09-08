@@ -106,7 +106,7 @@ Reponuzun ana dizinine veya `build/` klasörüne şu dosyalardan birini koymakt�
 
 GitHub'da kod güncellediğinizde veya yeni bir Release yayınladığınızda sitenin otomatik güncellenmesi için:
 1. GitHub Reponuz -> **Settings** -> **Webhooks** -> **Add webhook**
-2. **Payload URL:** `https://<panel-domaininiz>:8083/webhook/github/`
+2. **Payload URL:** `https://<panel-domaininiz>/webhook/github/`
 3. **Content type:** `application/json`
 4. **Events:** `Just the push event` veya `Releases`
 
@@ -121,3 +121,26 @@ GitHub'da kod güncellediğinizde veya yeni bir Release yayınladığınızda si
 | **Node.js** | `server.js` veya `app.js` veya `index.js` | `npm install --production` (Otomatik Port & Systemd) |
 | **.NET Core** | `*.csproj` veya `*.sln` | `dotnet publish -c Release` (Otomatik Port & Kestrel) |
 | **Python** | `main.py` veya `app.py` | `pip install -r requirements.txt` |
+
+---
+
+## 🧪 5. Demo Reposu Standartları (Panel → Demo Siteler)
+
+Müşteri demoları panelin **Demo Siteler** sayfasından saniyeler içinde
+`https://panel.<domain>/<ad>-<rastgele16>/` formatlı **gizli URL**'de yayınlanır; repoya push
+atınca demo otomatik güncellenir. Bir reponun bu akışta düzgün çalışması için:
+
+1. **Tüm yollar göreli olmalı:** `css/main.css` ✔ — `/css/main.css` ✘.
+   Demo bir alt dizinde yayınlanır; mutlak yol panel köküne düşüp 404 verir.
+   (`<base>` etiketi ve JS'de `"./api/x"` kalıbı güvenlidir.)
+2. **Kökte giriş dosyası:** `index.html` veya `index.php`. Site repo içindeki bir klasördeyse
+   (örn. `web/`, `dist/`) yayınlarken **Alt klasör** alanına yazılır — repo yeniden düzenlenmez.
+3. **DB ve kurulum sihirbazı yok:** sayfalar statik içerikle açılmalı; butonlar `href` ile sayfa
+   arası gezdirsin. DB şartlayan site demoda açılmaz (PHP 8.5 izole havuzda, `open_basedir`
+   hapli; PDO bağlantısı kurulamaz). Oturum/cache yazma gibi düz PHP işlevleri çalışır.
+4. **Derleme adımı yok:** hazır HTML/PHP dosyaları yayınlanır. Derlenmiş çıktı (`dist/`) repoda
+   commit'liyse sorun yok — alt klasör olarak gösterilir.
+5. **Secret yok:** demo ağacı herkese açık URL'de servis edilir; repoda anahtar/dump
+   bırakılmaz (`.env`, `.git`, `.sql` HTTP üzerinden 403 ile korunur ama repoya koymamak esastır).
+
+Detaylar ve sorun giderme: `docs/NEXVIA-PROJE-REHBERI.md` → bölüm **7.1 Demo Siteler**.
