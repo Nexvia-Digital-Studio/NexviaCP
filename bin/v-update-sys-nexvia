@@ -142,6 +142,12 @@ if [ -f "$HESTIA/install/deb/sudoers.d/nexvia-no-sudo-mail" ]; then
 	fi
 fi
 
+# Ensure demo-sites infrastructure (system user, dirs, php-fpm pool,
+# nginx include on the panelproxy domain) — idempotent, graceful reloads
+if [ -x "$HESTIA/bin/v-ensure-demo-sites" ]; then
+	"$HESTIA/bin/v-ensure-demo-sites" || true
+fi
+
 # Reload panel services gracefully in background so HTTP response is returned cleanly
 echo "[*] Scheduling graceful service reload..."
 (sleep 1 && (pkill -HUP -f "hestia-nginx: master process" 2>/dev/null; systemctl reload hestia 2>/dev/null || systemctl restart hestia 2>/dev/null)) >/dev/null 2>&1 &

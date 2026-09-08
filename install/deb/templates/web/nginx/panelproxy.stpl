@@ -37,5 +37,9 @@ server {
 		alias %home%/%user%/web/%domain%/document_errors/;
 	}
 
+	# Nexvia demo sites (secret demo URLs served locally, longer prefix
+	# locations win over the proxy above) — managed by v-*-demo-site.
+	include /etc/nginx/demo-sites/*.conf;
+
 	include %home%/%user%/conf/web/%domain%/nginx.ssl.conf_*;
 }

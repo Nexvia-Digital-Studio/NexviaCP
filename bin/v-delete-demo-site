@@ -1,0 +1,63 @@
+#!/bin/bash
+# info: delete a published demo site
+# options: USER SLUG
+#
+# example: v-delete-demo-site admin onlymutfak-1a2b3c4d5e6f7a8b
+#
+# Removes the demo's nginx location, published tree and registry entry.
+# Leaves no orphan files behind.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+user=$1
+slug=$2
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/demo-site.sh
+source $HESTIA/func/demo-site.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER SLUG'
+is_format_valid 'user'
+is_object_valid 'user' 'USER' "$user"
+demo_slug_format_valid "$slug" || check_result "$E_INVALID" "invalid SLUG"
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+reg=$(demo_reg_file "$user" "$slug")
+[ -f "$reg" ] || check_result "$E_NOTEXIST" "demo site '$slug' doesn't exist"
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Never leave the shell inside the tree we are about to delete.
+cd /
+
+rm -rf "${DEMO_DEMOS_DIR:?}/${slug:?}"
+rm -f "$DEMO_NGINX_DIR/$slug.conf"
+rm -f "$reg"
+
+if ! nginx -t >/dev/null 2>&1; then
+	check_result "$E_INVALID" "nginx config test failed after removal — investigate /etc/nginx/demo-sites/"
+fi
+systemctl reload nginx
+
+log_event "$OK" "deleted demo site $slug (user $user)"
+echo "OK:$slug deleted"
+exit 0

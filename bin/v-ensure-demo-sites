@@ -1,0 +1,142 @@
+#!/bin/bash
+# info: ensure demo-site infrastructure exists (user, dirs, php-fpm pool, nginx include)
+# options: —
+#
+# Idempotent setup for the demo site feature (v-add-demo-site). Called by
+# v-update-sys-nexvia after every core update; safe to run any time.
+#
+#   - system user/group nexviademo (runs demo PHP, owns demo files)
+#   - /var/lib/hestia/demos            published demo trees
+#   - /etc/nginx/demo-sites            per-demo nginx location files
+#   - php-fpm pool 'nexvia-demo'       isolated backend for demo PHP
+#   - include line in live panelproxy SSL confs (panel domain) so the
+#     /<name>-<random>/ URLs are served without touching the panel proxy
+#
+# nginx/php-fpm are only RELOADED (never restarted) — a hard restart of
+# system nginx drops the listener the panel itself is proxied through.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/demo-site.sh
+source $HESTIA/func/demo-site.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+NGINX_RELOAD=0
+PHP_POOL_VER=""
+PHP_POOL_CHANGED=0
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# --- dirs -------------------------------------------------------------
+mkdir -p "$DEMO_NGINX_DIR" "$DEMO_DEMOS_DIR"
+chmod 755 "$DEMO_NGINX_DIR" "$DEMO_DEMOS_DIR"
+
+# --- system user ------------------------------------------------------
+if ! getent group "$DEMO_POOL_GROUP" >/dev/null 2>&1; then
+	groupadd -r "$DEMO_POOL_GROUP"
+fi
+if ! id "$DEMO_POOL_USER" >/dev/null 2>&1; then
+	useradd -r -g "$DEMO_POOL_GROUP" -d "$DEMO_DEMOS_DIR" -s /usr/sbin/nologin \
+		-M "$DEMO_POOL_USER"
+	echo "[+] Created system user $DEMO_POOL_USER."
+fi
+
+# --- php-fpm pool -----------------------------------------------------
+# Reuse the existing pool's PHP version if present, otherwise pick the
+# highest installed FPM (func/demo-site.sh derives the socket the same way).
+for p in /etc/php/*/fpm/pool.d/nexvia-demo.conf; do
+	if [ -f "$p" ]; then
+		PHP_POOL_VER="${p#/etc/php/}"
+		PHP_POOL_VER="${PHP_POOL_VER%%/*}"
+		break
+	fi
+done
+if [ -z "$PHP_POOL_VER" ]; then
+	for v in 8.5 8.4 8.3 8.2; do
+		[ -d "/etc/php/$v/fpm/pool.d" ] && PHP_POOL_VER="$v" && break
+	done
+fi
+if [ -z "$PHP_POOL_VER" ]; then
+	echo "[!] No php-fpm found — demo PHP disabled (static demos still work)."
+else
+	pool_file="/etc/php/$PHP_POOL_VER/fpm/pool.d/nexvia-demo.conf"
+	pool_sock="/run/php/php${PHP_POOL_VER}-fpm-nexviademo.sock"
+	pool_content="[nexvia-demo]
+; Managed by v-ensure-demo-sites — isolated backend for demo sites
+; published under the panel domain (see func/demo-site.sh).
+user = $DEMO_POOL_USER
+group = $DEMO_POOL_GROUP
+listen = $pool_sock
+listen.owner = www-data
+listen.group = www-data
+listen.mode = 0660
+pm = dynamic
+pm.max_children = 8
+pm.start_servers = 2
+pm.min_spare_servers = 1
+pm.max_spare_servers = 3
+pm.max_requests = 200
+catch_workers_output = yes
+slowlog = /var/log/hestia/demo-php-slow.log
+request_slowlog_timeout = 15s
+php_admin_value[open_basedir] = $DEMO_DEMOS_DIR:/var/lib/php/sessions:/tmp:/usr/share/php
+php_admin_value[upload_max_filesize] = 32M
+php_admin_value[post_max_size] = 32M
+php_admin_value[max_execution_time] = 60
+php_admin_value[memory_limit] = 128M
+php_admin_flag[display_errors] = off"
+	if [ ! -f "$pool_file" ] || ! printf '%s' "$pool_content" | cmp -s - "$pool_file"; then
+		printf '%s\n' "$pool_content" > "$pool_file"
+		chmod 644 "$pool_file"
+		PHP_POOL_CHANGED=1
+		echo "[+] php$PHP_POOL_VER-fpm pool 'nexvia-demo' written."
+	fi
+fi
+
+# --- nginx include line in live panelproxy SSL confs ------------------
+for conf in /etc/nginx/conf.d/domains/*.ssl.conf; do
+	[ -f "$conf" ] || continue
+	grep -q "proxy_pass https://127.0.0.1:2083" "$conf" || continue
+	grep -q "demo-sites" "$conf" && continue
+	# Insert before the final closing brace of the server block.
+	if [ "$(tail -n1 "$conf" | tr -d '[:space:]')" != "}" ]; then
+		echo "[!] ${conf##*/}: unexpected layout, include NOT added"
+		continue
+	fi
+	cp -f "$conf" "${conf}.bak-nexvia"
+	sed -i "\$i\\$(printf '\t# Nexvia demo sites (secret demo URLs served locally)')\\n$(printf '\tinclude %s/*.conf;' "$DEMO_NGINX_DIR")" "$conf"
+	if ! nginx -t >/dev/null 2>&1; then
+		cp -f "${conf}.bak-nexvia" "$conf"
+		echo "[!] ${conf##*/}: nginx rejected the include, restored."
+	else
+		NGINX_RELOAD=1
+		echo "[+] ${conf##*/}: demo-sites include added."
+	fi
+done
+
+# --- reloads (graceful only) ------------------------------------------
+if [ "$PHP_POOL_CHANGED" = "1" ] && [ -n "$PHP_POOL_VER" ]; then
+	systemctl reload "php${PHP_POOL_VER}-fpm" && echo "[+] php${PHP_POOL_VER}-fpm reloaded."
+fi
+if [ "$NGINX_RELOAD" = "1" ]; then
+	nginx -t >/dev/null 2>&1 && systemctl reload nginx && echo "[+] nginx reloaded."
+fi
+
+echo "[+] demo-sites infrastructure ensured."
+exit 0

@@ -101,23 +101,60 @@ fi
 
 total=${#sync_pids[@]}
 
-# A push for a repo with zero connected domains is almost certainly a
+# ---- Demo sites (secret demo URLs under the panel domain) --------------
+# Registry REPO is owner/name; match by repo basename like the domain
+# loop above so one push refreshes every demo cloned from that repo.
+demo_pids=()
+for reg_dir in "$HESTIA"/data/users/*/demo-sites; do
+	[ -d "$reg_dir" ] || continue
+	d_owner=$(basename "$(dirname "$reg_dir")")
+	for reg in "$reg_dir"/*.conf; do
+		[ -f "$reg" ] || continue
+		d_repo=$(sed -n "s/^REPO='\([^']*\)'$/\1/p" "$reg" | head -1)
+		d_slug=$(sed -n "s/^SLUG='\([^']*\)'$/\1/p" "$reg" | head -1)
+		[ -n "$d_repo" ] && [ -n "$d_slug" ] || continue
+		if [ -n "$target_repo" ] && [ "${d_repo##*/}" != "$target_repo" ]; then
+			continue
+		fi
+		echo "[*] Triggering update for demo site: $d_slug (User: $d_owner)..."
+		(
+			$BIN/v-update-demo-site "$d_owner" "$d_slug"
+			exit $?
+		) &
+		demo_pids+=($!)
+	done
+done
+
+demo_failed=0
+for i in "${!demo_pids[@]}"; do
+	if ! wait "${demo_pids[$i]}" 2>/dev/null; then
+		demo_failed=$((demo_failed + 1))
+	fi
+done
+if [ "$demo_failed" -gt 0 ]; then
+	echo "[!] FINISHED WITH ERRORS: $demo_failed demo site update(s) FAILED (see v-update-demo-site output above)."
+fi
+
+total=$((total + ${#demo_pids[@]}))
+failed=$((failed + demo_failed))
+
+# A push for a repo with zero connected domains/demos is almost certainly a
 # misconfiguration (e.g. a site deployed from GitHub without registering
 # auto-sync) — it must never hide behind a "SUCCESS (0 sites)" line, which
 # is exactly how weareclean.com.tr stayed stale unnoticed.
 zero_match=0
 if [ -n "$target_repo" ] && [ "$total" -eq 0 ]; then
 	zero_match=1
-	echo "[!] WARNING: push received for '$target_repo' but no domain on this server is connected to that repository — nothing was updated."
-	echo "    Connect the site with: v-add-web-domain-git <user> <domain> <repo-url> (private repos need credentials in the URL)."
-	$BIN/v-add-user-notification admin "GitHub Sync" "GitHub'dan '${target_repo}' deposuna push geldi ama bu depoya bağlı site yok — hiçbir domain güncellenmedi. Siteyi bağlamak için: v-add-web-domain-git kullanıcı domain repo-url" 2>/dev/null || true
+	echo "[!] WARNING: push received for '$target_repo' but no domain or demo site on this server is connected to that repository — nothing was updated."
+	echo "    Connect the site with: v-add-web-domain-git <user> <domain> <repo-url> — or publish a demo with: v-add-demo-site <user> <repo>."
+	$BIN/v-add-user-notification admin "GitHub Sync" "GitHub'dan '${target_repo}' deposuna push geldi ama bu depoya bağlı site/demo yok — hiçbir şey güncellenmedi. Siteyi bağlamak için: v-add-web-domain-git kullanıcı domain repo-url · Demo yayınlamak için: v-add-demo-site kullanıcı repo" 2>/dev/null || true
 fi
 
 if [ "$failed" -gt 0 ]; then
-	echo "[!] FINISHED WITH ERRORS: $failed of $total domain update(s) FAILED (see lines above)."
+	echo "[!] FINISHED WITH ERRORS: $failed of $total update(s) FAILED (see lines above)."
 	exit 1
 fi
 if [ "$zero_match" -eq 0 ]; then
-	echo "[+] SUCCESS: All connected domains (${total} sites) updated from GitHub in parallel with zero downtime."
+	echo "[+] SUCCESS: All connected domains and demo sites (${total} total) updated from GitHub in parallel with zero downtime."
 fi
 exit 0

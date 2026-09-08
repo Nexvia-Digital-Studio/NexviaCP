@@ -1,0 +1,180 @@
+#!/bin/bash
+# info: publish a git repository as a demo site under a secret panel URL
+# options: USER REPO [BRANCH] [NAME] [SUBDIR]
+#
+# example: v-add-demo-site admin onlymutfak
+# example: v-add-demo-site admin Nexvia-Digital-Studio/onlymutfak main
+# example: v-add-demo-site admin https://github.com/user/site.git main "" web
+#
+# Publishes static HTML and plain PHP sites (no build steps, no database)
+# at https://panel.example.com/<name>-<random16>/ — the random suffix is
+# the access control. Pushes to the repo update the demo automatically
+# (v-sync-github-repos picks up demo sites too). Output's URL_PATH line is
+# machine-readable for the panel.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+user=$1
+repo_input=$2
+branch=${3:-main}
+name_input=${4:-}
+subdir=${5:-}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/demo-site.sh
+source $HESTIA/func/demo-site.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER REPO [BRANCH] [NAME] [SUBDIR]'
+is_format_valid 'user'
+is_object_valid 'user' 'USER' "$user"
+if [ -n "$branch" ] && [[ ! "$branch" =~ ^[A-Za-z0-9._/-]{1,100}$ ]]; then
+	check_result "$E_INVALID" "invalid BRANCH name"
+fi
+if [ -n "$subdir" ]; then
+	case "$subdir" in
+		/*|*..*|*\ *)
+			check_result "$E_INVALID" "invalid SUBDIR (relative path inside the repo, e.g. 'web')"
+			;;
+	esac
+	[[ "$subdir" =~ ^[A-Za-z0-9._/-]{1,200}$ ]] || check_result "$E_INVALID" "invalid SUBDIR"
+fi
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+# Normalize the repository to a plain github.com URL (owner/repo and bare
+# org repo names are accepted; the org comes from the GitHub connection).
+repo_url="${repo_input%/}"
+if [[ ! "$repo_url" =~ ^https?:// ]]; then
+	if [[ "$repo_url" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+		repo_url="https://github.com/${repo_url}.git"
+	elif [ -n "$GITHUB_ORG" ]; then
+		repo_url="https://github.com/${GITHUB_ORG}/${repo_url}.git"
+	else
+		check_result "$E_INVALID" "provide the full GitHub repository URL"
+	fi
+fi
+repo_path="${repo_url#http://}"
+repo_path="${repo_path#https://}"
+repo_path="${repo_path#www.github.com/}"
+repo_path="${repo_path#github.com/}"
+repo_url="https://github.com/${repo_path}"
+[[ "$repo_url" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(\.git)?$ ]] \
+	|| check_result "$E_INVALID" "only github.com owner/repo URLs are supported"
+[[ "$repo_url" =~ \.git$ ]] || repo_url="${repo_url}.git"
+repo_owner=$(echo "$repo_url" | cut -d/ -f4)
+repo_name=$(basename "$repo_url" .git)
+repo_norm="${repo_owner}/${repo_name}"
+
+# Demo name: explicit > repo name. Sanitized to lowercase dashes.
+name=$(demo_sanitize_name "${name_input:-$repo_name}")
+[ -n "$name" ] || check_result "$E_INVALID" "could not derive a valid NAME from '$repo_name'"
+
+# Infrastructure must exist (user, dirs, php pool). Deployed/ensured by
+# v-update-sys-nexvia; refuse with a helpful message instead of failing
+# half-way on fresh installs.
+id "$DEMO_POOL_USER" >/dev/null 2>&1 \
+	|| check_result "$E_NOTEXIST" "demo infrastructure missing — run: v-ensure-demo-sites"
+mkdir -p "$DEMO_NGINX_DIR" "$DEMO_DEMOS_DIR"
+chmod 755 "$DEMO_NGINX_DIR" "$DEMO_DEMOS_DIR"
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Random slug: <name>-<16 hex>. Regenerate a few times on the (absurdly
+# unlikely) chance of a collision with an existing demo or nginx conf.
+slug=""
+for _ in 1 2 3 4 5; do
+	cand="${name}-$(openssl rand -hex 8)"
+	if [ ! -e "$(demo_reg_file "$user" "$cand")" ] && [ ! -e "$DEMO_NGINX_DIR/$cand.conf" ] \
+		&& [ ! -d "$DEMO_DEMOS_DIR/$cand" ]; then
+		slug="$cand"
+		break
+	fi
+done
+[ -n "$slug" ] || check_result "$E_EXISTS" "could not generate a unique slug"
+
+demo_dir="$DEMO_DEMOS_DIR/$slug"
+mkdir -p "$demo_dir/.src"
+chown -R "$DEMO_POOL_USER:$DEMO_POOL_GROUP" "$demo_dir"
+
+echo "[*] Cloning ${repo_norm} (branch: ${branch})…"
+clone_rc=0
+demo_git clone --depth 1 -b "$branch" -- "$repo_url" "$demo_dir/.src" 2>/dev/null || {
+	# Requested branch may not exist — fall back to the repo default.
+	demo_git clone --depth 1 -- "$repo_url" "$demo_dir/.src" 2>/dev/null || clone_rc=1
+}
+if [ "$clone_rc" != "0" ]; then
+	rm -rf "$demo_dir"
+	check_result "$E_CONNECT" "git clone failed for ${repo_url} (private repo? check GITHUB_TOKEN)"
+fi
+
+# Record the branch that is actually checked out (the fallback above may
+# have landed on the default branch instead of the requested one).
+real_branch=$(demo_git -C "$demo_dir/.src" symbolic-ref --short HEAD 2>/dev/null || echo "$branch")
+commit=$(demo_git -C "$demo_dir/.src" rev-parse --short HEAD 2>/dev/null || echo "")
+
+if [ -n "$subdir" ] && [ ! -d "$demo_dir/.src/$subdir" ]; then
+	rm -rf "$demo_dir"
+	check_result "$E_NOTEXIST" "SUBDIR '$subdir' not found in ${repo_norm}"
+fi
+
+demo_publish_tree "$slug" "$subdir" || {
+	rm -rf "$demo_dir"
+	check_result "$E_INVALID" "failed to publish demo tree"
+}
+
+demo_gen_nginx_conf "$slug" "$user" "$repo_norm" "$real_branch"
+if ! nginx -t >/dev/null 2>&1; then
+	rm -f "$DEMO_NGINX_DIR/$slug.conf"
+	rm -rf "$demo_dir"
+	check_result "$E_INVALID" "nginx config test failed — demo not created"
+fi
+systemctl reload nginx
+
+# Registry entry (sourceable key='val', one file per demo).
+mkdir -p "$HESTIA/data/users/$user/demo-sites"
+reg=$(demo_reg_file "$user" "$slug")
+cat > "$reg" <<NXV_REG_EOF
+SLUG='$slug'
+NAME='$name'
+REPO='$repo_norm'
+REPO_URL='$repo_url'
+BRANCH='$real_branch'
+SUBDIR='$subdir'
+DIR='$demo_dir'
+COMMIT='$commit'
+CREATED='$(date '+%F %T')'
+UPDATED='$(date '+%F %T')'
+STATE='active'
+NXV_REG_EOF
+chown root:root "$reg"
+chmod 640 "$reg"
+
+index_hint=""
+if [ ! -f "$demo_dir/index.html" ] && [ ! -f "$demo_dir/index.htm" ] && [ ! -f "$demo_dir/index.php" ]; then
+	index_hint=" [!] no index.(html|php) at the demo root — set SUBDIR if the site lives in a subfolder"
+fi
+
+log_event "$OK" "created demo site $slug (user $user, repo $repo_norm)"
+echo "OK:$slug"
+echo "URL_PATH:/$slug/"
+echo "REPO:$repo_norm@$real_branch"
+[ -n "$index_hint" ] && echo "$index_hint"
+exit 0

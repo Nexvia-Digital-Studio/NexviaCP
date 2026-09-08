@@ -1,0 +1,76 @@
+#!/bin/bash
+# info: pull the latest commits for a published demo site
+# options: USER SLUG
+#
+# example: v-update-demo-site admin onlymutfak-1a2b3c4d5e6f7a8b
+#
+# Fetch + hard reset the demo's clone to origin/BRANCH and re-publish the
+# tree (local edits in .src are discarded by design — the repo is the
+# source of truth). Called automatically by v-sync-github-repos on every
+# webhook push for demo sites connected to the pushed repository.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+user=$1
+slug=$2
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/demo-site.sh
+source $HESTIA/func/demo-site.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER SLUG'
+is_format_valid 'user'
+is_object_valid 'user' 'USER' "$user"
+demo_slug_format_valid "$slug" || check_result "$E_INVALID" "invalid SLUG"
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+reg=$(demo_reg_file "$user" "$slug")
+[ -f "$reg" ] || check_result "$E_NOTEXIST" "demo site '$slug' doesn't exist"
+
+# Parse the registry WITHOUT sourcing it (keeps caller vars intact).
+r_branch=$(demo_reg_key "$reg" "BRANCH")
+r_subdir=$(demo_reg_key "$reg" "SUBDIR")
+r_dir=$(demo_reg_key "$reg" "DIR")
+r_commit=$(demo_reg_key "$reg" "COMMIT")
+[ -n "$r_branch" ] || r_branch="main"
+[ -d "$r_dir/.src" ] || check_result "$E_NOTEXIST" "demo clone missing for '$slug' (re-create the demo)"
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+if ! demo_git -C "$r_dir/.src" fetch --depth 1 origin "$r_branch" 2>/dev/null; then
+	check_result "$E_CONNECT" "git fetch failed for $slug (repo removed? credentials?)"
+fi
+demo_git -C "$r_dir/.src" reset --hard FETCH_HEAD >/dev/null 2>&1
+new_commit=$(demo_git -C "$r_dir/.src" rev-parse --short HEAD 2>/dev/null || echo "")
+
+demo_publish_tree "$slug" "$r_subdir" || check_result "$E_INVALID" "failed to re-publish demo tree"
+
+demo_reg_set_key "$reg" "COMMIT" "$new_commit"
+demo_reg_set_key "$reg" "UPDATED" "$(date '+%F %T')"
+
+if [ "$new_commit" = "$r_commit" ]; then
+	echo "OK:$slug up-to-date ($new_commit)"
+else
+	echo "OK:$slug updated $r_commit -> $new_commit"
+fi
+log_event "$OK" "updated demo site $slug ($r_commit -> $new_commit)"
+exit 0

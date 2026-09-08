@@ -1,0 +1,124 @@
+#!/bin/bash
+# info: list published demo sites
+# options: [USER|all] [FORMAT]
+#
+# example: v-list-demo-sites
+# example: v-list-demo-sites admin json
+#
+# Lists demo sites (secret demo URLs under the panel domain). Without a
+# user argument (or with 'all') every user's demos are listed — for the
+# panel's admin overview. SIZE is the published tree only, in MiB.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+user=${1:-all}
+format=${2-shell}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/demo-site.sh
+source $HESTIA/func/demo-site.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '0' "$#" '[USER|all] [FORMAT]'
+if [ "$user" != "all" ]; then
+	is_format_valid 'user'
+fi
+is_format_valid 'format'
+
+# Ensure root
+if [ "x$(id -u)" != 'x0' ]; then
+	echo "ERROR: Script can be executed only by root user"
+	exit 10
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Collect raw TSV rows: owner<TAB>slug<TAB>name<TAB>repo<TAB>branch<TAB>
+# subdir<TAB>commit<TAB>created<TAB>updated<TAB>state<TAB>size_mib
+rows=""
+for reg_dir in "$HESTIA"/data/users/*/demo-sites; do
+	[ -d "$reg_dir" ] || continue
+	owner=$(basename "$(dirname "$reg_dir")")
+	if [ "$user" != "all" ] && [ "$owner" != "$user" ]; then
+		continue
+	fi
+	for reg in "$reg_dir"/*.conf; do
+		[ -f "$reg" ] || continue
+		r_slug=$(demo_reg_key "$reg" "SLUG")
+		[ -n "$r_slug" ] || continue
+		r_name=$(demo_reg_key "$reg" "NAME")
+		r_repo=$(demo_reg_key "$reg" "REPO")
+		r_branch=$(demo_reg_key "$reg" "BRANCH")
+		r_subdir=$(demo_reg_key "$reg" "SUBDIR")
+		r_commit=$(demo_reg_key "$reg" "COMMIT")
+		r_created=$(demo_reg_key "$reg" "CREATED")
+		r_updated=$(demo_reg_key "$reg" "UPDATED")
+		r_state=$(demo_reg_key "$reg" "STATE")
+		r_dir=$(demo_reg_key "$reg" "DIR")
+		r_size=0
+		[ -n "$r_dir" ] && [ -d "$r_dir" ] && r_size=$(du -sm "$r_dir" 2>/dev/null | cut -f1)
+		rows="${rows}${owner}	${r_slug}	${r_name}	${r_repo}	${r_branch}	${r_subdir}	${r_commit}	${r_created}	${r_updated}	${r_state}	${r_size}
+"
+	done
+done
+
+json_list() {
+	printf '%s' "$rows" | python3 -c '
+import json, sys
+cols = ["OWNER","SLUG","NAME","REPO","BRANCH","SUBDIR","COMMIT",
+        "CREATED","UPDATED","STATE","SIZE_MB"]
+out = {}
+for line in sys.stdin.read().splitlines():
+    if not line.strip():
+        continue
+    vals = line.split("\t")
+    vals += [""] * (len(cols) - len(vals))
+    item = dict(zip(cols, vals))
+    item["SIZE_MB"] = item["SIZE_MB"] or "0"
+    item["URL_PATH"] = "/" + item["SLUG"] + "/"
+    out[item["SLUG"]] = item
+print(json.dumps(out, indent=2))
+'
+}
+
+shell_list() {
+	printf '%s' "$rows" | python3 -c '
+import sys
+cols = ["OWNER","SLUG","REPO","BRANCH","COMMIT","UPDATED","SIZE_MB"]
+rows = [l.split("\t") for l in sys.stdin.read().splitlines() if l.strip()]
+idx = dict(c=i for i,c in enumerate(["OWNER","SLUG","NAME","REPO","BRANCH","SUBDIR","COMMIT","CREATED","UPDATED","STATE","SIZE_MB"]))
+w = [max([len(c)]+[len(r[idx[c]]) for r in rows]) if rows else len(c) for c in cols]
+print("  ".join(c.ljust(w[i]) for i,c in enumerate(cols)))
+print("  ".join("-"*x for x in w))
+for r in rows:
+    print("  ".join(r[idx[c]].ljust(w[i]) for i,c in enumerate(cols)))
+print()
+print("Demos: %d" % len(rows))
+'
+}
+
+plain_list() {
+	printf '%s' "$rows" | cut -f2
+}
+
+case "$format" in
+	json) json_list ;;
+	plain) plain_list ;;
+	shell) shell_list ;;
+	*) check_result "$E_INVALID" "invalid format: $format" ;;
+esac
+
+exit 0

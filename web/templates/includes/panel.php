@@ -185,6 +185,16 @@
 								</a>
 							</li>
 
+							<!-- Demo Sites (secret demo URLs under the panel domain) — all users -->
+							<li class="top-bar-menu-item">
+								<a title="<?= function_exists('__tr') ? __tr("Demo Sites", "Demo Siteler") : _("Demo Sites") ?>" class="top-bar-menu-link <?php if ($TAB == "DEMO") {
+									echo "active";
+								} ?>" href="/list/demo/">
+									<i class="fas fa-flask icon-teal"></i>
+									<span class="top-bar-menu-link-label u-hide-desktop"><?= function_exists('__tr') ? __tr("Demo Sites", "Demo Siteler") : _("Demo Sites") ?></span>
+								</a>
+							</li>
+
 							<!-- GitHub & CI/CD Integration — admin only -->
 							<?php if (($_SESSION["userContext"] ?? "") === "admin") { ?>
 							<li class="top-bar-menu-item">
