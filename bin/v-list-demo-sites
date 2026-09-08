@@ -99,7 +99,7 @@ shell_list() {
 import sys
 cols = ["OWNER","SLUG","REPO","BRANCH","COMMIT","UPDATED","SIZE_MB"]
 rows = [l.split("\t") for l in sys.stdin.read().splitlines() if l.strip()]
-idx = dict(c=i for i,c in enumerate(["OWNER","SLUG","NAME","REPO","BRANCH","SUBDIR","COMMIT","CREATED","UPDATED","STATE","SIZE_MB"]))
+idx = {c: i for i, c in enumerate(["OWNER","SLUG","NAME","REPO","BRANCH","SUBDIR","COMMIT","CREATED","UPDATED","STATE","SIZE_MB"])}
 w = [max([len(c)]+[len(r[idx[c]]) for r in rows]) if rows else len(c) for c in cols]
 print("  ".join(c.ljust(w[i]) for i,c in enumerate(cols)))
 print("  ".join("-"*x for x in w))

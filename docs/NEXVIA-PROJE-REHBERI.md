@@ -679,6 +679,7 @@ Bir deploy bozulursa ilk bakılacak yer `deploy.log` (compose'un ham çıktısı
 | **WAF + fail2ban** | Domain bazlı WAF (Enterprise Threat Shield) + 7 fail2ban jail hazır. |
 | **phpMyAdmin SSO** | DB sekmesinden tek tık şifresiz yönetim. |
 | **LE + Cloudflare API** | Domain ekleme/sertifika/DNS tamamen panelden. |
+| **🧪 Demo Siteler** | Panelden **Demo Siteler** sayfası: bir GitHub reposunu saniyeler içinde `https://panel.nexviastudio.com/<ad>-<rastgele16>/` adresinde gizli DEMO olarak yayınlar (düz HTML + PHP; derleme/DB yok). URL rastgele olduğu için bilmeyen bulamaz; repoya push atınca demo otomatik güncellenir. CLI: `v-add-demo-site kullanıcı repo [dal] [ad] [altklasör]`, `v-list-demo-sites`, `v-update-demo-site`, `v-delete-demo-site`. **Demo repolarında bağlantılar/assetler göreli yol olmalı** (`css/x.css` ✔, `/css/x.css` ✘ — kök dizin sanıp panel alan adına düşer) ve kökte `index.html`/`index.php` bulunmalı; site repo içindeki bir klasördeyse alt klasör parametresini kullanın. PHP, izole `nexviademo` kullanıcılı ayrı php-fpm havuzunda `open_basedir` hapsinde çalışır (DB bağlanmaz). |
 
 ---
 
