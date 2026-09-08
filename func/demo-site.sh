@@ -167,6 +167,31 @@ demo_reg_file() {
 	echo "$HESTIA/data/users/$1/demo-sites/$2.conf"
 }
 
+# Purge the panel domain's caches (nginx/OPcache/Cloudflare) after a demo
+# changed, mirroring v-update-web-domain-git's deploy flow. The panel
+# domain is discovered from the live conf that includes demo-sites.
+demo_purge_cache() {
+	local conf domain owner uc
+	for conf in /etc/nginx/conf.d/domains/*.ssl.conf; do
+		[ -f "$conf" ] || continue
+		grep -q "demo-sites" "$conf" || continue
+		domain=$(basename "$conf" .ssl.conf)
+		for uc in "$HESTIA"/data/users/*/web.conf; do
+			if grep -q "^DOMAIN='$domain' " "$uc" 2>/dev/null; then
+				owner=$(basename "$(dirname "$(dirname "$uc")")")
+				break
+			fi
+		done
+		break
+	done
+	if [ -z "$owner" ] || [ -z "$domain" ] || [ ! -x "$BIN/v-purge-web-domain-cache" ]; then
+		return 0
+	fi
+	$BIN/v-purge-web-domain-cache "$owner" "$domain" all >/dev/null 2>&1 \
+		&& echo "[*] Panel domain cache purged ($domain)." \
+		|| echo "[!] Panel domain cache purge reported an error ($domain)."
+}
+
 # Read one key='val' pair from a registry file without sourcing it
 # (sourcing would clobber the caller's shell variables).
 demo_reg_key() {

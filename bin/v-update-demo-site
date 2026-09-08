@@ -64,6 +64,13 @@ new_commit=$(demo_git -C "$r_dir/.src" rev-parse --short HEAD 2>/dev/null || ech
 
 demo_publish_tree "$slug" "$r_subdir" || check_result "$E_INVALID" "failed to re-publish demo tree"
 
+# Fresh content must be visible on a plain reload (no Ctrl+F5): purge the
+# panel domain caches when HEAD actually moved (up-to-date pulls don't purge,
+# same semantics as v-update-web-domain-git).
+if [ "$new_commit" != "$r_commit" ]; then
+	demo_purge_cache
+fi
+
 demo_reg_set_key "$reg" "COMMIT" "$new_commit"
 demo_reg_set_key "$reg" "UPDATED" "$(date '+%F %T')"
 
