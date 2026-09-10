@@ -138,6 +138,46 @@ fi
 total=$((total + ${#demo_pids[@]}))
 failed=$((failed + demo_failed))
 
+# ---- Docker apps (compose services) ------------------------------------
+# Docker-app registry REPO is a full git URL; match by repo basename like the
+# loops above so one push redeploys the compose app cloned from that repo.
+# v-update-docker-app pulls, rebuilds and re-ups with ports/.env preserved.
+docker_pids=()
+for app_conf in "$HESTIA"/data/docker-apps/*/app.conf; do
+	[ -f "$app_conf" ] || continue
+	app_name=$(sed -n "s/^APP='\([^']*\)'$/\1/p" "$app_conf" | head -1)
+	app_repo=$(sed -n "s/^REPO='\([^']*\)'$/\1/p" "$app_conf" | head -1)
+	[ -n "$app_name" ] && [ -n "$app_repo" ] || continue
+	# A suspended app stays suspended — a push must not silently resume it.
+	app_state=$(sed -n "s/^STATE='\([^']*\)'$/\1/p" "$app_conf" | head -1)
+	[ "$app_state" = "suspended" ] && continue
+	if [ -n "$target_repo" ]; then
+		repo_base=$(basename "$app_repo" .git)
+		if [ "$repo_base" != "$target_repo" ] && [[ "$app_repo" != *"/$target_repo.git" ]] && [[ "$app_repo" != *"/$target_repo" ]]; then
+			continue
+		fi
+	fi
+	echo "[*] Triggering update for docker app: $app_name..."
+	(
+		$BIN/v-update-docker-app "$app_name"
+		exit $?
+	) &
+	docker_pids+=($!)
+done
+
+docker_failed=0
+for i in "${!docker_pids[@]}"; do
+	if ! wait "${docker_pids[$i]}" 2>/dev/null; then
+		docker_failed=$((docker_failed + 1))
+	fi
+done
+if [ "$docker_failed" -gt 0 ]; then
+	echo "[!] FINISHED WITH ERRORS: $docker_failed docker app update(s) FAILED (see v-update-docker-app output above)."
+fi
+
+total=$((total + ${#docker_pids[@]}))
+failed=$((failed + docker_failed))
+
 # A push for a repo with zero connected domains/demos is almost certainly a
 # misconfiguration (e.g. a site deployed from GitHub without registering
 # auto-sync) — it must never hide behind a "SUCCESS (0 sites)" line, which
@@ -145,9 +185,9 @@ failed=$((failed + demo_failed))
 zero_match=0
 if [ -n "$target_repo" ] && [ "$total" -eq 0 ]; then
 	zero_match=1
-	echo "[!] WARNING: push received for '$target_repo' but no domain or demo site on this server is connected to that repository — nothing was updated."
-	echo "    Connect the site with: v-add-web-domain-git <user> <domain> <repo-url> — or publish a demo with: v-add-demo-site <user> <repo>."
-	$BIN/v-add-user-notification admin "GitHub Sync" "GitHub'dan '${target_repo}' deposuna push geldi ama bu depoya bağlı site/demo yok — hiçbir şey güncellenmedi. Siteyi bağlamak için: v-add-web-domain-git kullanıcı domain repo-url · Demo yayınlamak için: v-add-demo-site kullanıcı repo" 2>/dev/null || true
+	echo "[!] WARNING: push received for '$target_repo' but no domain, demo site or docker app on this server is connected to that repository — nothing was updated."
+	echo "    Connect the site with: v-add-web-domain-git <user> <domain> <repo-url> — publish a demo with: v-add-demo-site <user> <repo> — or deploy the compose stack with: v-add-docker-app <app> <repo-url>."
+	$BIN/v-add-user-notification admin "GitHub Sync" "GitHub'dan '${target_repo}' deposuna push geldi ama bu depoya bağlı site/demo/docker uygulaması yok — hiçbir şey güncellenmedi. Siteyi bağlamak için: v-add-web-domain-git kullanıcı domain repo-url · Demo yayınlamak için: v-add-demo-site kullanıcı repo · Compose uygulaması kurmak için: v-add-docker-app uyguluma repo-url" 2>/dev/null || true
 fi
 
 if [ "$failed" -gt 0 ]; then
@@ -155,6 +195,6 @@ if [ "$failed" -gt 0 ]; then
 	exit 1
 fi
 if [ "$zero_match" -eq 0 ]; then
-	echo "[+] SUCCESS: All connected domains and demo sites (${total} total) updated from GitHub in parallel with zero downtime."
+	echo "[+] SUCCESS: All connected domains, demo sites and docker apps (${total} total) updated from GitHub in parallel with zero downtime."
 fi
 exit 0
