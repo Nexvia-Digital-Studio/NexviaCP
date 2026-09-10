@@ -195,20 +195,83 @@ if command -v docker >/dev/null 2>&1; then
 				dapp=$(basename "$(dirname "$acf")")
 				c_ids=$(docker ps -q --filter "label=com.docker.compose.project=nexvia-$dapp" 2>/dev/null)
 				if [ -n "$c_ids" ]; then
-					docker_args=()
+					engine_mem=""
 					if [ "$mem_max" != "unlimited" ]; then
-						docker_args+=(-m "$(echo "$mem_max" | tr '[:upper:]' '[:lower:]')" --memory-swap "$(echo "$mem_max" | tr '[:upper:]' '[:lower:]')")
+						engine_mem=$(echo "$mem_max" | tr '[:upper:]' '[:lower:]')
 					elif [ "$mem_high" != "unlimited" ]; then
-						docker_args+=(-m "$(echo "$mem_high" | tr '[:upper:]' '[:lower:]')" --memory-swap "$(echo "$mem_high" | tr '[:upper:]' '[:lower:]')")
+						engine_mem=$(echo "$mem_high" | tr '[:upper:]' '[:lower:]')
 					fi
+					cpu_val=""
 					if [ "$cpu_quota" != "unlimited" ]; then
 						cpu_num=$(echo "$cpu_quota" | tr -d '%')
 						cpu_val=$(awk "BEGIN {print $cpu_num / 100}")
-						docker_args+=(--cpus "$cpu_val")
 					fi
-					if [ ${#docker_args[@]} -gt 0 ]; then
-						docker update "${docker_args[@]}" $c_ids >/dev/null 2>&1 || true
+					# Compose-beyanlı mem_limit TABANLARI: motor değerleri bir
+					# servisin beyan limitinin altına inemez (headless-Chrome
+					# crawler gibi ağır servisler 256M'de OOM olur). Beyan
+					# yoksa motor değeri aynen geçerli. Beyanlar her uygulamada
+					# duruma göre değişir → konteyner başına uygulanır.
+					declare -A floor_mem=()
+					cfile=$(grep -m1 '^COMPOSE_FILE=' "$acf" | cut -d"'" -f2)
+					[ -n "$cfile" ] || cfile="docker-compose.yml"
+					appd=$(dirname "$acf")
+					while IFS='~' read -r f_svc f_lim; do
+						[ -n "$f_svc" ] && [ -n "$f_lim" ] && floor_mem[$f_svc]=$f_lim
+					done < <(cd "$appd/repo" 2>/dev/null && docker compose \
+						--env-file "$appd/.env" -f "$cfile" \
+						$( [ -f "$appd/nexvia-override.yml" ] && printf '%s ' -f "$appd/nexvia-override.yml" ) \
+						$( [ -f "$appd/nexvia-user-override.yml" ] && printf '%s ' -f "$appd/nexvia-user-override.yml" ) \
+						config --format json 2>/dev/null | python3 -c '
+import json, re, sys
+def to_bytes(v):
+    v = str(v).strip()
+    if v.isdigit():
+        return int(v)
+    m = re.match(r"^(\d+(?:\.\d+)?)\s*([kmgtpe]?)(?:i?b)?$", v.lower())
+    if not m:
+        return None
+    mult = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3,
+            "t": 1024**4, "p": 1024**5, "e": 1024**6}[m.group(2)]
+    return int(float(m.group(1)) * mult)
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for name, svc in (doc.get("services") or {}).items():
+    raw = svc.get("mem_limit")
+    if raw is None:
+        try:
+            raw = svc["deploy"]["resources"]["limits"]["memory"]
+        except (KeyError, TypeError):
+            continue
+    val = to_bytes(raw)
+    if val:
+        print(f"{name}~{val}")
+')
+					engine_mem_bytes=0
+					if [ -n "$engine_mem" ]; then
+						engine_mem_bytes=$(numfmt --from=iec "$engine_mem" 2>/dev/null || echo 0)
 					fi
+					for cid in $c_ids; do
+						docker_args=()
+						if [ -n "$engine_mem" ]; then
+							eff_mem_bytes=$engine_mem_bytes
+							c_svc=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}}' "$cid" 2>/dev/null)
+							f_lim=${floor_mem[$c_svc]:-0}
+							if [ "$f_lim" -gt "$eff_mem_bytes" ]; then
+								eff_mem_bytes=$f_lim
+							fi
+							if [ "$eff_mem_bytes" -gt 0 ]; then
+								docker_args+=(-m "$eff_mem_bytes" --memory-swap "$eff_mem_bytes")
+							fi
+						fi
+						if [ -n "$cpu_val" ]; then
+							docker_args+=(--cpus "$cpu_val")
+						fi
+						if [ ${#docker_args[@]} -gt 0 ]; then
+							docker update "${docker_args[@]}" "$cid" >/dev/null 2>&1 || true
+						fi
+					done
 				fi
 				break 2
 			fi
