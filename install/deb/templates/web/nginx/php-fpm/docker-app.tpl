@@ -19,10 +19,6 @@ server {
 		return 404;
 	}
 
-	location ^~ /.well-known/acme-challenge/ {
-		root %home%/%user%/web/%domain%/public_html;
-		default_type text/plain;
-	}
 
 	location / {
 		# %app_port% is the loopback host port of the mapped compose

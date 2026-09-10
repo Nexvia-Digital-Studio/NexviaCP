@@ -177,7 +177,15 @@ if yaml is not None:
                         continue
                     p = os.path.normpath(os.path.join(base, entry))
                     if not os.path.exists(p):
-                        open(p, "a").close()
+                        # Eksik env_file → panele yönetilen .env'e symlink.
+                        # (Boş placeholder sessiz misconfig'tü: compose env_file
+                        # repodaki dosyaya çözümlenir, --env-file yalnızca
+                        # ${...} yerine koyma yaptığından değerler konteynere
+                        # hiç ulaşmıyordu.)
+                        try:
+                            os.symlink(env_file, p)
+                        except OSError:
+                            open(p, "a").close()
         except yaml.YAMLError:
             pass
 
