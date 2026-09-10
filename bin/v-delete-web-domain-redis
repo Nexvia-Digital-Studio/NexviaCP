@@ -39,9 +39,25 @@ fi
 # Get current Redis DB from web.conf
 current_db=$(get_object_values 'web' 'DOMAIN' "$domain" '$REDIS_DB')
 
-# Optionally flush the keys in the unassigned DB
+# Discover Redis password from server config (kept off argv via REDISCLI_AUTH,
+# same pattern as v-purge-web-domain-cache) and flush the unassigned DB.
+redis_pass=""
+for _rc in /etc/redis/redis.conf /etc/redis/redis-server.conf; do
+	[ -f "$_rc" ] || continue
+	redis_pass=$(grep -E '^\s*requirepass\s+' "$_rc" | awk '{print $2}' | tr -d '"' | tr -d "'" | head -n1)
+	[ -n "$redis_pass" ] && break
+done
+
+redis_run() {
+	if [ -n "$redis_pass" ]; then
+		REDISCLI_AUTH="$redis_pass" redis-cli --no-auth-warning "$@"
+	else
+		redis-cli "$@"
+	fi
+}
+
 if [ "$flush_db" = "yes" ] && [ -n "$current_db" ] && [ "$current_db" != "null" ]; then
-	redis-cli -n "$current_db" flushdb async 2>/dev/null || redis-cli -n "$current_db" flushdb 2>/dev/null || true
+	redis_run -n "$current_db" flushdb async 2>/dev/null || redis_run -n "$current_db" flushdb 2>/dev/null || true
 fi
 
 # Locate project document root and target .env paths

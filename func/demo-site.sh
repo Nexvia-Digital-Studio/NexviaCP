@@ -150,6 +150,10 @@ location ^~ /$slug/ {
 		fastcgi_pass unix:$DEMO_PHP_SOCK;
 		fastcgi_index index.php;
 		fastcgi_param SCRIPT_FILENAME \$request_filename;
+		# Per-slug jail: overrides the pool-wide open_basedir (request-time
+		# admin value wins over pool default) so one demo can never read
+		# another demo's tree.
+		fastcgi_param PHP_ADMIN_VALUE "open_basedir=$DEMO_DEMOS_DIR/$slug:/var/lib/php/sessions:/tmp:/usr/share/php";
 		fastcgi_read_timeout 60s;
 	}
 }

@@ -96,6 +96,9 @@ catch_workers_output = yes
 slowlog = /var/log/hestia/demo-php-slow.log
 request_slowlog_timeout = 15s
 php_admin_value[open_basedir] = $DEMO_DEMOS_DIR:/var/lib/php/sessions:/tmp:/usr/share/php
+php_admin_value[disable_functions] = exec,passthru,system,shell_exec,popen,proc_open,pcntl_exec,putenv,dl,mail,socket_create,socket_bind,socket_listen,socket_accept,stream_socket_server,pfsockopen
+php_admin_flag[allow_url_fopen] = off
+php_admin_flag[allow_url_include] = off
 php_admin_value[upload_max_filesize] = 32M
 php_admin_value[post_max_size] = 32M
 php_admin_value[max_execution_time] = 60
@@ -106,6 +109,100 @@ php_admin_flag[display_errors] = off"
 		chmod 644 "$pool_file"
 		PHP_POOL_CHANGED=1
 		echo "[+] php$PHP_POOL_VER-fpm pool 'nexvia-demo' written."
+	fi
+fi
+
+# --- demo PHP network jail (nftables egress filter) -------------------
+# Demos need zero server-side network EXCEPT repo sync (demo_git runs git
+# as the pool user -> github.com:443 + DNS). Blocks SSRF/lateral movement
+# to localhost services even if a demo repo is compromised; separate inet
+# table survives v-update-firewall INPUT rebuilds. All steps idempotent.
+if command -v nft >/dev/null 2>&1; then
+	mkdir -p /etc/nftables.d
+	jail_changed=0
+	if ! grep -q "nxv_phpjail" /etc/nftables.d/nexvia-phpjail.nft 2>/dev/null; then
+		cat > /etc/nftables.d/nexvia-phpjail.nft <<'NXV_JAIL_EOF'
+# Nexvia demo-PHP network jail — egress filter for the demo pool user.
+# Applied by nexvia-phpjail.service. GitHub ranges per api.github.com/meta.
+table inet nxv_phpjail {
+	set gh_v4 {
+		type ipv4_addr
+		flags interval
+		elements = { 140.82.112.0/20, 143.55.192.0/20, 185.199.108.0/22,
+		             192.30.252.0/22, 20.201.28.151, 20.205.243.166,
+		             102.133.202.242, 20.248.137.48, 20.207.73.82,
+		             20.27.177.113, 20.200.245.247, 20.233.83.145,
+		             20.5.157.168, 20.61.105.242, 20.66.244.0/24 }
+	}
+	set gh_v6 {
+		type ipv6_addr
+		flags interval
+		elements = { 2a0a:a440::/29, 2606:50c0::/32 }
+	}
+	chain jail_out {
+		type filter hook output priority filter; policy accept;
+		meta skuid nexviademo udp dport 53 accept comment "dns for git sync"
+		meta skuid nexviademo tcp dport 53 accept comment "dns for git sync"
+		meta skuid nexviademo ip  daddr @gh_v4 tcp dport 443 accept comment "git sync github"
+		meta skuid nexviademo ip6 daddr @gh_v6 tcp dport 443 accept comment "git sync github v6"
+		meta skuid nexviademo counter reject comment "demo php jail"
+	}
+}
+NXV_JAIL_EOF
+		chmod 644 /etc/nftables.d/nexvia-phpjail.nft
+		jail_changed=1
+	fi
+	if [ ! -x /usr/local/sbin/nxv-phpjail-apply ]; then
+		cat > /usr/local/sbin/nxv-phpjail-apply <<'NXV_APPLY_EOF'
+#!/bin/bash
+# Nexvia demo-PHP network jail applier — idempotent, run at boot/update.
+# Applies /etc/nftables.d/nexvia-phpjail.nft, then live-resolves the GitHub
+# hosts the demo repo-sync needs and adds them to the gh_v4 set (covers
+# regional IP variance beyond the static ranges).
+set -u
+NFT_FILE=/etc/nftables.d/nexvia-phpjail.nft
+command -v nft >/dev/null 2>&1 || exit 0
+[ -f "$NFT_FILE" ] || exit 0
+
+nft list table inet nxv_phpjail >/dev/null 2>&1 && nft delete table inet nxv_phpjail
+if ! nft -f "$NFT_FILE"; then
+	echo "nexvia-phpjail: nft apply failed" >&2
+	exit 1
+fi
+
+for h in github.com api.github.com codeload.github.com objects.githubusercontent.com; do
+	for ip in $(getent ahostsv4 "$h" 2>/dev/null | awk '{print $1}' | sort -u); do
+		nft add element inet nxv_phpjail gh_v4 "{ $ip }" 2>/dev/null || true
+	done
+done
+exit 0
+NXV_APPLY_EOF
+		chmod 700 /usr/local/sbin/nxv-phpjail-apply
+		jail_changed=1
+	fi
+	if ! grep -q "nxvia-phpjail" /etc/systemd/system/nexvia-phpjail.service 2>/dev/null; then
+		cat > /etc/systemd/system/nexvia-phpjail.service <<'NXV_UNIT_EOF'
+[Unit]
+Description=Nexvia demo-PHP network jail (nftables egress filter for nexviademo)
+After=network.target nss-user-lookup.target
+Documentation=file:///etc/nftables.d/nexvia-phpjail.nft
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/nxv-phpjail-apply
+ExecReload=/usr/local/sbin/nxv-phpjail-apply
+
+[Install]
+WantedBy=multi-user.target
+NXV_UNIT_EOF
+		systemctl daemon-reload
+		jail_changed=1
+	fi
+	systemctl enable nexvia-phpjail.service >/dev/null 2>&1 || true
+	if [ "$jail_changed" = "1" ]; then
+		systemctl restart nexvia-phpjail.service \
+			&& echo "[+] demo PHP network jail (re)applied."
 	fi
 fi
 
