@@ -14,8 +14,9 @@
 # Policy: 5 failed attempts per account within 900s -> 900s lockout.
 # Compensates for fail2ban being structurally blind to panel attackers
 # (all panel traffic reaches the origin from the proxy chain, never from
-# the attacker's real address). State files are keyed by md5(username)
-# inside a root-only directory, so account names are not disclosed.
+# the attacker's real address). State is keyed by (username, source IP)
+# inside a root-only directory, so a remote attacker's failures can never
+# lock the account owner out of their own login.
 
 source /etc/hestiacp/hestia.conf
 source $HESTIA/func/main.sh
@@ -43,7 +44,7 @@ LOCK=900
 THROTTLE_DIR=$HESTIA/data/login-throttle
 mkdir -p "$THROTTLE_DIR"
 chmod 700 "$THROTTLE_DIR"
-STATE_FILE=$THROTTLE_DIR/$(printf '%s' "$USER_ARG" | md5sum | cut -d" " -f1)
+STATE_FILE=$THROTTLE_DIR/$(printf '%s' "$USER_ARG|$IP" | md5sum | cut -d" " -f1)
 NOW=$(date +%s)
 
 sanitise() {

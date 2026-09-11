@@ -119,9 +119,17 @@ function authenticate_user($user, $password, $twofa = "") {
 		$v_ip = quoteshellarg($ip);
 		$v_user_agent = quoteshellarg($user_agent);
 
-		// Per-account lockout: fail2ban cannot see attacker IPs behind the proxy chain
+		// Lockout keys on the address the edge proxy reports (X-Real-IP),
+		// so a remote attacker cannot lock the account owner out
+		$throttle_ip = filter_var($_SERVER["HTTP_X_REAL_IP"] ?? "", FILTER_VALIDATE_IP);
+		if ($throttle_ip === false) {
+			$throttle_ip = $ip;
+		}
+		$v_throttle_ip = quoteshellarg($throttle_ip);
+
+		// Per-account brute-force lockout
 		exec(
-			HESTIA_CMD . "v-login-throttle check " . $v_user . " " . $v_ip,
+			HESTIA_CMD . "v-login-throttle check " . $v_user . " " . $v_throttle_ip,
 			$nxv_throttle_out,
 			$nxv_throttle_rc,
 		);
@@ -143,7 +151,7 @@ function authenticate_user($user, $password, $twofa = "") {
 		if ($return_var > 0) {
 			sleep(2);
 			exec(
-				HESTIA_CMD . "v-login-throttle fail " . $v_user . " " . $v_ip,
+				HESTIA_CMD . "v-login-throttle fail " . $v_user . " " . $v_throttle_ip,
 				$nxv_throttle_out,
 				$nxv_throttle_rc,
 			);
@@ -210,7 +218,7 @@ function authenticate_user($user, $password, $twofa = "") {
 			// Check API answer
 			if ($return_var > 0) {
 				exec(
-					HESTIA_CMD . "v-login-throttle fail " . $v_user . " " . $v_ip,
+					HESTIA_CMD . "v-login-throttle fail " . $v_user . " " . $v_throttle_ip,
 					$nxv_throttle_out,
 					$nxv_throttle_rc,
 				);
@@ -234,7 +242,7 @@ function authenticate_user($user, $password, $twofa = "") {
 				return $error;
 			} else {
 				exec(
-					HESTIA_CMD . "v-login-throttle clear " . $v_user . " " . $v_ip,
+					HESTIA_CMD . "v-login-throttle clear " . $v_user . " " . $v_throttle_ip,
 					$nxv_throttle_out,
 					$nxv_throttle_rc,
 				);
