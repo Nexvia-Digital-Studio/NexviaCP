@@ -104,7 +104,6 @@ if (\$http_user_agent ~* "(sqlmap|havij|nikto|acunetix|nessus|openvas|arachni|ma
     set \$waf_threat_type "BAD_BOT_SCANNER";
 }
 
-add_header X-WAF-Mode "detect" always;
 add_header X-WAF-Status "monitoring" always;
 add_header X-WAF-Detected \$waf_threat_type always;
 EOF
@@ -146,7 +145,6 @@ if (\$http_user_agent ~* "(sqlmap|havij|nikto|acunetix|nessus|openvas|arachni|ma
     return 403;
 }
 
-add_header X-WAF-Mode "block" always;
 add_header X-WAF-Shield "Protected by NexviaCP Threat Shield" always;
 EOF
 			;;
@@ -203,7 +201,6 @@ add_header X-Frame-Options "SAMEORIGIN" always;
 add_header X-Content-Type-Options "nosniff" always;
 add_header X-XSS-Protection "1; mode=block" always;
 add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-add_header X-WAF-Mode "aggressive" always;
 add_header X-WAF-Shield "Active (NexviaCP Maximum Shield)" always;
 EOF
 			;;

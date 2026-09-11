@@ -119,6 +119,18 @@ function authenticate_user($user, $password, $twofa = "") {
 		$v_ip = quoteshellarg($ip);
 		$v_user_agent = quoteshellarg($user_agent);
 
+		// Per-account lockout: fail2ban cannot see attacker IPs behind the proxy chain
+		exec(
+			HESTIA_CMD . "v-login-throttle check " . $v_user . " " . $v_ip,
+			$nxv_throttle_out,
+			$nxv_throttle_rc,
+		);
+		unset($nxv_throttle_out);
+		if ($nxv_throttle_rc != 0) {
+			sleep(2);
+			return _("Invalid username or password");
+		}
+
 		// Get user's salt
 		$output = "";
 		exec(
@@ -130,6 +142,12 @@ function authenticate_user($user, $password, $twofa = "") {
 		unset($output);
 		if ($return_var > 0) {
 			sleep(2);
+			exec(
+				HESTIA_CMD . "v-login-throttle fail " . $v_user . " " . $v_ip,
+				$nxv_throttle_out,
+				$nxv_throttle_rc,
+			);
+			unset($nxv_throttle_out);
 			if ($return_var == 5) {
 				$error = _("Account has been suspended");
 			} elseif ($return_var == 1) {
@@ -191,6 +209,12 @@ function authenticate_user($user, $password, $twofa = "") {
 			unlink($v_hash);
 			// Check API answer
 			if ($return_var > 0) {
+				exec(
+					HESTIA_CMD . "v-login-throttle fail " . $v_user . " " . $v_ip,
+					$nxv_throttle_out,
+					$nxv_throttle_rc,
+				);
+				unset($nxv_throttle_out);
 				sleep(2);
 				$error = _("Invalid username or password");
 				$v_session_id = quoteshellarg($_POST["token"]);
@@ -209,6 +233,13 @@ function authenticate_user($user, $password, $twofa = "") {
 				);
 				return $error;
 			} else {
+				exec(
+					HESTIA_CMD . "v-login-throttle clear " . $v_user . " " . $v_ip,
+					$nxv_throttle_out,
+					$nxv_throttle_rc,
+				);
+				unset($nxv_throttle_out);
+
 				// Get user specific parameters
 				exec(HESTIA_CMD . "v-list-user " . $v_user . " json", $output, $return_var);
 				$data = json_decode(implode("", $output), true);

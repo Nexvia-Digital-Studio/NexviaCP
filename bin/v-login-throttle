@@ -1,0 +1,98 @@
+#!/bin/bash
+# info: per-account login throttling for the control panel
+# options: ACTION USER [IP]
+#
+# example: v-login-throttle check admin 95.10.232.203
+# example: v-login-throttle fail admin 95.10.232.203
+# example: v-login-throttle clear admin
+#
+# Actions:
+#   check   exit 0 = attempt allowed, exit 1 = account temporarily locked
+#   fail    record a failed password attempt (locks after MAX_FAILS)
+#   clear   reset state after a successful login
+#
+# Policy: 5 failed attempts per account within 900s -> 900s lockout.
+# Compensates for fail2ban being structurally blind to panel attackers
+# (all panel traffic reaches the origin from the proxy chain, never from
+# the attacker's real address). State files are keyed by md5(username)
+# inside a root-only directory, so account names are not disclosed.
+
+source /etc/hestiacp/hestia.conf
+source $HESTIA/func/main.sh
+
+ACTION=${1:-}
+USER_ARG=${2:-}
+IP=${3:-unknown}
+
+if [ -z "$ACTION" ] || [ -z "$USER_ARG" ]; then
+	echo "Usage: v-login-throttle check|fail|clear USER [IP]"
+	exit 2
+fi
+case "$ACTION" in
+	check | fail | clear) ;;
+	*) exit 2 ;;
+esac
+if ! [[ "$USER_ARG" =~ ^[A-Za-z0-9._-]+$ ]]; then
+	exit 2
+fi
+
+WINDOW=900
+MAX_FAILS=5
+LOCK=900
+
+THROTTLE_DIR=$HESTIA/data/login-throttle
+mkdir -p "$THROTTLE_DIR"
+chmod 700 "$THROTTLE_DIR"
+STATE_FILE=$THROTTLE_DIR/$(printf '%s' "$USER_ARG" | md5sum | cut -d" " -f1)
+NOW=$(date +%s)
+
+sanitise() {
+	if [[ "$1" =~ ^[0-9]+$ ]]; then
+		echo "$1"
+	else
+		echo "$2"
+	fi
+}
+
+case "$ACTION" in
+	check)
+		if [ ! -f "$STATE_FILE" ]; then
+			exit 0
+		fi
+		exec 9>>"$STATE_FILE"
+		flock -x 9
+		read -r LAST COUNT UNTIL < "$STATE_FILE" || true
+		LAST=$(sanitise "$LAST" 0)
+		COUNT=$(sanitise "$COUNT" 0)
+		UNTIL=$(sanitise "$UNTIL" 0)
+		if [ "$NOW" -lt "$UNTIL" ]; then
+			echo "$(date '+%F %T') $USER_ARG $IP login throttled ($COUNT failed attempts, lockout active)" >>$HESTIA/log/auth.log
+			exit 1
+		fi
+		exit 0
+		;;
+	fail)
+		exec 9>>"$STATE_FILE"
+		flock -x 9
+		LAST=0
+		COUNT=0
+		UNTIL=0
+		if [ -s "$STATE_FILE" ]; then
+			read -r LAST COUNT UNTIL < "$STATE_FILE" || true
+			LAST=$(sanitise "$LAST" 0)
+			COUNT=$(sanitise "$COUNT" 0)
+			UNTIL=$(sanitise "$UNTIL" 0)
+		fi
+		if [ $((NOW - LAST)) -gt $WINDOW ]; then
+			COUNT=0
+		fi
+		COUNT=$((COUNT + 1))
+		if [ "$COUNT" -ge "$MAX_FAILS" ]; then
+			UNTIL=$((NOW + LOCK))
+		fi
+		echo "$NOW $COUNT $UNTIL" >"$STATE_FILE"
+		;;
+	clear)
+		rm -f "$STATE_FILE"
+		;;
+esac
