@@ -48,6 +48,15 @@ check_hestia_demo_mode
 #                       Action                             #
 #----------------------------------------------------------#
 
+# Nexvia: noreply@ takma adi silinecek hesaba bagliysa once API uzerinden kaldir
+# ve isaretle — ilk kalan hesaba yeniden baglanacak
+nxv_noreply_retarget=0
+if [[ "$MAIL_SYSTEM" =~ exim ]] \
+    && grep -q "^noreply@$domain_idn:$account@$domain_idn\$" "$HOMEDIR/$user/conf/mail/$domain/aliases" 2>/dev/null; then
+    $BIN/v-delete-mail-account-alias "$user" "$domain" "$account" 'noreply' >/dev/null 2>&1
+    nxv_noreply_retarget=1
+fi
+
 if [[ "$MAIL_SYSTEM" =~ exim ]]; then
 	aliases=$(get_object_value "mail/$domain" 'ACCOUNT' "$account" '$ALIAS')
 	for al in ${aliases//,/ }; do
@@ -74,6 +83,14 @@ sed -i "/ACCOUNT='$account'/d" $USER_DATA/mail/$domain.conf
 accounts=$(wc -l $USER_DATA/mail/$domain.conf | cut -f 1 -d ' ')
 decrease_user_value "$user" '$U_MAIL_ACCOUNTS'
 update_object_value 'mail' 'DOMAIN' "$domain" '$ACCOUNTS' "$accounts"
+
+# Nexvia: noreply@ takma adini ilk kalan hesaba yeniden bagla (hesap kalmadiysa eklenmez)
+if [ "$nxv_noreply_retarget" -eq 1 ]; then
+    nxv_first_acc=$(cut -d: -f1 "$HOMEDIR/$user/conf/mail/$domain/accounts" 2>/dev/null | head -n1)
+    if [ -n "$nxv_first_acc" ] && [ "$nxv_first_acc" != 'noreply' ]; then
+        $BIN/v-add-mail-account-alias "$user" "$domain" "$nxv_first_acc" 'noreply' >/dev/null 2>&1
+    fi
+fi
 
 # Logging
 $BIN/v-log-action "$user" "Info" "Mail" "Mail account removed (User: $account@$domain)."

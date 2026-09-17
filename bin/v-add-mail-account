@@ -148,6 +148,18 @@ accounts=$(wc -l $USER_DATA/mail/$domain.conf | cut -f 1 -d ' ')
 increase_user_value "$user" '$U_MAIL_ACCOUNTS'
 update_object_value 'mail' 'DOMAIN' "$domain" '$ACCOUNTS' "$accounts"
 
+# Nexvia: ilk hesapla birlikte noreply@ takma adi otomatik acilir
+# (uygulamalarin From: noreply@<domain> ile gonderebilmesi icin sender verify gecmeli)
+if [[ "$MAIL_SYSTEM" =~ exim ]] && [ "$account" != 'noreply' ]; then
+    nxv_acc_file="$HOMEDIR/$user/conf/mail/$domain/accounts"
+    nxv_ali_file="$HOMEDIR/$user/conf/mail/$domain/aliases"
+    if [ "$(grep -c . "$nxv_acc_file" 2>/dev/null)" -eq 1 ] \
+        && ! grep -q '^noreply:' "$nxv_acc_file" \
+        && ! grep -qi "^noreply@$domain_idn:" "$nxv_ali_file" 2>/dev/null; then
+        $BIN/v-add-mail-account-alias "$user" "$domain" "$account" 'noreply' >/dev/null 2>&1
+    fi
+fi
+
 # Logging
 $BIN/v-log-action "$user" "Info" "Mail" "Added new mail account ($account@$domain)."
 log_event "$OK" "$ARGUMENTS"
