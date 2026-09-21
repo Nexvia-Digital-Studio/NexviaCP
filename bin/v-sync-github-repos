@@ -75,6 +75,9 @@ for u_dir in "$HOMEDIR"/*; do
 			rc=$?
 			if [ $rc -ne 0 ]; then
 				echo "[!] FAILED: v-update-web-domain-git $user $domain (exit $rc)"
+				# Fail loudly: a silent deploy failure is how a site stays stale
+				# for days without anyone noticing.
+				$BIN/v-add-user-notification "$user" "GitHub Sync" "'$domain' için GitHub dağıtımı BAŞARISIZ (exit $rc). Ayrıntılar: /var/log/hestia/github-webhook.log — sorun giderildikten sonra 'v-update-web-domain-git $user $domain' ile yeniden deneyin." 2>/dev/null || true
 			fi
 			exit $rc
 		) &

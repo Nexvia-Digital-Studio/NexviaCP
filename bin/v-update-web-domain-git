@@ -36,13 +36,63 @@ cd "$docroot" || exit 1
 # actually moves HEAD, so "Already up to date." webhooks stay free.
 old_head=$(su - "$user" -s /bin/bash -c "cd '$docroot' && git rev-parse HEAD" 2>/dev/null)
 
-# Pull latest commits as user — a failed pull must abort the deploy instead
-# of reporting success with a stale tree.
-su - "$user" -s /bin/bash -c "cd '$docroot' && git pull" 2>&1
-pull_rc=$?
-if [ $pull_rc -ne 0 ]; then
-	echo "[!] ERROR: git pull failed for $domain (exit $pull_rc) — aborting update."
-	check_result "$E_CONNECT" "git pull failed :: $domain (exit $pull_rc)"
+# Fetch, then fast-forward. A bare `git pull` both aborts on a dirty tree and
+# can create surprise merge commits — and apps dirty their tree in normal
+# operation (admin image uploads overwriting tracked uploads/, generated
+# caches, sitemaps). One conflicting upload therefore used to stall that
+# site's deploys forever, silently. Recovery ladder:
+#   1. fetch + `merge --ff-only`          → the clean, common path
+#   2. dirty/diverged → audit the local state, log it, notify the user, then
+#      `reset --hard origin/<branch>`. Untracked files (fresh runtime uploads)
+#      are never touched, so nothing the site wrote is deleted; overwritten
+#      tracked paths and any dropped local commits are listed in the log and
+#      in the panel notification for auditability.
+git_as_user() {
+	su - "$user" -s /bin/bash -c "cd '$docroot' && git $1"
+}
+
+if ! git_out=$(git_as_user "fetch origin --prune" 2>&1); then
+	echo "[!] ERROR: git fetch failed for $domain — aborting update."
+	echo "$git_out"
+	check_result "$E_CONNECT" "git fetch failed :: $domain"
+fi
+
+branch=$(git_as_user "rev-parse --abbrev-ref HEAD" 2>/dev/null | head -1)
+if [ -z "$branch" ] || [ "$branch" = "HEAD" ]; then
+	branch=$(git_as_user "symbolic-ref -q --short HEAD" 2>/dev/null | head -1)
+fi
+if [ -z "$branch" ] || [ "$branch" = "HEAD" ]; then
+	# Detached HEAD: there is no branch to fast-forward or reset safely.
+	if git_as_user "merge --ff-only FETCH_HEAD" >/dev/null 2>&1; then
+		echo "[*] Detached HEAD fast-forwarded to FETCH_HEAD."
+		branch=""
+	else
+		echo "[!] ERROR: $domain is on a detached HEAD and cannot be fast-forwarded — aborting."
+		check_result "$E_CONNECT" "detached HEAD, ff failed :: $domain"
+	fi
+fi
+
+if [ -n "$branch" ]; then
+	if git_as_user "merge --ff-only origin/$branch" >/dev/null 2>&1; then
+		:
+	else
+		dirty_paths=$(git_as_user "status --porcelain" 2>/dev/null | grep -v '^??' | head -25)
+		dirty_count=$(git_as_user "status --porcelain" 2>/dev/null | grep -vc '^??')
+		local_ahead=$(git_as_user "rev-list --count origin/$branch..$branch" 2>/dev/null || echo 0)
+		if [ -n "$dirty_paths" ]; then
+			echo "[!] Working tree has $dirty_count locally modified tracked file(s) — listing up to 25:"
+			echo "$dirty_paths"
+		fi
+		if [ "${local_ahead:-0}" -gt 0 ] 2>/dev/null; then
+			echo "[!] Local branch is $local_ahead commit(s) ahead of origin/$branch — those commits will be detached (recoverable via reflog)."
+		fi
+		if ! git_as_user "reset --hard origin/$branch" >/dev/null 2>&1; then
+			echo "[!] ERROR: git reset --hard failed for $domain — aborting update."
+			check_result "$E_CONNECT" "git reset --hard failed :: $domain"
+		fi
+		echo "[+] Recovered with hard reset to origin/$branch (untracked runtime files preserved)."
+		$BIN/v-add-user-notification "$user" "GitHub Sync" "'$domain' için deploy, yerel değişiklikler ($dirty_count takipli dosya${local_ahead:+, $local_ahead yerel commit}) yüzünden fast-forward edilemedi ve origin/$branch ile eşitlendi. Takipsiz dosyalar (yeni yüklenenler) korundu; üzerine yazılanlar sunucu günlüğünde listelendi." 2>/dev/null || true
+	fi
 fi
 
 # Build if necessary

@@ -11,6 +11,17 @@ panel installation.
 
 ### Fixed
 
+- **GitHub webhook deploys no longer stall on a dirty working tree.**
+  `v-update-web-domain-git` replaced the bare `git pull` with
+  fetch + `merge --ff-only`, falling back to an audited `reset --hard
+  origin/<branch>` when the site's tree is locally modified or diverged —
+  the normal state for apps that overwrite tracked files at runtime (e.g.
+  an e-commerce admin replacing committed `uploads/` images). Untracked
+  runtime files (fresh uploads) are never deleted; overwritten paths and
+  dropped local commits are logged and reported via a panel notification,
+  and `v-sync-github-repos` now also raises a notification when a domain
+  update fails outright. Previously a single conflicting upload silently
+  froze that site's deployments at the last good commit.
 - **Installer no longer pins a non-existent package version.** The installer
   hard-coded `hestia=1.10.0-1+<distro>~alpha`, which is not published in the
   package repository, aborting the whole installation. The version is now
