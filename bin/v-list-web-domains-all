@@ -35,6 +35,13 @@ json_list() {
 		[ -f "$HESTIA/data/users/$u/web.conf" ] || continue
 		while read str; do
 			parse_object_kv_list "$str"
+			docroot_dir="$HOMEDIR/$u/web/$DOMAIN/public_html"
+			if [ -z "$GIT_REPO" ] && [ -d "$docroot_dir/.git" ]; then
+				GIT_REPO=$(su - "$u" -s /bin/bash -c "git -C '$docroot_dir' config --get remote.origin.url 2>/dev/null" || git -C "$docroot_dir" config --get remote.origin.url 2>/dev/null)
+				GIT_REPO=$(printf '%s' "$GIT_REPO" | sed -E 's#(://)[^/@]+@#\1#')
+				GIT_BRANCH=$(su - "$u" -s /bin/bash -c "git -C '$docroot_dir' rev-parse --abbrev-ref HEAD 2>/dev/null" || git -C "$docroot_dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
+				[ -z "$GIT_BRANCH" ] || [ "$GIT_BRANCH" = "HEAD" ] && GIT_BRANCH="main"
+			fi
 			echo "	\"$DOMAIN\": {"
 			echo "		\"IP\": \"$IP\","
 			echo "		\"TPL\": \"$TPL\","
@@ -47,6 +54,8 @@ json_list() {
 			echo "		\"U_DISK\": \"$U_DISK\","
 			echo "		\"U_BANDWIDTH\": \"$U_BANDWIDTH\","
 			echo "		\"_OWNER\": \"$u\","
+			echo "		\"GIT_REPO\": \"$GIT_REPO\","
+			echo "		\"GIT_BRANCH\": \"$GIT_BRANCH\","
 			echo "		\"TIME\": \"$TIME\","
 			echo "		\"DATE\": \"$DATE\""
 			if [ "$i" -lt "$objects" ]; then

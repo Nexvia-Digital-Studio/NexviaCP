@@ -7,6 +7,11 @@
 			</a>
 		</div>
 		<div class="toolbar-buttons">
+			<?php if (!empty($v_is_git) || !empty($v_git_repo)) { ?>
+				<a href="/edit/web/?<?= tohtml(http_build_query(array_filter(["domain" => $v_domain, "user" => ($_GET["user"] ?? ""), "git_pull" => "1", "token" => $_SESSION["token"]]))) ?>" class="button button-secondary" title="<?= tohtml(__tr("Pull & Update from GitHub", "GitHub'dan Güncelle (Pull & Rebuild)")) ?>">
+					<i class="fab fa-github icon-blue"></i><?= tohtml(__tr("Git Pull", "Git Pull")) ?>
+				</a>
+			<?php } ?>
 			<a href="/delete/web/cache/?<?= tohtml(http_build_query(["domain" => $v_domain, "token" => $_SESSION['token']])) ?>" class="button button-secondary js-clear-cache-button <?php if (!($v_nginx_cache == 'yes' || (($v_proxy_template == 'caching' || is_int(strpos($v_proxy_template, 'caching-'))) && $_SESSION['PROXY_SYSTEM'] == 'nginx'))) { echo "u-hidden"; } ?>">
 				<i class="fas fa-trash icon-red"></i><?= tohtml( _("Purge NGINX Cache")) ?>
 			</a>
@@ -145,6 +150,176 @@
 					</div>
 				</div>
 				<?php } ?>
+
+			<!-- GitHub Integration & Git Deployment Card -->
+			<div class="card u-mb20" style="border-left: 4px solid #2563eb;">
+				<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #d3d3d3; flex-wrap: wrap; background: #f8fafc;">
+					<div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap;">
+						<i class="fab fa-github fa-xl" style="color: #2563eb;"></i>
+						<span style="font-weight: 700; font-size: 14px; color: #1e293b;">
+							<?= tohtml(__tr("GitHub Integration & Git Deployment", "GitHub Entegrasyonu & Git Dağıtımı")) ?>
+						</span>
+						<?php if (!empty($v_is_git) || !empty($v_git_repo)) { ?>
+							<span class="badge" style="background:#dcfce7; color:#166534; font-size:12px; font-weight:700; padding:3px 10px; border-radius:99px;">
+								<i class="fas fa-circle-check u-mr5"></i><?= tohtml(__tr("Connected", "Bağlı & Aktif")) ?>
+							</span>
+						<?php } else { ?>
+							<span class="badge" style="background:#f1f5f9; color:#64748b; font-size:12px; font-weight:700; padding:3px 10px; border-radius:99px;">
+								<i class="fas fa-circle-xmark u-mr5"></i><?= tohtml(__tr("Not Connected", "Bağlı Değil")) ?>
+							</span>
+						<?php } ?>
+					</div>
+					<?php if (!empty($v_is_git) || !empty($v_git_repo)) { ?>
+						<a href="/edit/web/?<?= tohtml(http_build_query(array_filter(["domain" => $v_domain, "user" => ($_GET["user"] ?? ""), "git_pull" => "1", "token" => $_SESSION["token"]]))) ?>" class="button button-primary" style="background:#2563eb; color:#ffffff; font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius:6px; display:inline-flex; align-items:center; gap:6px;" onclick="this.innerHTML='<i class=\'fas fa-spinner fa-spin\'></i> <?= tohtml(__tr("Pulling...", "Çekiliyor...")) ?>';">
+							<i class="fab fa-github"></i><?= tohtml(__tr("Pull & Rebuild", "Manuel Git Pull Tetikle")) ?>
+						</a>
+					<?php } ?>
+				</div>
+				<div style="padding: 16px 18px;">
+					<?php if (!empty($v_is_git) || !empty($v_git_repo)) { 
+						$repo_clean = preg_replace('#^https?://([^@]+@)?#', 'https://', $v_git_repo);
+						$repo_slug = preg_replace('#^https?://(www\.)?github\.com/#i', '', $repo_clean);
+						$repo_slug = rtrim($repo_slug, '.git');
+					?>
+						<div style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 12px; background: #ffffff; padding: 14px 16px; border-radius: 6px; border: 1px solid #e2e8f0;">
+							<div style="min-width: 220px; flex: 1;">
+								<small style="color: #64748b; display: block; font-weight: 600; margin-bottom: 4px;"><?= tohtml(__tr("Connected Repository", "Bağlı GitHub Deposu")) ?></small>
+								<a href="<?= tohtml($repo_clean) ?>" target="_blank" rel="noopener" style="font-weight: 700; font-size: 14px; color: #2563eb; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
+									<i class="fab fa-github"></i> <?= tohtml($repo_slug ?: $v_git_repo) ?>
+									<i class="fas fa-arrow-up-right-from-square" style="font-size: 11px; opacity: 0.7;"></i>
+								</a>
+							</div>
+							<div>
+								<small style="color: #64748b; display: block; font-weight: 600; margin-bottom: 4px;"><?= tohtml(__tr("Branch", "Aktif Dal (Branch)")) ?></small>
+								<span class="badge badge-info" style="font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 99px;">
+									<i class="fas fa-code-branch u-mr5"></i><?= tohtml($v_git_branch ?: "main") ?>
+								</span>
+							</div>
+							<?php if (!empty($v_git_dirty)) { ?>
+								<div>
+									<small style="color: #64748b; display: block; font-weight: 600; margin-bottom: 4px;"><?= tohtml(__tr("Local State", "Yerel Durum")) ?></small>
+									<span class="badge badge-warning" style="font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 99px;">
+										<i class="fas fa-triangle-exclamation u-mr5"></i><?= tohtml(__tr("Modified files", "Yerel Değişiklik Var")) ?>
+									</span>
+								</div>
+							<?php } ?>
+						</div>
+
+						<?php if (!empty($v_git_commit_hash)) { ?>
+							<div style="background: rgba(0,0,0,0.02); border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin-bottom: 14px;">
+								<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+									<small style="color: #64748b; font-weight: 700;"><?= tohtml(__tr("Last Deployed Commit:", "Son Dağıtılan Commit:")) ?></small>
+									<code style="background: #1e293b; color: #38bdf8; padding: 2px 7px; border-radius: 4px; font-size: 12px; font-weight: 700;"><?= tohtml($v_git_commit_hash) ?></code>
+									<span style="font-weight: 600; font-size: 13px; color: #1e293b;"><?= tohtml($v_git_commit_msg) ?></span>
+								</div>
+								<?php if (!empty($v_git_commit_date) || !empty($v_git_commit_author)) { ?>
+									<div style="font-size: 11px; color: #64748b; margin-top: 5px;">
+										<?php if (!empty($v_git_commit_author)) { ?>
+											<span><i class="fas fa-user u-mr5"></i><?= tohtml($v_git_commit_author) ?></span>
+										<?php } ?>
+										<?php if (!empty($v_git_commit_date)) { ?>
+											<span style="margin-left: 10px;"><i class="fas fa-clock u-mr5"></i><?= tohtml($v_git_commit_date) ?></span>
+										<?php } ?>
+									</div>
+								<?php } ?>
+							</div>
+						<?php } ?>
+
+						<!-- Webhook Information -->
+						<div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px 14px; margin-bottom: 14px;">
+							<div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin-bottom: 8px;">
+								<div style="flex: 1; min-width: 250px;">
+									<label class="form-label u-mb5 u-text-bold" style="font-size: 12px; color: #475569;">
+										<i class="fas fa-link u-mr5"></i>Webhook URL (deploy.php)
+									</label>
+									<div style="display: flex; gap: 6px; align-items: center;">
+										<input type="text" class="form-control" value="<?= tohtml($v_git_webhook_url) ?>" readonly style="font-family: monospace; font-size: 12px; background: #f8fafc;">
+										<button type="button" class="button button-secondary" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" onclick="navigator.clipboard.writeText('<?= tohtml($v_git_webhook_url) ?>'); this.innerText='<?= tohtml(__tr('Copied!', 'Kopyalandı!')) ?>'; setTimeout(() => this.innerText='<?= tohtml(__tr('Copy', 'Kopyala')) ?>', 2000);">
+											<i class="fas fa-copy u-mr5"></i><?= tohtml(__tr("Copy", "Kopyala")) ?>
+										</button>
+									</div>
+								</div>
+								<?php if (!empty($v_git_secret)) { ?>
+									<div style="flex: 1; min-width: 250px;">
+										<label class="form-label u-mb5 u-text-bold" style="font-size: 12px; color: #475569;">
+											<i class="fas fa-key u-mr5"></i>Webhook Secret (HMAC-SHA256)
+										</label>
+										<div style="display: flex; gap: 6px; align-items: center;">
+											<input type="password" id="webhook-secret-input" class="form-control" value="<?= tohtml($v_git_secret) ?>" readonly style="font-family: monospace; font-size: 12px; background: #f8fafc;">
+											<button type="button" class="button button-secondary" style="padding: 6px 10px; font-size: 12px;" onclick="var s = document.getElementById('webhook-secret-input'); s.type = s.type === 'password' ? 'text' : 'password';">
+												<i class="fas fa-eye"></i>
+											</button>
+											<button type="button" class="button button-secondary" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" onclick="navigator.clipboard.writeText('<?= tohtml($v_git_secret) ?>'); this.innerText='<?= tohtml(__tr('Copied!', 'Kopyalandı!')) ?>'; setTimeout(() => this.innerText='<?= tohtml(__tr('Copy', 'Kopyala')) ?>', 2000);">
+												<i class="fas fa-copy u-mr5"></i><?= tohtml(__tr("Copy", "Kopyala")) ?>
+											</button>
+										</div>
+									</div>
+								<?php } ?>
+							</div>
+							<p style="font-size: 12px; color: #64748b; margin: 0; line-height: 1.4;">
+								💡 <strong><?= tohtml(__tr("Auto-Deploy:", "Otomatik Dağıtım:")) ?></strong>
+								<?= tohtml(__tr("Add this Webhook URL to GitHub (Repo > Settings > Webhooks) with 'application/json' format to trigger automatic deployments on git push.", "GitHub repository sayfanızda (Settings > Webhooks) bu adresi ve secret'ı ekleyin; her 'git push' yapıldığında siteniz otomatik olarak güncellenir.")) ?>
+							</p>
+						</div>
+
+						<!-- Action row -->
+						<div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+							<a href="/edit/web/?<?= tohtml(http_build_query(array_filter(["domain" => $v_domain, "user" => ($_GET["user"] ?? ""), "git_pull" => "1", "token" => $_SESSION["token"]]))) ?>" class="button button-primary" style="background:#2563eb; color:#ffffff; font-size: 13px; font-weight: 600; padding: 8px 18px; border-radius:6px; display:inline-flex; align-items:center; gap:8px;" onclick="this.innerHTML='<i class=\'fas fa-spinner fa-spin\'></i> <?= tohtml(__tr("Pulling from GitHub...", "GitHub\'dan Çekiliyor...")) ?>';">
+								<i class="fab fa-github fa-lg"></i> <?= tohtml(__tr("Manual Git Pull & Rebuild", "Manuel Git Pull & Rebuild Çalıştır")) ?>
+							</a>
+							<button type="button" class="button button-secondary" style="font-size: 13px;" onclick="var el = document.getElementById('git-manage-settings'); el.style.display = el.style.display === 'none' ? 'block' : 'none';">
+								<i class="fas fa-sliders u-mr5"></i><?= tohtml(__tr("Change Repo / Branch / Disconnect", "Repo & Dal Ayarlarını Değiştir")) ?>
+							</button>
+						</div>
+
+						<!-- Collapsible Git Configuration Form -->
+						<div id="git-manage-settings" style="display: none; margin-top: 14px; padding: 14px; background: #ffffff; border: 1px solid #d3d3d3; border-radius: 6px;">
+							<h4 style="margin: 0 0 10px 0; font-size: 13px; font-weight: 700; color: #1e293b;">
+								<?= tohtml(__tr("Git Integration Configuration", "Git Deposu ve Dal Ayarları")) ?>
+							</h4>
+							<div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px;">
+								<div style="flex: 2; min-width: 250px;">
+									<label class="form-label u-mb5" style="font-size: 12px; font-weight: 600;"><?= tohtml(__tr("Repository URL", "GitHub Repo URL")) ?></label>
+									<input type="text" class="form-control" name="v_git_repo" value="<?= tohtml($v_git_repo) ?>" placeholder="https://github.com/owner/repo.git">
+								</div>
+								<div style="flex: 1; min-width: 140px;">
+									<label class="form-label u-mb5" style="font-size: 12px; font-weight: 600;"><?= tohtml(__tr("Branch", "Dal (Branch)")) ?></label>
+									<input type="text" class="form-control" name="v_git_branch" value="<?= tohtml($v_git_branch ?: 'main') ?>" placeholder="main">
+								</div>
+							</div>
+							<div class="form-check" style="margin-top: 10px;">
+								<input class="form-check-input" type="checkbox" name="v_git_disable" id="v_git_disable" value="yes">
+								<label class="form-check-label" for="v_git_disable" style="color: #dc2626; font-size: 12px; font-weight: 600;">
+									<?= tohtml(__tr("Disconnect Git repository from this domain (disable webhook auto-deploy)", "Bu domainin Git bağlantısını sonlandır (otomatik webhook dağıtımını kapat)")) ?>
+								</label>
+							</div>
+							<p class="hint u-mt5" style="font-size: 11px;">
+								<?= tohtml(__tr("Click 'Save' at the top or bottom of the page to apply configuration changes.", "Değişikliklerin kaydedilmesi için sayfanın üst veya altındaki 'Kaydet' butonuna basınız.")) ?>
+							</p>
+						</div>
+
+					<?php } else { ?>
+						<p class="u-text-muted" style="margin: 0 0 12px 0; font-size: 13px; line-height: 1.5;">
+							<?= tohtml(__tr("This domain is not connected to a Git repository yet. You can connect a public or private GitHub repository to enable webhook auto-deployment and 1-click manual pulls.", "Bu alan adı henüz bir Git deposuna bağlı değil. Bir GitHub deposu bağlayarak webhook ile otomatik güncellemeleri ve tek tıkla manuel pull & derleme özelliğini aktif edebilirsiniz.")) ?>
+						</p>
+						<div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px;">
+							<div style="flex: 2; min-width: 250px;">
+								<label class="form-label u-mb5" style="font-size: 12px; font-weight: 600;"><?= tohtml(__tr("GitHub Repository URL", "GitHub Repo URL")) ?></label>
+								<input type="text" class="form-control" name="v_git_repo" value="" placeholder="https://github.com/owner/repository.git">
+								<small class="hint" style="font-size: 11px;"><?= tohtml(__tr("Example: https://github.com/username/project.git (For private repos include PAT or configure organization token)", "Örn: https://github.com/kullanici/proje.git (Özel repo ise PAT token kullanabilirsiniz)")) ?></small>
+							</div>
+							<div style="flex: 1; min-width: 140px;">
+								<label class="form-label u-mb5" style="font-size: 12px; font-weight: 600;"><?= tohtml(__tr("Branch", "Dal (Branch)")) ?></label>
+								<input type="text" class="form-control" name="v_git_branch" value="main" placeholder="main">
+								<small class="hint" style="font-size: 11px;"><?= tohtml(__tr("Default: main", "Varsayılan: main")) ?></small>
+							</div>
+						</div>
+						<p class="hint u-mt5" style="font-size: 11px;">
+							<?= tohtml(__tr("Enter the repository details and click 'Save' to initialize the repository for this domain.", "Repo bilgilerini girdikten sonra 'Kaydet' butonuna basarak depoyu bu domaine bağlayabilirsiniz.")) ?>
+						</p>
+					<?php } ?>
+				</div>
+			</div>
 
 			<div class="u-mb10">
 				<label for="v_domain" class="form-label"><?= tohtml( _("Domain")) ?></label>

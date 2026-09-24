@@ -39,6 +39,26 @@ unset($output);
 
 $is_tr = (($_SESSION['language'] ?? '') === 'tr' || ($_SESSION['LANGUAGE'] ?? '') === 'tr');
 
+// Action: Manual Git Pull & Rebuild for Domain
+if (!empty($_GET["git_pull"]) || !empty($_POST["git_pull"])) {
+	$csrf_data = !empty($_POST["git_pull"]) ? $_POST : $_GET;
+	if (verify_csrf($csrf_data)) {
+		$output = [];
+		exec(HESTIA_CMD . "v-update-web-domain-git " . $user . " " . quoteshellarg($v_domain), $output, $return_var);
+		if ($return_var == 0) {
+			$_SESSION["ok_msg"] = $is_tr ? "Web sitesi GitHub'dan başarıyla güncellendi (Pull & Build tamamlandı)." : _("Repository successfully pulled and updated from GitHub.");
+		} else {
+			$_SESSION["error_msg"] = ($is_tr ? "Git Pull hatası: " : _("Git pull error: ")) . implode(" ", array_slice($output, -3));
+		}
+		$redirect_params = ["domain" => $v_domain, "token" => $_SESSION["token"]];
+		if (!empty($_GET["user"])) {
+			$redirect_params["user"] = $_GET["user"];
+		}
+		header("Location: /edit/web/?" . http_build_query($redirect_params));
+		exit();
+	}
+}
+
 // Action: Save Domain .env Secret (Write-Only)
 if (!empty($_POST["save_env_secret"])) {
 	verify_csrf($_POST);
@@ -140,10 +160,19 @@ $v_proxy_template = $data[$v_domain]["PROXY"];
 $v_proxy_ext = str_replace(",", ", ", $data[$v_domain]["PROXY_EXT"]);
 $v_stats = $data[$v_domain]["STATS"];
 
-// NexviaCP Git Auto-Deploy fields (may be empty on older domains).
-$v_git_repo = $data[$v_domain]["GIT_REPO"] ?? "";
-$v_git_branch = $data[$v_domain]["GIT_BRANCH"] ?? "";
-$v_git_secret = $data[$v_domain]["GIT_DEPLOY_SECRET"] ?? "";
+// NexviaCP Git Auto-Deploy fields (via v-list-web-domain-git).
+$git_info_raw = shell_exec(HESTIA_CMD . "v-list-web-domain-git " . $user . " " . quoteshellarg($v_domain) . " json");
+$git_info = json_decode($git_info_raw, true) ?: [];
+$v_is_git = ($git_info["IS_GIT"] ?? "no") === "yes";
+$v_git_repo = $git_info["REPO_URL"] ?? ($data[$v_domain]["GIT_REPO"] ?? "");
+$v_git_branch = $git_info["BRANCH"] ?? ($data[$v_domain]["GIT_BRANCH"] ?? "main");
+$v_git_secret = $git_info["DEPLOY_SECRET"] ?? ($data[$v_domain]["GIT_DEPLOY_SECRET"] ?? "");
+$v_git_webhook_url = $git_info["WEBHOOK_URL"] ?? ("https://" . $v_domain . "/deploy.php");
+$v_git_commit_hash = $git_info["COMMIT_HASH"] ?? "";
+$v_git_commit_msg = $git_info["COMMIT_MSG"] ?? "";
+$v_git_commit_date = $git_info["COMMIT_DATE"] ?? "";
+$v_git_commit_author = $git_info["COMMIT_AUTHOR"] ?? "";
+$v_git_dirty = ($git_info["IS_DIRTY"] ?? "no") === "yes";
 
 // NexviaCP per-domain cgroup limits (baseline + peak + cpu).
 $v_web_cgroup_high = $data[$v_domain]["WEB_CGROUP_HIGH"] ?? "";

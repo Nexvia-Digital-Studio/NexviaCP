@@ -329,6 +329,34 @@
 								<i class="fas fa-code-pull-request"></i> PR
 							</span>
 						<?php endif; ?>
+						<?php
+							$d_git_repo = $data[$key]['GIT_REPO'] ?? '';
+							$d_git_branch = $data[$key]['GIT_BRANCH'] ?? 'main';
+							$d_owner = $value["_owner"] ?? $user_plain;
+							$d_is_git = false;
+							if (empty($d_git_repo)) {
+								$homedir_base = $_SESSION['HOMEDIR'] ?? '/home';
+								if (file_exists($homedir_base . '/' . $d_owner . '/web/' . $key . '/public_html/.git') || file_exists('/home/' . $d_owner . '/web/' . $key . '/public_html/.git')) {
+									$d_is_git = true;
+								}
+							} else {
+								$d_is_git = true;
+							}
+						?>
+						<?php if (!empty($d_git_repo)): ?>
+							<?php
+								$d_clean_repo = preg_replace('#^https?://([^@]+@)?#', 'https://', $d_git_repo);
+								$d_repo_display = preg_replace('#^https?://(www\.)?github\.com/#i', '', $d_clean_repo);
+								$d_repo_display = rtrim($d_repo_display, '.git');
+							?>
+							<a href="<?= tohtml($d_clean_repo) ?>" target="_blank" rel="noopener" class="badge badge-info" style="font-size:10px; margin-left:4px; padding:2px 6px; text-decoration:none; display:inline-flex; align-items:center; gap:4px; vertical-align:middle;" title="<?= tohtml("GitHub: " . $d_git_repo . " (Branch: " . $d_git_branch . ")") ?>">
+								<i class="fab fa-github"></i> <?= tohtml($d_repo_display ?: $d_git_repo) ?> <span style="opacity:0.8;">(<?= tohtml($d_git_branch) ?>)</span>
+							</a>
+						<?php elseif (!empty($d_is_git)): ?>
+							<span class="badge badge-info" style="font-size:10px; margin-left:4px; padding:2px 6px; display:inline-flex; align-items:center; gap:4px; vertical-align:middle;" title="<?= tohtml(__tr("Git repository active", "Git deposu aktif")) ?>">
+								<i class="fab fa-github"></i> Git
+							</span>
+						<?php endif; ?>
 						<?php if (!empty($data[$key]['_subdomain_of'])): ?>
 							<span class="badge badge-secondary" style="font-size:10px; margin-left:4px; padding:2px 5px;" title="<?= tohtml(__tr("Subdomain of", "Şunun subdomaini")) ?>: <?= tohtml($data[$key]['_subdomain_of']) ?>">
 								<i class="fas fa-sitemap"></i> <?= tohtml($data[$key]['_subdomain_of']) ?>
@@ -368,7 +396,9 @@
 							if (strpos($_SERVER['HTTP_HOST'] ?? '', ':8083') !== false || ($_SERVER['SERVER_PORT'] ?? '') == '8083') {
 								$web_port_suffix = ":9080";
 							}
-							$is_git_domain = file_exists(($_SESSION['HOMEDIR'] ?? '/home') . '/' . $user_plain . '/web/' . $key . '/public_html/.git') || file_exists('/home/' . $user_plain . '/web/' . $key . '/public_html/.git');
+							$d_row_owner = $value["_owner"] ?? $user_plain;
+							$homedir_base = $_SESSION['HOMEDIR'] ?? '/home';
+							$is_git_domain = !empty($data[$key]['GIT_REPO']) || file_exists($homedir_base . '/' . $d_row_owner . '/web/' . $key . '/public_html/.git') || file_exists('/home/' . $d_row_owner . '/web/' . $key . '/public_html/.git');
 						?>
 						<li class="units-table-row-action" data-key-action="href">
 							<a
@@ -388,11 +418,11 @@
 									<li class="units-table-row-action" data-key-action="href">
 										<a
 											class="units-table-row-action-link"
-											href="/list/web/?git_update=1&domain=<?= urlencode($key) ?>&token=<?= tohtml($_SESSION["token"]) ?>"
-											title="<?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "GitHub'dan Güncelle (Pull & Build)" : _("Pull & Update from GitHub")) ?>"
+											href="/list/web/?git_pull=1&domain=<?= urlencode($key) ?>&user=<?= urlencode($d_row_owner) ?>&token=<?= tohtml($_SESSION["token"]) ?>"
+											title="<?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "GitHub'dan Güncelle (Manuel Pull & Rebuild)" : _("Pull & Update from GitHub")) ?>"
 										>
 											<i class="fab fa-github icon-blue"></i>
-											<span class="u-hide-desktop"><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Git Güncelle" : _("Git Update")) ?></span>
+											<span class="u-hide-desktop"><?= tohtml((($_SESSION['language'] ?? '') === 'tr') ? "Git Pull" : _("Git Pull")) ?></span>
 										</a>
 									</li>
 								<?php } ?>

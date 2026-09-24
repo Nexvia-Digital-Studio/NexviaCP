@@ -44,6 +44,13 @@ json_list() {
 			fi
 			EXPIRY_TYPE="1y"
 		fi
+		docroot_dir="${DOCROOT%/}"
+		if [ -z "$GIT_REPO" ] && [ -d "$docroot_dir/.git" ]; then
+			GIT_REPO=$(su - "$user" -s /bin/bash -c "git -C '$docroot_dir' config --get remote.origin.url 2>/dev/null" || git -C "$docroot_dir" config --get remote.origin.url 2>/dev/null)
+			GIT_REPO=$(printf '%s' "$GIT_REPO" | sed -E 's#(://)[^/@]+@#\1#')
+			GIT_BRANCH=$(su - "$user" -s /bin/bash -c "git -C '$docroot_dir' rev-parse --abbrev-ref HEAD 2>/dev/null" || git -C "$docroot_dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
+			[ -z "$GIT_BRANCH" ] || [ "$GIT_BRANCH" = "HEAD" ] && GIT_BRANCH="main"
+		fi
 		echo -n '    "'$DOMAIN'": {
         "IP": "'$IP'",
         "IP6": "'$IP6'",
@@ -67,6 +74,8 @@ json_list() {
         "EXPIRY_DATE": "'$EXPIRY_DATE'",
         "EXPIRY_TYPE": "'$EXPIRY_TYPE'",
         "RESOURCE_PRIORITY": "'$RESOURCE_PRIORITY'",
+        "GIT_REPO": "'$GIT_REPO'",
+        "GIT_BRANCH": "'$GIT_BRANCH'",
         "TIME": "'$TIME'",
         "DATE": "'$DATE'"
     }'

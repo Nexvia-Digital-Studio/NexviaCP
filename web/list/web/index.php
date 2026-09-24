@@ -26,13 +26,17 @@ function wz_filter_env_keys($raw) {
 	return implode(", ", array_slice($keys, 0, 12)) . $extra;
 }
 
-// Action: Update Git Repository for Web Domain
-if (!empty($_GET["git_update"]) && !empty($_GET["domain"])) {
+// Action: Update Git Repository for Web Domain (Manual Pull)
+if ((!empty($_GET["git_update"]) || !empty($_GET["git_pull"])) && !empty($_GET["domain"])) {
 	if (verify_csrf($_GET)) {
 		$v_domain = quoteshellarg($_GET["domain"]);
-		exec(HESTIA_CMD . "v-update-web-domain-git " . $user . " " . $v_domain, $output, $return_var);
+		$target_user = $user;
+		if (is_admin_overview() && !empty($_GET["user"])) {
+			$target_user = quoteshellarg($_GET["user"]);
+		}
+		exec(HESTIA_CMD . "v-update-web-domain-git " . $target_user . " " . $v_domain, $output, $return_var);
 		if ($return_var == 0) {
-			$_SESSION["ok_msg"] = $is_tr ? "Web sitesi GitHub'dan en güncel sürüme yükseltildi." : _("Web site updated successfully from GitHub.");
+			$_SESSION["ok_msg"] = $is_tr ? "Web sitesi GitHub'dan en güncel sürüme yükseltildi (Pull & Build tamamlandı)." : _("Web site updated successfully from GitHub.");
 		} else {
 			$_SESSION["error_msg"] = ($is_tr ? "Güncelleme hatası: " : _("Update error: ")) . implode(" ", array_slice($output, -3));
 		}

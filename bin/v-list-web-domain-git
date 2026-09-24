@@ -1,0 +1,114 @@
+#!/bin/bash
+# info: list git integration parameters and status for a web domain
+# options: USER DOMAIN [FORMAT]
+#
+# example: v-list-web-domain-git admin example.com json
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+[ -f /etc/hestiacp/hestia.conf ] && source /etc/hestiacp/hestia.conf
+[ -z "$HESTIA" ] && HESTIA="/usr/local/hestia"
+if [ ! -d "$HESTIA" ] && [ -d "$(cd "$(dirname "$0")/.." && pwd)" ]; then
+	HESTIA="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=/usr/local/hestia/func/main.sh
+[ -f "$HESTIA/func/main.sh" ] && source "$HESTIA/func/main.sh"
+# load config file
+[ -f "$HESTIA/conf/hestia.conf" ] && source_conf "$HESTIA/conf/hestia.conf"
+
+check_args '2' "$#" 'USER DOMAIN [FORMAT]'
+
+user=$1
+domain=$2
+format=${3:-json}
+
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
+
+docroot="$HOMEDIR/$user/web/$domain/public_html"
+
+# Read domain config from web.conf
+repo_url=$(get_object_value 'web' 'DOMAIN' "$domain" '$GIT_REPO')
+branch=$(get_object_value 'web' 'DOMAIN' "$domain" '$GIT_BRANCH')
+secret=$(get_object_value 'web' 'DOMAIN' "$domain" '$GIT_DEPLOY_SECRET')
+
+# Fallback: if GIT_REPO is not set in web.conf, check docroot/.git
+is_git="no"
+if [ -d "$docroot/.git" ]; then
+	is_git="yes"
+	if [ -z "$repo_url" ]; then
+		repo_url=$(su - "$user" -s /bin/bash -c "git -C '$docroot' config --get remote.origin.url 2>/dev/null")
+	fi
+	if [ -z "$branch" ]; then
+		branch=$(su - "$user" -s /bin/bash -c "git -C '$docroot' rev-parse --abbrev-ref HEAD 2>/dev/null")
+		[ -z "$branch" ] || [ "$branch" = "HEAD" ] && branch="main"
+	fi
+fi
+
+if [ -n "$repo_url" ]; then
+	is_git="yes"
+fi
+
+# Clean repo URL (strip tokens if any embedded)
+clean_repo=$(printf '%s' "$repo_url" | sed -E 's#(://)[^/@]+@#\1#')
+
+# Commit details
+commit_hash=""
+commit_msg=""
+commit_date=""
+commit_author=""
+dirty="no"
+
+if [ -d "$docroot/.git" ]; then
+	commit_hash=$(su - "$user" -s /bin/bash -c "git -C '$docroot' rev-parse --short HEAD 2>/dev/null")
+	commit_msg=$(su - "$user" -s /bin/bash -c "git -C '$docroot' log -1 --pretty=format:'%s' 2>/dev/null")
+	commit_date=$(su - "$user" -s /bin/bash -c "git -C '$docroot' log -1 --pretty=format:'%cd' --date=iso 2>/dev/null")
+	commit_author=$(su - "$user" -s /bin/bash -c "git -C '$docroot' log -1 --pretty=format:'%an' 2>/dev/null")
+	if [ -n "$(su - "$user" -s /bin/bash -c "git -C '$docroot' status --porcelain 2>/dev/null | grep -v '^\?\?'")" ]; then
+		dirty="yes"
+	fi
+fi
+
+# Webhook receiver info
+webhook_url="https://$domain/deploy.php"
+[ -z "$branch" ] && branch="main"
+
+python3 - "$format" "$is_git" "$clean_repo" "$branch" "$secret" "$webhook_url" "$commit_hash" "$commit_msg" "$commit_date" "$commit_author" "$dirty" "$domain" "$user" << 'PYEOF'
+import sys, json
+
+fmt = sys.argv[1]
+is_git = sys.argv[2]
+repo = sys.argv[3]
+branch = sys.argv[4]
+secret = sys.argv[5]
+webhook_url = sys.argv[6]
+commit_hash = sys.argv[7]
+commit_msg = sys.argv[8]
+commit_date = sys.argv[9]
+commit_author = sys.argv[10]
+dirty = sys.argv[11]
+domain = sys.argv[12]
+user = sys.argv[13]
+
+res = {
+    "DOMAIN": domain,
+    "USER": user,
+    "IS_GIT": is_git,
+    "REPO_URL": repo,
+    "BRANCH": branch,
+    "DEPLOY_SECRET": secret,
+    "WEBHOOK_URL": webhook_url,
+    "COMMIT_HASH": commit_hash,
+    "COMMIT_MSG": commit_msg,
+    "COMMIT_DATE": commit_date,
+    "COMMIT_AUTHOR": commit_author,
+    "IS_DIRTY": dirty
+}
+
+if fmt == "json":
+    print(json.dumps(res, indent=4))
+else:
+    for k, v in res.items():
+        print(f"{k}: {v}")
+PYEOF
