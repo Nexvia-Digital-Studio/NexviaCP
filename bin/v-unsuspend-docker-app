@@ -40,6 +40,10 @@ fi
 #----------------------------------------------------------#
 
 docker_app_compose "$app" start || check_result "$E_INVALID" "failed to start app '$app'"
+# Blue-green containers live outside compose's view — start them too
+# (they carry restart=unless-stopped, this covers the stopped case).
+docker ps -aq --filter "label=nexvia.app=$app" --filter "label=nexvia.green=1" 2>/dev/null \
+	| xargs -r docker start >/dev/null 2>&1 || true
 docker_app_set "$app" STATE "running"
 
 #----------------------------------------------------------#

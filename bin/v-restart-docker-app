@@ -49,6 +49,14 @@ else
 		|| check_result "$E_INVALID" "failed to restart app '$app'"
 fi
 
+# Blue-green containers live outside compose's view — restart them too.
+docker_restart_green() {
+	local filters=(--filter "label=nexvia.app=$app" --filter "label=nexvia.green=1")
+	[ -n "$service" ] && filters+=(--filter "label=nexvia.svc=$service")
+	docker ps -aq "${filters[@]}" 2>/dev/null | xargs -r docker restart >/dev/null 2>&1 || true
+}
+docker_restart_green
+
 #----------------------------------------------------------#
 #                       Hestia                             #
 #----------------------------------------------------------#

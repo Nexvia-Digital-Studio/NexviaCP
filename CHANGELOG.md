@@ -9,6 +9,32 @@ container, nginx + PHP-FPM stack with multi-PHP, MariaDB, PostgreSQL, mail,
 BIND, Docker, Portainer, Redis). Every fix below was verified against a live
 panel installation.
 
+### Added
+
+- **Zero-downtime, resource-friendly automatic redeploys for docker apps.**
+  `v-update-docker-app`'s background worker now runs a blue-green deploy:
+  new images are built/pulled while the old stack keeps serving (niced with
+  `nice 19`/`ionice idle` and serialized behind a *global* build lock, so
+  concurrent webhooks can never stampede the CPU/disk — slow is fine by
+  design), changed *stateless* services get a green copy on a fresh loopback
+  port (derived from the resolved compose config: same networks, env,
+  volumes, healthcheck), the greens are health-gated — a container that
+  never comes up is removed, the deploy fails loudly and the live stack
+  stays untouched (rollback by construction) — and only then nginx is
+  flipped to the green ports (registry rewrite + graceful reload, no dropped
+  requests) before the old containers retire. Changed *stateful* services
+  (named volume / db-like name) are recreated by compose directly with a
+  loud "short blip" note, ready-made `image:` references are now **pulled on
+  every deploy** (previously a retagged image silently kept running the old
+  version), no-op deploys no longer resurrect a retired blue container next
+  to the live green one, and `v-restart/suspend/unsuspend/delete-docker-app`
+  plus `v-list-docker-app` now account for green containers (tracked by
+  `nexvia.*` labels, deliberately outside compose's view so
+  `up --remove-orphans` never reaps them). Verified end-to-end against a
+  live compose v2/v5 plugin stack. Documented in
+  `docs/docs/nexvia/docker-apps.md` together with the one-time GitHub
+  webhook setup that covers every app automatically.
+
 ### Fixed
 
 - **GitHub webhook deploys no longer stall on a dirty working tree.**

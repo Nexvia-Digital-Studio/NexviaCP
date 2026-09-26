@@ -40,6 +40,9 @@ fi
 #----------------------------------------------------------#
 
 docker_app_compose "$app" stop || check_result "$E_INVALID" "failed to stop app '$app'"
+# Blue-green containers live outside compose's view — stop them too.
+docker ps -q --filter "label=nexvia.app=$app" --filter "label=nexvia.green=1" 2>/dev/null \
+	| xargs -r docker stop >/dev/null 2>&1 || true
 docker_app_set "$app" STATE "suspended"
 
 #----------------------------------------------------------#

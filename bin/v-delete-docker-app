@@ -54,6 +54,9 @@ down_args="down"
 echo "[*] docker compose $down_args ..."
 # Containers may not exist (failed first deploy); tolerate that.
 docker_app_compose "$app" $down_args
+# Blue-green containers live outside compose's view — remove them too.
+docker ps -aq --filter "label=nexvia.app=$app" --filter "label=nexvia.green=1" 2>/dev/null \
+	| xargs -r docker rm -f >/dev/null 2>&1 || true
 
 # Remove project images so repeated deploys don't fill the disk.
 docker image prune -f --filter "label=com.docker.compose.project=nexvia-$app" >/dev/null 2>&1
