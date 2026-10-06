@@ -228,7 +228,12 @@ demo_reg_set_key() {
 # unique per demo and regenerated on re-create.
 
 demo_db_host() {
-	echo "${DEMO_DB_HOST:-127.0.0.1}"
+	# 'localhost' (not 127.0.0.1!): the demo PHP jail (nxv_phpjail nftables)
+	# blocks ALL TCP egress for the pool user, but cannot filter unix
+	# sockets — and PHP's mysqlnd routes host=localhost through
+	# /run/mysqld/mysqld.sock. DB users are provisioned at 'localhost'
+	# (and 127.0.0.1 for good measure) accordingly.
+	echo "${DEMO_DB_HOST:-localhost}"
 }
 
 demo_db_provision() {

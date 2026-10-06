@@ -708,7 +708,10 @@ kutucusunu işaretleyin (CLI'de `--db`):
 - Demoya **özel bir MariaDB veritabanı + kullanıcı** açılır (demo silinince birlikte düşer;
   adları slug'ın rastgele sondan türetilir, iki demo birbirinin DB'sini göremez).
 - Kimlik bilgileri PHP'ye **ortam değişkeni** olarak iletilir: `DB_HOST`, `DB_NAME`,
-  `DB_USER`, `DB_PASS` (`getenv()` / `$_SERVER` ile okunur). "Önek" alanına bir şey
+  `DB_USER`, `DB_PASS` (`getenv()` / `$_SERVER` ile okunur). `DB_HOST` her zaman
+  **`localhost`**'tur: demo PHP jail'i (nftables) TCP çıkışını tamamen kapattığından
+  bağlantı unix socket üzerinden kurulur (PHP `host=localhost` deyincede otomatik
+  socket kullanır — `127.0.0.1` yazmayın, jail'e takılır). "Önek" alanına bir şey
   yazarsanız (örn. `URBANA`) aynı değerler `URBANA_DB_HOST`… olarak **bir de önekle** verilir —
   uygulamanız hazır `URBANA_DB_*` değişkenleri okuyorsa kod değişikliği gerekmez.
 - **"Kurulum komutu"** (CLI: `--install='php bin/install.php'`) repo kökünde, demo
