@@ -49,6 +49,11 @@ reg=$(demo_reg_file "$user" "$slug")
 # Never leave the shell inside the tree we are about to delete.
 cd /
 
+# Drop the demo's database first (registered via --db) so a failure below
+# cannot leave an orphaned db behind.
+r_db_name=$(demo_reg_key "$reg" "DB_NAME")
+[ -n "$r_db_name" ] && demo_db_drop "$slug"
+
 rm -rf "${DEMO_DEMOS_DIR:?}/${slug:?}"
 rm -f "$DEMO_NGINX_DIR/$slug.conf"
 rm -f "$reg"

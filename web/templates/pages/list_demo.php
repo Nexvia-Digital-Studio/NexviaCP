@@ -1,7 +1,8 @@
 <?php
 // Demo sites list — data comes from v-list-demo-sites (see /list/demo/
 // handler). $data is keyed by slug; each item has OWNER, SLUG, NAME, REPO,
-// BRANCH, SUBDIR, COMMIT, CREATED, UPDATED, STATE, SIZE_MB, URL_PATH.
+// BRANCH, SUBDIR, COMMIT, DB_NAME, INSTALL, CREATED, UPDATED, STATE,
+// SIZE_MB, URL_PATH.
 $v_is_admin = ($_SESSION["userContext"] ?? "") === "admin";
 $v_host = $_SERVER["HTTP_HOST"] ?? "";
 $v_rows = array_values($data ?? []);
@@ -78,6 +79,12 @@ usort($v_rows, fn($a, $b) => strcmp($b["UPDATED"] ?? "", $a["UPDATED"] ?? ""));
 						<?= tohtml(($r["REPO"] ?? "") . "@" . ($r["BRANCH"] ?? "")) ?>
 						<?php if (!empty($r["SUBDIR"])) { ?>
 							<span class="label label-default">/<?= tohtml($r["SUBDIR"]) ?></span>
+						<?php } ?>
+						<?php if (!empty($r["DB_NAME"])) { ?>
+							<span class="label label-info" title="<?= tohtml($r["DB_NAME"]) ?>">DB</span>
+						<?php } ?>
+						<?php if (!empty($r["INSTALL"]) && $r["INSTALL"] !== "-") { ?>
+							<span class="label label-default" title="<?= tohtml($r["INSTALL"]) ?>">install</span>
 						<?php } ?>
 					</div>
 					<div class="units-table-cell">
@@ -193,6 +200,29 @@ usort($v_rows, fn($a, $b) => strcmp($b["UPDATED"] ?? "", $a["UPDATED"] ?? ""));
 				</small>
 			</div>
 
+			<div class="u-mb15" style="border:1px solid var(--color-border, #ddd); border-radius:8px; padding:12px 14px;">
+				<label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+					<input type="checkbox" name="demo_db" value="1" id="demo-db-toggle" style="margin:0;">
+					<span class="u-text-bold"><?= tohtml(__tr("Veritabanı oluştur (admin panelli siteler)", "Veritabanı oluştur (admin panelli siteler)")) ?></span>
+				</label>
+				<div id="demo-db-opts" style="display:none; margin-top:10px;">
+					<div class="u-mb10">
+						<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("Ortam değişkeni öneki (opsiyonel)", "Ortam değişkeni öneki (opsiyonel)")) ?></label>
+						<input type="text" name="demo_db_prefix" placeholder="URBANA" class="form-control" style="width:100%;">
+						<small class="u-text-muted" style="display:block; margin-top:4px;">
+							<?= tohtml(__tr("PHP, DB_HOST / DB_NAME / DB_USER / DB_PASS ortam değişkenlerini görür. Önek yazarsanız aynı değerler ÖNEK_DB_* olarak da verilir.", "PHP, DB_HOST / DB_NAME / DB_USER / DB_PASS ortam değişkenlerini görür. Önek yazarsanız aynı değerler ÖNEK_DB_* olarak da verilir.")) ?>
+						</small>
+					</div>
+					<div>
+						<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("Kurulum komutu (opsiyonel)", "Kurulum komutu (opsiyonel)")) ?></label>
+						<input type="text" name="demo_install" placeholder="php bin/install.php" class="form-control" style="width:100%;">
+						<small class="u-text-muted" style="display:block; margin-top:4px;">
+							<?= tohtml(__tr("Repo kökünde çalışır; şema/seed yüklemek için kullanın. Her güncellemede yeniden çalışır (demo verileri geçicidir).", "Repo kökünde çalışır; şema/seed yüklemek için kullanın. Her güncellemede yeniden çalışır (demo verileri geçicidir).")) ?>
+						</small>
+					</div>
+				</div>
+			</div>
+
 			<div class="u-mt20" style="display:flex; justify-content:flex-end; gap:10px;">
 				<button type="button" class="button button-secondary" onclick="document.getElementById('demo-add-modal').style.display='none'">
 					<?= tohtml(__tr("İptal", "İptal")) ?>
@@ -212,6 +242,15 @@ document.addEventListener('keydown', function(e) {
 		if (m) m.style.display = 'none';
 	}
 });
+(function() {
+	const t = document.getElementById('demo-db-toggle');
+	const o = document.getElementById('demo-db-opts');
+	if (t && o) {
+		const sync = function() { o.style.display = t.checked ? 'block' : 'none'; };
+		t.addEventListener('change', sync);
+		sync();
+	}
+})();
 (function() {
 	const sel = document.getElementById('demo-repo-select');
 	const wrap = document.getElementById('demo-repo-url-wrap');

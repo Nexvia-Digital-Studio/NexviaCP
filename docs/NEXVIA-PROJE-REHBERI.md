@@ -679,7 +679,7 @@ Bir deploy bozulursa ilk bakılacak yer `deploy.log` (compose'un ham çıktısı
 | **WAF + fail2ban** | Domain bazlı WAF (Enterprise Threat Shield) + 7 fail2ban jail hazır. |
 | **phpMyAdmin SSO** | DB sekmesinden tek tık şifresiz yönetim. |
 | **LE + Cloudflare API** | Domain ekleme/sertifika/DNS tamamen panelden. |
-| **🧪 Demo Siteler** | Panelden **Demo Siteler** sayfası: bir GitHub reposunu saniyeler içinde `https://panel.nexviastudio.com/<ad>-<rastgele16>/` adresinde gizli DEMO olarak yayınlar (düz HTML + PHP; derleme/DB yok). URL rastgele olduğu için bilmeyen bulamaz; repoya push atınca demo otomatik güncellenir. CLI: `v-add-demo-site kullanıcı repo [dal] [ad] [altklasör]`, `v-list-demo-sites`, `v-update-demo-site`, `v-delete-demo-site`. **Demo repolarında bağlantılar/assetler göreli yol olmalı** (`css/x.css` ✔, `/css/x.css` ✘ — kök dizin sanıp panel alan adına düşer) ve kökte `index.html`/`index.php` bulunmalı; site repo içindeki bir klasördeyse alt klasör parametresini kullanın. PHP, izole `nexviademo` kullanıcılı ayrı php-fpm havuzunda `open_basedir` hapsinde çalışır (DB bağlanmaz). |
+| **🧪 Demo Siteler** | Panelden **Demo Siteler** sayfası: bir GitHub reposunu saniyeler içinde `https://panel.nexviastudio.com/<ad>-<rastgele16>/` adresinde gizli DEMO olarak yayınlar (düz HTML + PHP; derleme yok). URL rastgele olduğu için bilmeyen bulamaz; repoya push atınca demo otomatik güncellenir. **`--db` ile demoya özel MariaDB veritabanı** açılır (admin panelli/bloglu siteler tam çalışır), **`--install`** komutuyla şema/seed yüklenir. CLI: `v-add-demo-site kullanıcı repo [dal] [ad] [altklasör] [--db[=ÖNEK]] [--install=KOMUT]`, `v-list-demo-sites`, `v-update-demo-site`, `v-delete-demo-site`. **Demo repolarında bağlantılar/assetler göreli yol olmalı** (`css/x.css` ✔, `/css/x.css` ✘ — kök dizin sanıp panel alan adına düşer) ve kökte `index.html`/`index.php` bulunmalı; site repo içindeki bir klasördeyse alt klasör parametresini kullanın. PHP, izole `nexviademo` kullanıcılı ayrı php-fpm havuzunda `open_basedir` hapsinde çalışır. |
 
 ### 🧪 7.1 Demo Siteler — Müşteri Demosunu 2 Dakikada Gizli URL'de Yayınlama
 
@@ -696,8 +696,35 @@ motorlarına `noindex` başlığı).
 3. İsteğe bağlı: dal, demo adı (URL'de görünen kısım, örn `onlymutfak`), alt klasör.
 4. **Demoyu Yayınla** → 5-10 saniye → URL ekranda. Kopyala butonu ile müşteriye gönder.
 
-**CLI ile aynı işler:** `v-add-demo-site kullanıcı repo [dal] [ad] [altklasör]` ·
+**CLI ile aynı işler:** `v-add-demo-site kullanıcı repo [dal] [ad] [altklasör] [--db[=ÖNEK]] [--install=KOMUT]` ·
 `v-list-demo-sites` · `v-update-demo-site kullanıcı slug` · `v-delete-demo-site kullanıcı slug`
+
+**Veritabanlı demolar (admin panelli siteler, bloglar):**
+
+Düz PHP siteler için hiçbir şey yapmaya gerek yoktur. Site **veritabanı + yönetim paneli**
+gerektiriyorsa (ör. içeriği DB'den okuyan blog/CMS), yayınlarken **"Veritabanı oluştur"**
+kutucusunu işaretleyin (CLI'de `--db`):
+
+- Demoya **özel bir MariaDB veritabanı + kullanıcı** açılır (demo silinince birlikte düşer;
+  adları slug'ın rastgele sondan türetilir, iki demo birbirinin DB'sini göremez).
+- Kimlik bilgileri PHP'ye **ortam değişkeni** olarak iletilir: `DB_HOST`, `DB_NAME`,
+  `DB_USER`, `DB_PASS` (`getenv()` / `$_SERVER` ile okunur). "Önek" alanına bir şey
+  yazarsanız (örn. `URBANA`) aynı değerler `URBANA_DB_HOST`… olarak **bir de önekle** verilir —
+  uygulamanız hazır `URBANA_DB_*` değişkenleri okuyorsa kod değişikliği gerekmez.
+- **"Kurulum komutu"** (CLI: `--install='php bin/install.php'`) repo kökünde, demo
+  kullanıcısıyla çalışır ve ortam değişkenlerinde DB kimlik bilgileri hazır gelir —
+  şema + seed yüklemek için kullanın. Her **Güncelle**'de yeniden çalışır: demo verileri
+  **geçicidir**, repo gerçek kaynaktır (demoda panelden yapılan değişiklikler bir sonraki
+  push'ta sıfırlanır — müşteriye "deneme alanı" olarak böyle anlatın).
+- Uygulama kodu tarafında tek şart: DB ayarını **ortam değişkeninden** okumak (ör.
+  `getenv('DB_NAME') ?: 'urbana'`) ve DB yoksa ayar dosyasına düşmek.
+
+Örnek — Urbana (PHP+MySQL+admin panel) demoları:
+
+```bash
+v-add-demo-site admin Nexvia-Digital-Studio/Nexvia-Urbana main urbana "" \
+  --db=URBANA --install="php bin/install.php && php bin/install.php admin Demo2026"
+```
 
 **Demo reposu nasıl hazırlanır (önemli — burada yazanlar şart):**
 
@@ -706,21 +733,32 @@ motorlarına `noindex` başlığı).
 | Yollar göreli olmalı | `css/main.css`, `./sayfa2.html`, `../img/x.png` | `/css/main.css`, `https://panel.../...` | Demo bir **alt dizinde** yaşar (`/onlymutfak-a1b2…/`); mutlak yol panel köküne düşer, asset 404 verir |
 | Giriş dosyası kökte | `index.html` veya `index.php` repoda kökte | sadece `home.html` | nginx kök index arar; yoksa uyarı döner |
 | Site klasördeyse alt klasör belirt | panelde "Alt klasör" alanına `web`, `dist`… | repoyu yeniden düzenlemek | yayınlama o klasörden yapılır, repo el değmemiş kalır |
-| Veritabanı gerektirmesin | sayfalar statik içerikle açılsın, form butonları `href` ile gezinsin | kurulum sihirbazı, DB zorunlu, `install.lock` kontrolü | Demolar DB'siz çalışır; DB şartlayan site (ör. install.php'ye yönlendiren) demoda gezilemez hale gelir |
+| DB gerekiyorsa `--db` + env okuma | `getenv('DB_NAME')` ile bağlan; DB yoksa seed fallback | kodda gömülü DB adı/şifre; DB olmadan hiç açılmayan site | DB kimlik bilgileri demoya env olarak gelir; site `--db`'siz yayınlansa bile açılabilmeli |
 | Derleme adımı olmasın | hazır HTML/PHP dosyaları | `npm run build` sonrası `dist/` (dist repo'da YOKSA) | demo akışı derleme yapmaz; derlenmiş çıktı repodaysa sorun yok (alt klasör=`dist`) |
 
 PHP demolar için ek notlar: PHP 8.5'te izole bir havuzda çalışır (`nexviademo` kullanıcısı,
 `open_basedir` sadece demo ağacına açık) — oturum (session), cache yazma, `mail()` gibi düz
-işlevler çalışır; MySQL/PDO bağlantısı kurulamaz (DB hata sayfası basan site tasarımı demo için
-uygun değilden bunu repoda düzeltmek gerekir).
+işlevler çalışır; `--db` ile açılan demolarda MySQL/PDO bağlantısı da kurulur (kimlik bilgileri
+env'den gelir, her demoya özel veritabanı + kullanıcı).
 
 **Otomatik güncelleme:** demoya bağlı repoya push atınca mevcut webhook zinciri demoyu da
 günceller (domain siteleriyle aynı akış). Panelden **Güncelle** butonu da aynı işi anında yapar.
 
 **Güvenlik ve sınırlar:** erişim kontrolü URL'nin gizliliğidir — URL'yi sadece göstermek
 istediğiniz kişiye paylaşın. `.git`, `.env`, `.sql` vb. dosyalar HTTP üzerinden 403 kapalıdır;
-PHP dosyalarının kaynağı asla sızdırılmaz (çalıştırılır). Demolar panel istatistiklerine (trafik/
-bant genişliği) dahil değildir; logları `/var/log/nginx/demos.access.log`'dadır.
+PHP dosyalarının kaynağı asla sızdırılmaz (çalıştırılır). DB'li demolarda kimlik bilgileri
+nginx konfigürasyonunda (root-only 640 dosya) ve panel kaydında tutulur, PHP'ye yalnızca
+istek başı env olarak iletilir; her demo yalnız kendi veritabanına yetkilidir. Demolar panel
+istatistiklerine (trafik/bant genişliği) dahil değildir; logları `/var/log/nginx/demos.access.log`'dadır.
+
+**Yol haritası — Node.js / .NET / Docker demoları:** demo sistemi bugün statik + PHP (+`--db`
+MariaDB) destekler. Node/.NET/Docker uygulamaları için hedef desen: `v-add-demo-site ... --engine=docker`
+— repo'daki `docker-compose.yml`'i demo kullanıcısıyla prefix'li proje adıyla ayağa kaldırıp
+`/<slug>/` nginx location'ını `proxy_pass` ile konteyner portuna bağlamak; güncellemede imajı
+yeniden build/up, silmede `compose down` + volume temizliği. Mevcut docker-app altyapısı
+(blue-green, healthcheck, override zinciri) yeniden kullanılabilir; fark, domain+port yerine
+path-based proxy olması. SPA/React tarafında bugün bile çalışanın yolu: build çıktısını
+(`out/`/`dist/`) repoya işlemek ve alt klasör olarak yayınlamak. (NEXVIA-TODO'da izleniyor.)
 
 ---
 
@@ -739,7 +777,7 @@ bant genişliği) dahil değildir; logları `/var/log/nginx/demos.access.log`'da
 | Domain açıldı ama sertifika yok (NPM altında) | 80/443 loopback'e çekilmiş, http-01 çalışmıyor | NPM yerine servis→domain eşlemesi (6.6) |
 | Deploy uzun sürüyor / başlamıyor gibi | Build ağır; durum `deploying` | `deploy.log` izle; panelde durum `failed` ise çıktının son satırları sebep gösterir |
 | Demo açılıyor ama CSS/JS/resim yok | Asset yolları **mutlak** (`/css/…`) — demo alt dizinde yaşar | Repoda yolları **göreli** yap (`css/…`, `./x`, `../x`) → push/Güncelle (7.1) |
-| PHP demo anasayfa `install.php`'ye yönleniyor / DB hatası basıyor | Site kodu veritabanı/kurulum şartlıyor | Demo için DB'siz akış ekle (sayfalar statik içerikle açılsın); bu site kodunda çözülür (7.1) |
+| PHP demo anasayfa `install.php`'ye yönleniyor / DB hatası basıyor | Site kodu veritabanı/kurulum şartlıyor | "Veritabanı oluştur" + kurulum komutuyla yeniden yayınla (`--db --install=…`, 7.1); DB'siz de açılacak şekilde repoya env-okuma + seed fallback ekle |
 | Demo URL'si 404 | Demo silinmiş ya da slug yanlış yazılmış | Panel Demo Siteler sayfasından güncel URL'yi kopyala (URL'de sondaki `/` dahil) |
 | "no index.(html\|php)" uyarısı aldı | Repoda kökte giriş dosyası yok | Sitedeki klasörü "Alt klasör" alanına yaz (örn. `web`) veya repoya kök index ekle |
 

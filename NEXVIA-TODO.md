@@ -112,3 +112,9 @@
     (.ssh, conf, mail...) klasörleri de FM'de görüyordu. Canlıda configuration.php'ye eklendi:
     admin hariç root = /home/<user>/web (SFTP jail). v-add-sys-filemanager içindeki config
     sablonuna da islenmeli — yoksa FM yeniden kurulunca jail kaybolur.
+27. **Node.js / .NET / Docker demoları:** demo sistemi statik+PHP(+--db MariaDB) destekliyor;
+    dinamik runtime'lı repolar için `v-add-demo-site --engine=docker` deseni planlandı —
+    repo `docker-compose.yml`'i demo kullanıcı+prefiksiyle ayağa kalkar, `/<slug>/`
+    location'ı `proxy_pass` ile konteynera bağlanır; update = build/up, delete = down+temizlik.
+    Blue-green/healthcheck altyapısı docker-app'tan yeniden kullanılabilir. Detay:
+    docs/NEXVIA-PROJE-REHBERI.md §7.1 yol haritası notu.

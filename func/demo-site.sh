@@ -113,8 +113,12 @@ demo_fix_perms() {
 # /<slug>/... maps straight onto $DEMO_DEMOS_DIR/<slug>/... and the nested
 # php regex stays correct. try_files falls back to the site's own
 # index.php so front-controller PHP apps work out of the box.
+#
+# $5 (optional): extra fastcgi_param lines — per-demo environment for
+# DB-backed apps (fastcgi params are NOT inherited into the php location
+# once it declares its own, so they must be injected inside it).
 demo_gen_nginx_conf() {
-	local slug="$1" owner="$2" repo="$3" branch="$4"
+	local slug="$1" owner="$2" repo="$3" branch="$4" env_params="${5:-}"
 	cat > "$DEMO_NGINX_DIR/$slug.conf" <<NXV_DEMO_EOF
 # Nexvia demo site: $slug (owner: $owner) — $repo @$branch
 # Managed by v-add-demo-site / v-delete-demo-site — DO NOT EDIT.
@@ -154,10 +158,13 @@ location ^~ /$slug/ {
 		# admin value wins over pool default) so one demo can never read
 		# another demo's tree.
 		fastcgi_param PHP_ADMIN_VALUE "open_basedir=$DEMO_DEMOS_DIR/$slug:/var/lib/php/sessions:/tmp:/usr/share/php";
+$env_params
 		fastcgi_read_timeout 60s;
 	}
 }
 NXV_DEMO_EOF
+	# The conf may carry per-demo DB credentials — keep it root-only.
+	chmod 640 "$DEMO_NGINX_DIR/$slug.conf"
 }
 
 # Validate config, then graceful reload (never a hard restart — the panel
@@ -205,4 +212,88 @@ demo_reg_key() {
 
 demo_reg_set_key() {
 	sed -i "s|^$2='.*'|$2='$3'|" "$1"
+}
+
+# ---------------------------------------------------------------------
+# MySQL-backed demos (admin panels, DB-requiring PHP apps)
+# ---------------------------------------------------------------------
+# A demo can request its own MariaDB database + user, created with the
+# demo and dropped with it. Credentials reach the app two ways:
+#   * per-request FastCGI params (getenv()/$_SERVER in PHP):
+#       DB_HOST, DB_NAME, DB_USER, DB_PASS
+#       (+ <PREFIX>_DB_HOST/… copies when --db=PREFIX was given)
+#   * the install hook's environment (demo_install_run).
+# mysql runs as root over the unix socket (MariaDB socket auth). The
+# database and user are named after the slug's 16-hex suffix, so they are
+# unique per demo and regenerated on re-create.
+
+demo_db_host() {
+	echo "${DEMO_DB_HOST:-127.0.0.1}"
+}
+
+demo_db_provision() {
+	# $1 = slug → drops & (re)creates db+user, echoes "db user pass"
+	local hex dbn dbu pass
+	hex="${1##*-}"
+	[[ "$hex" =~ ^[a-f0-9]{16}$ ]] || return 1
+	dbn="demo_${hex}"
+	dbu="d${hex}"
+	pass=$(openssl rand -hex 16) || return 1
+	mysql <<SQL || return 1
+DROP DATABASE IF EXISTS \`$dbn\`;
+DROP USER IF EXISTS \`$dbu\`@'localhost';
+DROP USER IF EXISTS \`$dbu\`@'127.0.0.1';
+CREATE DATABASE \`$dbn\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER \`$dbu\`@'localhost' IDENTIFIED BY '$pass';
+CREATE USER \`$dbu\`@'127.0.0.1' IDENTIFIED BY '$pass';
+GRANT ALL PRIVILEGES ON \`$dbn\`.* TO \`$dbu\`@'localhost';
+GRANT ALL PRIVILEGES ON \`$dbn\`.* TO \`$dbu\`@'127.0.0.1';
+SQL
+	echo "$dbn $dbu $pass"
+}
+
+demo_db_drop() {
+	# $1 = slug — idempotent, never fails the caller
+	local hex dbn dbu
+	hex="${1##*-}"
+	[[ "$hex" =~ ^[a-f0-9]{16}$ ]] || return 0
+	dbn="demo_${hex}"
+	dbu="d${hex}"
+	mysql <<SQL 2>/dev/null
+DROP DATABASE IF EXISTS \`$dbn\`;
+DROP USER IF EXISTS \`$dbu\`@'localhost';
+DROP USER IF EXISTS \`$dbu\`@'127.0.0.1';
+SQL
+	return 0
+}
+
+demo_db_fastcgi_params() {
+	# $1 db, $2 user, $3 pass, $4 prefix (optional, e.g. URBANA)
+	# → fastcgi_param lines injected into the demo's php location.
+	local db="$1" usr="$2" pass="$3" pfx="${4:-}" host
+	host=$(demo_db_host)
+	printf '\t\tfastcgi_param DB_HOST "%s";\n' "$host"
+	printf '\t\tfastcgi_param DB_NAME "%s";\n' "$db"
+	printf '\t\tfastcgi_param DB_USER "%s";\n' "$usr"
+	printf '\t\tfastcgi_param DB_PASS "%s";\n' "$pass"
+	if [ -n "$pfx" ]; then
+		printf '\t\tfastcgi_param %s_DB_HOST "%s";\n' "$pfx" "$host"
+		printf '\t\tfastcgi_param %s_DB_NAME "%s";\n' "$pfx" "$db"
+		printf '\t\tfastcgi_param %s_DB_USER "%s";\n' "$pfx" "$usr"
+		printf '\t\tfastcgi_param %s_DB_PASS "%s";\n' "$pfx" "$pass"
+	fi
+	printf '\t\tfastcgi_param NEXVIA_DEMO "1";\n'
+}
+
+demo_install_run() {
+	# $1 slug, $2 install_cmd, $3 db, $4 dbuser, $5 dbpass
+	# Runs the command as the demo pool user inside the demo's .src clone
+	# (repo code — same trust level as the demo's PHP itself) with the
+	# demo's DB credentials in the environment. db args may be empty.
+	local dir="$DEMO_DEMOS_DIR/$1/.src"
+	[ -d "$dir" ] || return 1
+	runuser -u "$DEMO_POOL_USER" -- env HOME="$DEMO_DEMOS_DIR" \
+		PATH="/usr/local/bin:/usr/bin:/bin" NEXVIA_DEMO=1 \
+		DB_HOST="$(demo_db_host)" DB_NAME="$3" DB_USER="$4" DB_PASS="$5" \
+		bash -c "cd '$dir' && $2"
 }

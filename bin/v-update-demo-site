@@ -49,6 +49,10 @@ r_branch=$(demo_reg_key "$reg" "BRANCH")
 r_subdir=$(demo_reg_key "$reg" "SUBDIR")
 r_dir=$(demo_reg_key "$reg" "DIR")
 r_commit=$(demo_reg_key "$reg" "COMMIT")
+r_db_name=$(demo_reg_key "$reg" "DB_NAME")
+r_db_user=$(demo_reg_key "$reg" "DB_USER")
+r_db_pass=$(demo_reg_key "$reg" "DB_PASS")
+r_install=$(demo_reg_key "$reg" "INSTALL")
 [ -n "$r_branch" ] || r_branch="main"
 [ -d "$r_dir/.src" ] || check_result "$E_NOTEXIST" "demo clone missing for '$slug' (re-create the demo)"
 
@@ -63,6 +67,15 @@ demo_git -C "$r_dir/.src" reset --hard FETCH_HEAD >/dev/null 2>&1
 new_commit=$(demo_git -C "$r_dir/.src" rev-parse --short HEAD 2>/dev/null || echo "")
 
 demo_publish_tree "$slug" "$r_subdir" || check_result "$E_INVALID" "failed to re-publish demo tree"
+
+# Install hook: demo data is ephemeral by design — the repo is the source
+# of truth, so every update re-seeds the database (panel edits made on the
+# demo are discarded on the next push).
+if [ -n "$r_install" ]; then
+	if ! demo_install_run "$slug" "$r_install" "$r_db_name" "$r_db_user" "$r_db_pass"; then
+		echo " [!] install command failed — demo published but the DB may be stale"
+	fi
+fi
 
 # Fresh content must be visible on a plain reload (no Ctrl+F5): purge the
 # panel domain caches when HEAD actually moved (up-to-date pulls don't purge,

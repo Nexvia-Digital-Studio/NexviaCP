@@ -24,6 +24,9 @@ if (!empty($_POST["action"])) {
 			$v_branch = trim($_POST["demo_branch"] ?? "main");
 			$v_name = strtolower(trim($_POST["demo_name"] ?? ""));
 			$v_subdir = trim($_POST["demo_subdir"] ?? "");
+			$v_db = !empty($_POST["demo_db"]);
+			$v_db_prefix = strtoupper(trim($_POST["demo_db_prefix"] ?? ""));
+			$v_install = trim($_POST["demo_install"] ?? "");
 			$v_repo = "";
 
 			if ($v_repo_input === "__custom__") {
@@ -58,16 +61,27 @@ if (!empty($_POST["action"])) {
 				$_SESSION["error_msg"] = _("Geçersiz alt klasör (SUBDIR).");
 				break;
 			}
+			if ($v_db_prefix !== "" && !preg_match("/^[A-Z][A-Z0-9_]{0,30}$/", $v_db_prefix)) {
+				$_SESSION["error_msg"] = _("Geçersiz ortam değişkeni öneki (harf/rakam/alt çizgi, ör. URBANA).");
+				break;
+			}
+			if ($v_install !== "" && (strpos($v_install, "'") !== false || strpbrk($v_install, "\r\n") !== false || strlen($v_install) > 300)) {
+				$_SESSION["error_msg"] = _("Geçersiz kurulum komutu (tırnak/satır sonu yok, en fazla 300 karakter).");
+				break;
+			}
 
-			exec(
-				HESTIA_CMD . "v-add-demo-site " . $user . " " .
-					quoteshellarg($v_repo) . " " .
-					quoteshellarg($v_branch) . " " .
-					quoteshellarg($v_name) . " " .
-					quoteshellarg($v_subdir),
-				$output,
-				$return_var,
-			);
+			$v_cmd = HESTIA_CMD . "v-add-demo-site " . $user . " " .
+				quoteshellarg($v_repo) . " " .
+				quoteshellarg($v_branch) . " " .
+				quoteshellarg($v_name) . " " .
+				quoteshellarg($v_subdir);
+			if ($v_db) {
+				$v_cmd .= $v_db_prefix !== "" ? " --db=" . quoteshellarg($v_db_prefix) : " --db";
+			}
+			if ($v_install !== "") {
+				$v_cmd .= " --install=" . quoteshellarg($v_install);
+			}
+			exec($v_cmd, $output, $return_var);
 			if ($return_var === 0) {
 				$v_path = "";
 				$v_hints = [];

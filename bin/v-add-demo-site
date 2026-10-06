@@ -1,20 +1,60 @@
 #!/bin/bash
 # info: publish a git repository as a demo site under a secret panel URL
-# options: USER REPO [BRANCH] [NAME] [SUBDIR]
+# options: USER REPO [BRANCH] [NAME] [SUBDIR] [--db[=ENV_PREFIX]] [--install=CMD]
 #
 # example: v-add-demo-site admin onlymutfak
 # example: v-add-demo-site admin Nexvia-Digital-Studio/onlymutfak main
 # example: v-add-demo-site admin https://github.com/user/site.git main "" web
+# example: v-add-demo-site admin org/blog main "" "" --db=BLOG --install "php bin/install.php"
 #
-# Publishes static HTML and plain PHP sites (no build steps, no database)
-# at https://panel.example.com/<name>-<random16>/ — the random suffix is
+# Publishes static HTML and plain PHP sites (no build steps) at
+# https://panel.example.com/<name>-<random16>/ — the random suffix is
 # the access control. Pushes to the repo update the demo automatically
 # (v-sync-github-repos picks up demo sites too). Output's URL_PATH line is
 # machine-readable for the panel.
+#
+# --db[=ENV_PREFIX]: provision a per-demo MariaDB database + user (dropped
+# with the demo). Credentials reach PHP as fastcgi params DB_HOST/DB_NAME/
+# DB_USER/DB_PASS and, when a prefix is given (e.g. URBANA), additionally
+# as URBANA_DB_HOST/… — getenv()/$_SERVER both see them.
+# --install=CMD: run CMD inside the repo clone as the demo pool user right
+# after publishing (and on every v-update-demo-site), with the DB creds in
+# the environment — e.g. "php bin/install.php" to load schema+seed.
+# Without --install the DB stays empty (app must self-provision or the
+# site must run without DB).
 
 #----------------------------------------------------------#
 #                Variables & Functions                     #
 #----------------------------------------------------------#
+
+# Positional args + flags. Flags are recognized anywhere (--db, --db=PFX,
+# --install=CMD); the rest are positional in order:
+#   USER REPO [BRANCH] [NAME] [SUBDIR]
+db_flag=0
+db_prefix=""
+install_cmd=""
+positionals=()
+for _a in "$@"; do
+	case "$_a" in
+		--db)
+			db_flag=1
+			;;
+		--db=*)
+			db_flag=1
+			db_prefix="${_a#--db=}"
+			;;
+		--install=*)
+			install_cmd="${_a#--install=}"
+			;;
+		--*)
+			bad_flag="$_a"
+			;;
+		*)
+			positionals+=("$_a")
+			;;
+	esac
+done
+set -- "${positionals[@]}"
 
 user=$1
 repo_input=$2
@@ -36,7 +76,23 @@ source_conf "$HESTIA/conf/hestia.conf"
 #                    Verifications                         #
 #----------------------------------------------------------#
 
-check_args '2' "$#" 'USER REPO [BRANCH] [NAME] [SUBDIR]'
+[ -z "$bad_flag" ] || check_result "$E_INVALID" "unknown flag: $bad_flag"
+if [ "$db_flag" = "1" ] && [ -n "$db_prefix" ]; then
+	[[ "$db_prefix" =~ ^[A-Za-z][A-Za-z0-9_]{0,30}$ ]] \
+		|| check_result "$E_INVALID" "invalid ENV_PREFIX (letters/digits/underscore, e.g. URBANA)"
+	db_prefix=$(echo "$db_prefix" | tr '[:lower:]' '[:upper:]')
+fi
+if [ -n "$install_cmd" ]; then
+	# The registry stores single-quoted values — keep quotes/newlines out.
+	case "$install_cmd" in
+		*"'"*|*$'\n'*)
+			check_result "$E_INVALID" "invalid --install command (no quotes or newlines)"
+			;;
+	esac
+	[ "${#install_cmd}" -le 300 ] || check_result "$E_INVALID" "--install command too long (max 300 chars)"
+fi
+
+check_args '2' "$#" 'USER REPO [BRANCH] [NAME] [SUBDIR] [--db[=ENV_PREFIX]] [--install=CMD]'
 is_format_valid 'user'
 is_object_valid 'user' 'USER' "$user"
 if [ -n "$branch" ] && [[ ! "$branch" =~ ^[A-Za-z0-9._/-]{1,100}$ ]]; then
@@ -140,9 +196,28 @@ demo_publish_tree "$slug" "$subdir" || {
 	check_result "$E_INVALID" "failed to publish demo tree"
 }
 
-demo_gen_nginx_conf "$slug" "$user" "$repo_norm" "$real_branch"
+# Per-demo database (admin panels, DB-backed apps). Provisioned before the
+# nginx conf so the credentials can be injected as fastcgi params.
+db_name=""
+db_user=""
+db_pass=""
+db_params=""
+if [ "$db_flag" = "1" ]; then
+	echo "[*] Provisioning demo database…"
+	prov=$(demo_db_provision "$slug") || {
+		rm -rf "$demo_dir"
+		check_result "$E_CONNECT" "failed to create the demo database (mysql reachable as root?)"
+	}
+	read -r db_name db_user db_pass <<EOF
+$prov
+EOF
+	db_params=$(demo_db_fastcgi_params "$db_name" "$db_user" "$db_pass" "$db_prefix")
+fi
+
+demo_gen_nginx_conf "$slug" "$user" "$repo_norm" "$real_branch" "$db_params"
 if ! nginx -t >/dev/null 2>&1; then
 	rm -f "$DEMO_NGINX_DIR/$slug.conf"
+	[ -n "$db_name" ] && demo_db_drop "$slug"
 	rm -rf "$demo_dir"
 	check_result "$E_INVALID" "nginx config test failed — demo not created"
 fi
@@ -160,6 +235,11 @@ BRANCH='$real_branch'
 SUBDIR='$subdir'
 DIR='$demo_dir'
 COMMIT='$commit'
+DB_NAME='$db_name'
+DB_USER='$db_user'
+DB_PASS='$db_pass'
+DB_PREFIX='$db_prefix'
+INSTALL='$install_cmd'
 CREATED='$(date '+%F %T')'
 UPDATED='$(date '+%F %T')'
 STATE='active'
@@ -167,14 +247,23 @@ NXV_REG_EOF
 chown root:root "$reg"
 chmod 640 "$reg"
 
+# Install hook: load schema/seed into the fresh DB (repo code, pool user).
+if [ -n "$install_cmd" ]; then
+	echo "[*] Running install command…"
+	if ! demo_install_run "$slug" "$install_cmd" "$db_name" "$db_user" "$db_pass"; then
+		echo " [!] install command failed — the demo is published but the DB may be empty"
+	fi
+fi
+
 index_hint=""
 if [ ! -f "$demo_dir/index.html" ] && [ ! -f "$demo_dir/index.htm" ] && [ ! -f "$demo_dir/index.php" ]; then
 	index_hint=" [!] no index.(html|php) at the demo root — set SUBDIR if the site lives in a subfolder"
 fi
 
-log_event "$OK" "created demo site $slug (user $user, repo $repo_norm)"
+log_event "$OK" "created demo site $slug (user $user, repo $repo_norm${db_name:+, db $db_name})"
 echo "OK:$slug"
 echo "URL_PATH:/$slug/"
 echo "REPO:$repo_norm@$real_branch"
+[ -n "$db_name" ] && echo "DB:$db_name"
 [ -n "$index_hint" ] && echo "$index_hint"
 exit 0
