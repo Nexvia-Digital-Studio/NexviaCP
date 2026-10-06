@@ -131,7 +131,7 @@ location ^~ /$slug/ {
 	access_log /var/log/nginx/demos.access.log main;
 	error_log  /var/log/nginx/demos.error.log error;
 
-	try_files \$uri \$uri/ /$slug/index.php;
+	try_files \$uri \$uri/ \$uri.html /$slug/index.php;
 
 	# dotfiles: .git, .env, .src …
 	location ~ /\. {

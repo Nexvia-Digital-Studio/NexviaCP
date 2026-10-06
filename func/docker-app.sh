@@ -696,8 +696,9 @@ repo, compose_file, env_file, app = sys.argv[1:5]
 
 cmd = ["docker", "compose", "--env-file", env_file, "-f", compose_file]
 for extra in ("nexvia-override.yml", "nexvia-user-override.yml"):
-    if os.path.isfile(os.path.join(os.path.dirname(env_file), extra)):
-        cmd += ["-f", extra]
+    _p = os.path.join(os.path.dirname(env_file), extra)
+    if os.path.isfile(_p):
+        cmd += ["-f", _p]
 cmd += ["-p", "nexvia-" + app, "config", "--format", "json"]
 r = subprocess.run(cmd, cwd=repo, capture_output=True, text=True)
 if r.returncode != 0:
@@ -759,7 +760,7 @@ cmd = ["docker", "compose", "--env-file", env_file, "-f", compose_file]
 for extra in ("nexvia-override.yml", "nexvia-user-override.yml"):
     p = os.path.join(os.path.dirname(env_file), extra)
     if os.path.isfile(p):
-        cmd += ["-f", extra]
+        cmd += ["-f", p]
 cmd += ["-p", "nexvia-" + app, "config", "--format", "json"]
 
 r = subprocess.run(cmd, cwd=repo, capture_output=True, text=True)
@@ -838,6 +839,9 @@ if hc:
     test_cmd = hc.get("test") or []
     if isinstance(test_cmd, list):
         test_cmd = " ".join(test_cmd)
+    # docker compose config kacisi: CMD-SHELL icindeki '$$' docker run ile
+    # calistirilirsa konteyner kabugunda PID'e acilir (compose up cozumlerdi).
+    test_cmd = test_cmd.replace("$" + "$", "$")
     if test_cmd:
         args += ["--health-cmd", test_cmd]
     if hc.get("interval"):
@@ -898,9 +902,10 @@ docker_app_wait_green() {
 			echo "[nexvia] green container $name did not open port $port" >&2
 			return 1
 		fi
-		# Optional docker healthcheck: wait for healthy (max 60s)
+		# Optional docker healthcheck: wait for healthy (max 120s — agir acilan
+		# imajlar: migrate+seed+boot 60-90sn surebilir)
 		if [ "$(docker inspect -f '{{if .Config.Healthcheck}}1{{end}}' "$name" 2>/dev/null)" = "1" ]; then
-			for i in $(seq 1 30); do
+			for i in $(seq 1 60); do
 				healthy=$(docker inspect -f '{{.State.Health.Status}}' "$name" 2>/dev/null)
 				[ "$healthy" = "healthy" ] && break
 				[ "$healthy" = "unhealthy" ] && {
