@@ -149,7 +149,10 @@ location ^~ /$slug/ {
 	}
 
 	location ~ [^/]\.php(/|\$) {
-		try_files \$fastcgi_script_name =404;
+		# Mevcut PHP dosyası yoksa demo kökündeki index.php'ye (front
+		# controller) düş — public/ altında yaşayan uygulamaların
+		# /admin/login.php gibi doğrudan .php URL'leri böylece çalışır.
+		try_files \$fastcgi_script_name /$slug/index.php\$is_args\$args;
 		include /etc/nginx/fastcgi_params;
 		fastcgi_pass unix:$DEMO_PHP_SOCK;
 		fastcgi_index index.php;
