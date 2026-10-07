@@ -679,7 +679,7 @@ Bir deploy bozulursa ilk bakılacak yer `deploy.log` (compose'un ham çıktısı
 | **WAF + fail2ban** | Domain bazlı WAF (Enterprise Threat Shield) + 7 fail2ban jail hazır. |
 | **phpMyAdmin SSO** | DB sekmesinden tek tık şifresiz yönetim. |
 | **LE + Cloudflare API** | Domain ekleme/sertifika/DNS tamamen panelden. |
-| **🧪 Demo Siteler** | Panelden **Demo Siteler** sayfası: bir GitHub reposunu saniyeler içinde `https://panel.nexviastudio.com/<ad>-<rastgele16>/` adresinde gizli DEMO olarak yayınlar (düz HTML + PHP; derleme yok). URL rastgele olduğu için bilmeyen bulamaz; repoya push atınca demo otomatik güncellenir. **`--db` ile demoya özel MariaDB veritabanı** açılır (admin panelli/bloglu siteler tam çalışır), **`--install`** komutuyla şema/seed yüklenir. CLI: `v-add-demo-site kullanıcı repo [dal] [ad] [altklasör] [--db[=ÖNEK]] [--install=KOMUT]`, `v-list-demo-sites`, `v-update-demo-site`, `v-delete-demo-site`. **Demo repolarında bağlantılar/assetler göreli yol olmalı** (`css/x.css` ✔, `/css/x.css` ✘ — kök dizin sanıp panel alan adına düşer) ve kökte `index.html`/`index.php` bulunmalı; site repo içindeki bir klasördeyse alt klasör parametresini kullanın. PHP, izole `nexviademo` kullanıcılı ayrı php-fpm havuzunda `open_basedir` hapsinde çalışır. |
+| **🧪 Demo Siteler** | Panelden **Demo Siteler** sayfası: bir GitHub reposunu saniyeler içinde `https://panel.nexviastudio.com/<ad>-<rastgele16>/` adresinde gizli DEMO olarak yayınlar (düz HTML + PHP **ve derlemeli projeler**: Astro/Vite/Next export için sunucuda `npm run build` çalışır — `--build`/`--dist`, detay 7.1). URL rastgele olduğu için bilmeyen bulamaz; repoya push atınca demo otomatik güncellenir (yeniden derleme dahil). **`--db` ile demoya özel MariaDB veritabanı** açılır (admin panelli/bloglu siteler tam çalışır), **`--install`** komutuyla şema/seed yüklenir. CLI: `v-add-demo-site kullanıcı repo [dal] [ad] [altklasör] [--db[=ÖNEK]] [--install=KOMUT] [--build=KOMUT] [--dist=DIZIN]`, `v-list-demo-sites`, `v-update-demo-site`, `v-delete-demo-site`. **Demo repolarında bağlantılar/assetler göreli yol olmalı** (`css/x.css` ✔, `/css/x.css` ✘ — kök dizin sanıp panel alan adına düşer) ve kökte `index.html`/`index.php` bulunmalı; site repo içindeki bir klasördeyse alt klasör parametresini kullanın. PHP, izole `nexviademo` kullanıcılı ayrı php-fpm havuzunda `open_basedir` hapsinde çalışır. |
 
 ### 🧪 7.1 Demo Siteler — Müşteri Demosunu 2 Dakikada Gizli URL'de Yayınlama
 
@@ -696,8 +696,9 @@ motorlarına `noindex` başlığı).
 3. İsteğe bağlı: dal, demo adı (URL'de görünen kısım, örn `onlymutfak`), alt klasör.
 4. **Demoyu Yayınla** → 5-10 saniye → URL ekranda. Kopyala butonu ile müşteriye gönder.
 
-**CLI ile aynı işler:** `v-add-demo-site kullanıcı repo [dal] [ad] [altklasör] [--db[=ÖNEK]] [--install=KOMUT]` ·
+**CLI ile aynı işler:** `v-add-demo-site kullanıcı repo [dal] [ad] [altklasör] [--db[=ÖNEK]] [--install=KOMUT] [--build=KOMUT] [--dist=DIZIN]` ·
 `v-list-demo-sites` · `v-update-demo-site kullanıcı slug` · `v-delete-demo-site kullanıcı slug`
+(flag'lerde değer **`=`** ile verilir: `--build="npm ci && npm run build" --dist=dist`)
 
 **Veritabanlı demolar (admin panelli siteler, bloglar):**
 
@@ -729,6 +730,37 @@ v-add-demo-site admin Nexvia-Digital-Studio/Nexvia-Urbana main urbana "" \
   --db=URBANA --install="php bin/install.php && php bin/install.php admin Demo2026"
 ```
 
+**Derlemeli demolar (Astro / Vite / Next export / Hugo):**
+
+Statik-site üreteci kullanan repolar **"Derleme adımı"** ile yayınlanır (paneldeki kutu;
+CLI'de `--build=KOMUT --dist=DIZIN`):
+
+```bash
+v-add-demo-site admin Nexvia-Digital-Studio/gokhan-menajerlik main gokhan-menajerlik "" \
+  --build="npm ci && npm run build" --dist=dist
+```
+
+- Derleme komutu repo kökünde, **ilk kurulumda ve her güncellemede** çalışır;
+  `--dist` derleme çıktısının yayınlanır (Astro/Vite: `dist`, Next export: `out`,
+  Hugo: `public`). `node_modules` asla yayınlanmaz.
+- Derleme, PHP jail'inde (nftables TCP çıkışı kapalı) **çalışamaz** — bu yüzden
+  ayrı, yetkisiz `nexviabuild` kullanıcısında koşar; npm cache'i
+  `/var/lib/hestia/demos/.npm` altında paylaşılır (tekrar derlemeler hızlı).
+- Derleme ortamına `NEXVIA_DEMO_BASE="/<slug>/"` verilir (sonunda `/` ile).
+  Demo bir **alt dizinde** yaşadığı için üreteci bu temele göre derlemelisiniz;
+  yoksa kök-mutlak linkler panel alan adına düşer:
+  - **Astro:** `package.json` → `"build": "astro build ${NEXVIA_DEMO_BASE:+--base \"$NEXVIA_DEMO_BASE\"}"`
+    ve iç linkler için küçük bir `u()` yardımcısı (`import.meta.env.BASE_URL`
+    öneki; bkz. gokhan-menajerlik reposu `src/lib/base.ts`). Astro `--base`
+    kendi asset'lerini önekler ama sizin yazdığınız `href`/`src` değerlerini öneklemez.
+  - **Vite:** `vite build --base="$NEXVIA_DEMO_BASE"`.
+  - **Next (output: export):** `next build && next export` + `basePath` config'i
+    env'den okunacak şekilde.
+- Sunucuda Node.js 24 LTS kurulu (NodeSource). Derleme başarısız olursa demo
+  **eski yayında kalır** ve hata çıktısı komut satırında/panelde görünür.
+- Webhook zinciri aynen çalışır: repoya push → demo kendini yeniden derleyip
+  günceller (build ~3sn, 900+ sayfalık Astro sitesi için).
+
 **Demo reposu nasıl hazırlanır (önemli — burada yazanlar şart):**
 
 | Kural | Doğru | Yanlış | Sebep |
@@ -736,8 +768,9 @@ v-add-demo-site admin Nexvia-Digital-Studio/Nexvia-Urbana main urbana "" \
 | Yollar göreli olmalı | `css/main.css`, `./sayfa2.html`, `../img/x.png` | `/css/main.css`, `https://panel.../...` | Demo bir **alt dizinde** yaşar (`/onlymutfak-a1b2…/`); mutlak yol panel köküne düşer, asset 404 verir |
 | Giriş dosyası kökte | `index.html` veya `index.php` repoda kökte | sadece `home.html` | nginx kök index arar; yoksa uyarı döner |
 | Site klasördeyse alt klasör belirt | panelde "Alt klasör" alanına `web`, `dist`… | repoyu yeniden düzenlemek | yayınlama o klasörden yapılır, repo el değmemiş kalır |
+| Derlemeli proje ise base'i kodla | Astro/Vite'ta `--base "$NEXVIA_DEMO_BASE"` + linkler BASE_URL önekli | base'siz derleme, kök-mutlak linkler | demo alt dizinde yaşar; base'siz derlemede tüm linkler panel köküne kaçar |
 | DB gerekiyorsa `--db` + env okuma | `getenv('DB_NAME')` ile bağlan; DB yoksa seed fallback | kodda gömülü DB adı/şifre; DB olmadan hiç açılmayan site | DB kimlik bilgileri demoya env olarak gelir; site `--db`'siz yayınlansa bile açılabilmeli |
-| Derleme adımı olmasın | hazır HTML/PHP dosyaları | `npm run build` sonrası `dist/` (dist repo'da YOKSA) | demo akışı derleme yapmaz; derlenmiş çıktı repodaysa sorun yok (alt klasör=`dist`) |
+| Derlenmiş çıktı repodayse | `dist/` commit'liyse alt klasör=`dist` ile yayınlama | derleme adımını gereksiz kullanma | demo akışı dist repodayken derleme istemez; derlemek de her zaman mümkün |
 
 PHP demolar için ek notlar: PHP 8.5'te izole bir havuzda çalışır (`nexviademo` kullanıcısı,
 `open_basedir` sadece demo ağacına açık) — oturum (session), cache yazma, `mail()` gibi düz
@@ -754,14 +787,19 @@ nginx konfigürasyonunda (root-only 640 dosya) ve panel kaydında tutulur, PHP'y
 istek başı env olarak iletilir; her demo yalnız kendi veritabanına yetkilidir. Demolar panel
 istatistiklerine (trafik/bant genişliği) dahil değildir; logları `/var/log/nginx/demos.access.log`'dadır.
 
-**Yol haritası — Node.js / .NET / Docker demoları:** demo sistemi bugün statik + PHP (+`--db`
-MariaDB) destekler. Node/.NET/Docker uygulamaları için hedef desen: `v-add-demo-site ... --engine=docker`
-— repo'daki `docker-compose.yml`'i demo kullanıcısıyla prefix'li proje adıyla ayağa kaldırıp
-`/<slug>/` nginx location'ını `proxy_pass` ile konteyner portuna bağlamak; güncellemede imajı
-yeniden build/up, silmede `compose down` + volume temizliği. Mevcut docker-app altyapısı
-(blue-green, healthcheck, override zinciri) yeniden kullanılabilir; fark, domain+port yerine
-path-based proxy olması. SPA/React tarafında bugün bile çalışanın yolu: build çıktısını
-(`out/`/`dist/`) repoya işlemek ve alt klasör olarak yayınlamak. (NEXVIA-TODO'da izleniyor.)
+**Yol haritası — runtime demoları (Node SSR / .NET / Docker):** demo sistemi bugün
+statik + PHP (+`--db` MariaDB) **ve derlemeli statik üreticiler** (Astro/Vite/Next
+export/Hugo — `--build`/`--dist`, sunucuda Node 24) destekler. Sunucu tarafı sürekli
+process gerektiren uygulamalar (Node SSR, .NET, docker-compose) için hedef desen:
+`v-add-demo-site ... --engine=docker` — repo'daki `docker-compose.yml`'i demo
+kullanıcısıyla prefix'li proje adıyla ayağa kaldırıp `/<slug>/` nginx location'ını
+`proxy_pass` ile konteyner portuna bağlamak. Mevcut docker-app altyapısı (blue-green,
+healthcheck, override zinciri) yeniden kullanılabilir; fark, domain+port yerine
+path-based proxy olması. (NEXVIA-TODO'da izleniyor.)
+
+**Uygulama örneği:** `Nexvia-Digital-Studio/gokhan-menajerlik` (931 sayfalık Astro
+sitesi) bu akışla yayınlanır — `--build="npm ci && npm run build" --dist=dist`,
+`NEXVIA_DEMO_BASE` ile derleme, push'ta otomatik yeniden derleme.
 
 ---
 
@@ -780,6 +818,9 @@ path-based proxy olması. SPA/React tarafında bugün bile çalışanın yolu: b
 | Domain açıldı ama sertifika yok (NPM altında) | 80/443 loopback'e çekilmiş, http-01 çalışmıyor | NPM yerine servis→domain eşlemesi (6.6) |
 | Deploy uzun sürüyor / başlamıyor gibi | Build ağır; durum `deploying` | `deploy.log` izle; panelde durum `failed` ise çıktının son satırları sebep gösterir |
 | Demo açılıyor ama CSS/JS/resim yok | Asset yolları **mutlak** (`/css/…`) — demo alt dizinde yaşar | Repoda yolları **göreli** yap (`css/…`, `./x`, `../x`) → push/Güncelle (7.1) |
+| Derlemeli demo açılıyor ama linkler panele düşüyor | Üreteç demo temeliyle derlenmemiş | Build script'te `--base "$NEXVIA_DEMO_BASE"` (Astro/Vite) + iç linkleri BASE_URL'e göre üret (7.1 derlemeli demolar) |
+| Derlemeli demo kurulumu "build command failed" verdi | npm script adı farklı / Node sürümü yetmiyor / derleme ortamı hatası | Çıktının son satırlarına bak; `engines` alanını kontrol et; yerelde aynı komutu çalıştırıp doğrula |
+| Demo derleme sonrası hâlâ eski içerik | Build başarısız olmuş ama eski yayın korunmuş | `v-update-demo-site` çıktısındaki uyarıya bak; deploy hatası eski yayını bilerek korur |
 | PHP demo anasayfa `install.php`'ye yönleniyor / DB hatası basıyor | Site kodu veritabanı/kurulum şartlıyor | "Veritabanı oluştur" + kurulum komutuyla yeniden yayınla (`--db --install=…`, 7.1); DB'siz de açılacak şekilde repoya env-okuma + seed fallback ekle |
 | Demo URL'si 404 | Demo silinmiş ya da slug yanlış yazılmış | Panel Demo Siteler sayfasından güncel URL'yi kopyala (URL'de sondaki `/` dahil) |
 | "no index.(html\|php)" uyarısı aldı | Repoda kökte giriş dosyası yok | Sitedeki klasörü "Alt klasör" alanına yaz (örn. `web`) veya repoya kök index ekle |
@@ -803,7 +844,8 @@ path-based proxy olması. SPA/React tarafında bugün bile çalışanın yolu: b
 
 **Demo reposu (🧪):** tüm yollar göreli (`css/…` değil `/css/…`) · kökte `index.html`/`index.php`
 (veya alt klasör panelde belirtilir) · DB/kurulum sihirbazı yok · derlenmiş çıktı repodaysa alt
-klasör olarak göster · bu listeyi geçen repo panelden **tek tıkla** gizli demo URL'sinde yayınlanır
+klasör olarak göster · derlemeli projede (Astro/Vite) `NEXVIA_DEMO_BASE` ile derleme + linkler
+base-farkında · bu listeyi geçen repo panelden **tek tıkla** gizli demo URL'sinde yayınlanır
 
 Bu listeleri geçen bir repo, panelde **tek tıkla** kurulur, güncellenir ve gerekirse
 tek komutla önceki sürümüne döner.
