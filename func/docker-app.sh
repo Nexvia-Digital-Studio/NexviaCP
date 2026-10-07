@@ -838,9 +838,14 @@ hc = service.get("healthcheck") or {}
 if hc:
     test_cmd = hc.get("test") or []
     if isinstance(test_cmd, list):
-        test_cmd = " ".join(test_cmd)
-    # docker compose config kacisi: CMD-SHELL icindeki '$$' docker run ile
-    # calistirilirsa konteyner kabugunda PID'e acilir (compose up cozumlerdi).
+        # compose CMD-SHELL/CMD önekini düşür: `docker run --health-cmd`
+        # komutu zaten sh -c ile çalıştırır; önek kalırsa healthcheck
+        # "CMD-SHELL: not found" ile daima başarısız olur.
+        if test_cmd and test_cmd[0] in ("CMD-SHELL", "CMD"):
+            test_cmd = test_cmd[1:]
+        test_cmd = " ".join(str(p) for p in test_cmd)
+    # docker compose config kacisi: CMD-SHELL icindeki '\$\$' konteyner
+    # kabugunda PID'e acilir (compose up bunu kendisi cozer, docker run cozmez).
     test_cmd = test_cmd.replace("$" + "$", "$")
     if test_cmd:
         args += ["--health-cmd", test_cmd]
@@ -850,6 +855,8 @@ if hc:
         args += ["--health-timeout", hc["timeout"]]
     if hc.get("retries"):
         args += ["--health-retries", str(hc["retries"])]
+    if hc.get("start_period"):
+        args += ["--health-start-period", str(hc["start_period"])]
 
 args.append(service.get("image") or f"nexvia-{app}-{svc}")
 cmd = service.get("command")
@@ -886,6 +893,39 @@ docker_app_green_list() {
 # port and, when the service defines a healthcheck, additionally waits for
 # docker to report it healthy. Returns non-zero on timeout (caller must
 # roll back — the live stack is still untouched at that point).
+# Usage: docker_app_service_publishes_port APP SERVICE
+# True (0) when SERVICE publishes a host port in the resolved compose config.
+# Only port-publishing services join the green-flip (nginx only flips those);
+# internal services (e.g. a private searxng) are recreated by compose instead.
+docker_app_service_publishes_port() {
+	local app="$1" svc="$2"
+	local app_dir="$DOCKER_APPS_DIR/$app"
+	local repo_dir="$app_dir/repo"
+	local conf_compose
+	conf_compose=$(grep -m1 '^COMPOSE_FILE=' "$app_dir/app.conf" 2>/dev/null | cut -d"'" -f2)
+	[ -n "$conf_compose" ] || conf_compose="docker-compose.yml"
+	python3 - "$repo_dir" "$conf_compose" "$app_dir/.env" "$svc" <<'PYEOF'
+import json, os, subprocess, sys
+
+repo, compose_file, env_file, svc = sys.argv[1:5]
+cmd = ["docker", "compose", "--env-file", env_file, "-f", compose_file]
+for extra in ("nexvia-override.yml", "nexvia-user-override.yml"):
+    p = os.path.join(os.path.dirname(env_file), extra)
+    if os.path.isfile(p):
+        cmd += ["-f", p]
+cmd += ["config", "--format", "json"]
+r = subprocess.run(cmd, cwd=repo, capture_output=True, text=True)
+if r.returncode != 0:
+    sys.exit(1)  # config problems surface in the main deploy path
+try:
+    cfg = json.loads(r.stdout)
+except ValueError:
+    sys.exit(1)
+ports = (cfg.get("services") or {}).get(svc, {}).get("ports") or []
+sys.exit(0 if ports else 1)
+PYEOF
+}
+
 # Usage: docker_app_wait_green "name:port name:port ..."
 docker_app_wait_green() {
 	local entry name port i healthy

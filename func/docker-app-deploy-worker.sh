@@ -138,6 +138,26 @@ else
 	stale=$(docker_app_stale_green_services "$app") || stale=""
 	plan=$(printf '%s\n%s\n' "$plan" "$stale" | awk 'NF && !seen[$0]++')
 	classify=$(docker_app_classify_services "$app") || classify='{"stateless": [], "stateful": []}'
+	# Oz-iyilestirme: servisin NE compose (mavi) NE yesil konteyneri calismiyorsa
+	# (elle silme / beklenmedik olum sonrasi) plana geri girer. compose dry-run
+	# bu durumda "Create" der ve recreate planinin disinda kalir; olmadiginda
+	# "nothing to recreate" denip uygulama kapali kalirdi.
+	missing=""
+	running_services="$(docker_app_compose "$app" ps --status running --services 2>/dev/null | tr '\n' ' ' || true)"
+	green_services=""
+	for g in $(docker_app_green_list "$app"); do
+		gsvc="${g#nexvia-${app}-}"
+		gsvc="${gsvc%-g*}"
+		green_services="$green_services $gsvc"
+	done
+	for svc in $(printf '%s\n' "$classify" | python3 -c 'import json,sys; c=json.load(sys.stdin); print(" ".join(c.get("stateless",[])+c.get("stateful",[])))' 2>/dev/null); do
+		case " $running_services $green_services " in
+			*" $svc "*) ;;
+			*) missing="$missing $svc" ;;
+		esac
+	done
+	[ -n "$missing" ] && echo "[nexvia] self-heal: eksik servisler:$missing"
+	plan=$(printf '%s\n%s\n' "$plan" "$missing" | awk 'NF && !seen[$0]++')
 	eval "$(python3 - "$plan" "$classify" <<'PYEOF'
 import json, shlex, sys
 
@@ -174,11 +194,28 @@ PYEOF
 	fi
 
 	# 4) Changed stateless services: green copies on fresh loopback ports.
+	# Port publish etmeyen (dahili) servisler nginx'e bağlı olmadığı için
+	# green-flip'e girmez; compose doğrudan oluşturur/yeniler (kısa restart,
+	# dış trafiği etkilemez — app bunlara compose servis adıyla erişir).
+	green_plan=""
+	internal_plan=""
+	for svc in $stateless_plan; do
+		if docker_app_service_publishes_port "$app" "$svc"; then
+			green_plan="${green_plan:+$green_plan }$svc"
+		else
+			internal_plan="${internal_plan:+$internal_plan }$svc"
+		fi
+	done
+	if [ -n "$internal_plan" ]; then
+		echo "[nexvia] recreating internal (port-less) services: $internal_plan"
+		docker_app_compose "$app" up -d --no-deps --no-build $internal_plan \
+			|| deploy_rc=1
+	fi
 	green_specs=""
 	green_names=""
 	used_ports=""
 	gen=$(date +%s)
-	for svc in $stateless_plan; do
+	for svc in $green_plan; do
 		port=$(docker_app_alloc_port "$used_ports") || {
 			echo "[nexvia] no free loopback port for green $svc" >&2
 			for g in $green_names; do
@@ -221,7 +258,7 @@ PYEOF
 
 		# 7) Give nginx a moment, then retire the old containers.
 		sleep 3
-		for svc in $stateless_plan; do
+		for svc in $green_plan; do
 			docker_app_compose "$app" rm -sf "$svc" >/dev/null 2>&1 || true
 		done
 		# Previous green generation — but ONLY of the services this deploy
@@ -231,7 +268,7 @@ PYEOF
 		for gname in $prev_green; do
 			gsvc="${gname#nexvia-${app}-}"
 			gsvc="${gsvc%-g*}"
-			case " $stateless_plan " in
+			case " $green_plan " in
 				*" $gsvc "*) docker rm -f "$gname" >/dev/null 2>&1 || true ;;
 			esac
 		done

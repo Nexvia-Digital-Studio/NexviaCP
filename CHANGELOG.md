@@ -37,6 +37,20 @@ panel installation.
 
 ### Fixed
 
+- **Blue-green deploy: three live-proven fixes re-ported from the 2026-10-05
+  hotfix session (lost when the server was re-synced from origin on 2026-10-06).**
+  (1) `docker run --health-cmd` now strips the `CMD-SHELL`/`CMD` prefix from
+  the resolved compose healthcheck — with the prefix intact every green
+  container reported `CMD-SHELL: not found` and stayed permanently unhealthy,
+  failing the health gate; `--health-start-period` is passed through too.
+  (2) Services that publish no host port (internal-only, e.g. a private
+  searxng) no longer try to join the green-flip — nginx can only flip ported
+  services, so portless ones are recreated in place by `compose up -d
+  --no-deps` instead (short restart, no external traffic impact).
+  (3) Self-heal: a service with neither a compose (blue) nor a green
+  container running — after manual deletion or an unexpected death — is put
+  back into the recreate plan; before, the dry-run said "Create", the plan
+  stayed empty and the app silently remained down (lived as a 502).
 - **GitHub webhook deploys no longer stall on a dirty working tree.**
   `v-update-web-domain-git` replaced the bare `git pull` with
   fetch + `merge --ff-only`, falling back to an audited `reset --hard
