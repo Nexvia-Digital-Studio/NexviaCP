@@ -135,11 +135,14 @@ atınca demo otomatik güncellenir. Bir reponun bu akışta düzgün çalışmas
    (`<base>` etiketi ve JS'de `"./api/x"` kalıbı güvenlidir.)
 2. **Kökte giriş dosyası:** `index.html` veya `index.php`. Site repo içindeki bir klasördeyse
    (örn. `web/`, `dist/`) yayınlarken **Alt klasör** alanına yazılır — repo yeniden düzenlenmez.
-3. **DB ve kurulum sihirbazı yok:** sayfalar statik içerikle açılmalı; butonlar `href` ile sayfa
-   arası gezdirsin. DB şartlayan site demoda açılmaz (PHP 8.5 izole havuzda, `open_basedir`
-   hapli; PDO bağlantısı kurulamaz). Oturum/cache yazma gibi düz PHP işlevleri çalışır.
-4. **Derleme adımı yok:** hazır HTML/PHP dosyaları yayınlanır. Derlenmiş çıktı (`dist/`) repoda
-   commit'liyse sorun yok — alt klasör olarak gösterilir.
+3. **DB şartlıysa env'den oku:** düz PHP DB'siz açılabilmeli; DB kullanan siteler
+   "Veritabanı oluştur" (`--db`) ile yayınlanır — kimlik bilgileri PHP'ye
+   `DB_HOST/DB_NAME/DB_USER/DB_PASS` env'leriyle gelir (host `localhost`'tur).
+4. **Derlemeli projeler (Astro/Vite/Next export):** "Derleme adımı" (`--build`/`--dist`)
+   ile yayınlanır; derleme sunucuda her kurulum/güncellemede çalışır. Build script'i
+   `NEXVIA_DEMO_BASE` env'ini `--base`'e çevirmeli ve iç linkler base-farkında
+   üretilmeli (Astro örneği: `gokhan-menajerlik` reposu). Derlenmiş çıktı (`dist/`)
+   zaten repoda commit'liyse derleme gerekmez — alt klasör olarak yayınlanır.
 5. **Secret yok:** demo ağacı herkese açık URL'de servis edilir; repoda anahtar/dump
    bırakılmaz (`.env`, `.git`, `.sql` HTTP üzerinden 403 ile korunur ama repoya koymamak esastır).
 
