@@ -149,11 +149,14 @@ demo_build_run() {
 	}
 	chown -R "$DEMO_BUILD_USER:$DEMO_BUILD_GROUP" "$dir/.src"
 	install -d -m 700 -o "$DEMO_BUILD_USER" -g "$DEMO_BUILD_GROUP" \
-		"$DEMO_DEMOS_DIR/.npm" 2>/dev/null || true
+		"$DEMO_DEMOS_DIR/.npm" "$DEMO_DEMOS_DIR/.cache" "$DEMO_DEMOS_DIR/.config" 2>/dev/null || true
 	runuser -u "$DEMO_BUILD_USER" -- \
 		env HOME="$DEMO_DEMOS_DIR" \
 		PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
 		NEXVIA_DEMO="1" NEXVIA_DEMO_BASE="/$1/" \
+		XDG_CACHE_HOME="$DEMO_DEMOS_DIR/.cache" \
+		XDG_CONFIG_HOME="$DEMO_DEMOS_DIR/.config" \
+		ASTRO_TELEMETRY_DISABLED="1" NPM_CONFIG_TELEMETRY="false" \
 		npm_config_cache="$DEMO_DEMOS_DIR/.npm" \
 		bash -c "cd '$dir/.src' && $2"
 }
