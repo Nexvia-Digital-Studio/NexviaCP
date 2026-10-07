@@ -360,3 +360,44 @@ demo_install_run() {
 		DB_HOST="$(demo_db_host)" DB_NAME="$3" DB_USER="$4" DB_PASS="$5" \
 		bash -c "cd '$dir' && $2"
 }
+
+# Auto-detect the repo's PHP installer so --install does not have to be
+# typed for the common layouts (bin/install.php, install.php, …).
+# Echoes "php <path relative to the repo root>" or nothing (rc 1).
+# Order: curated conventional paths (subdir variants first when SUBDIR is
+# set), then a shallow fuzzy pass (depth <= 3, install*/setup*.php) with
+# .git/node_modules/vendor pruned and uninstall-ish names skipped.
+demo_install_detect() {
+	# $1 repo root (.src), $2 subdir (optional, relative to $1)
+	local root="$1" sub="${2:-}" f
+	[ -d "$root" ] || return 1
+	local names=(
+		"bin/install.php" "install.php" "installer.php" "setup.php"
+		"install/index.php" "installer/index.php" "scripts/install.php"
+		"public/install.php"
+	)
+	local candidates=()
+	if [ -n "$sub" ]; then
+		for f in "${names[@]}"; do candidates+=("$sub/$f"); done
+	fi
+	candidates+=("${names[@]}")
+	for f in "${candidates[@]}"; do
+		if [ -f "$root/$f" ]; then
+			echo "php $f"
+			return 0
+		fi
+	done
+	while IFS= read -r f; do
+		case "${f##*/}" in
+			uninstall*|*uninstall*|reinstall*)
+				continue
+				;;
+		esac
+		echo "php $f"
+		return 0
+	done < <(cd "$root" 2>/dev/null && find . -maxdepth 3 \
+		\( -name .git -o -name node_modules -o -name vendor \) -prune -o \
+		-type f \( -iname 'install*.php' -o -iname 'setup*.php' \) \
+		-print 2>/dev/null | sed 's|^\./||' | LC_ALL=C sort)
+	return 1
+}

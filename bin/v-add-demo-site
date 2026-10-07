@@ -21,8 +21,11 @@
 # --install=CMD: run CMD inside the repo clone as the demo pool user right
 # after publishing (and on every v-update-demo-site), with the DB creds in
 # the environment — e.g. "php bin/install.php" to load schema+seed.
-# Without --install the DB stays empty (app must self-provision or the
-# site must run without DB).
+# With --db but WITHOUT --install, the installer is AUTO-DETECTED
+# (bin/install.php, install.php, installer.php, setup.php, install/index.php,
+# … then any shallow install*/setup*.php) and run — most PHP apps need no
+# --install at all. Without --db and --install the DB stays empty (app must
+# self-provision or the site must run without DB).
 # --build=CMD: run CMD inside the repo clone BEFORE publishing (and on
 # every update) as the unjailed build user — for static-site generators
 # (Astro, Vite, Next export, Hugo…): "npm ci && npm run build". The
@@ -232,6 +235,21 @@ if [ -n "$subdir" ] && [ ! -d "$demo_dir/.src/$subdir" ]; then
 	check_result "$E_NOTEXIST" "SUBDIR '$subdir' not found in ${repo_norm}"
 fi
 
+# Installer auto-detection: with --db and no explicit --install, look for
+# the repo's PHP installer (bin/install.php, install.php, installer.php,
+# setup.php, …) so the path never has to be typed for the common layout.
+# Explicit --install always wins; the auto value is re-detected on every
+# update (INSTALL_AUTO registry key) so moved/renamed installers follow.
+install_auto=0
+if [ "$db_flag" = "1" ] && [ -z "$install_cmd" ]; then
+	if install_cmd=$(demo_install_detect "$demo_dir/.src" "$subdir"); then
+		install_auto=1
+		echo "[*] Installer auto-detected: ${install_cmd}"
+	else
+		echo "[!] no installer found (install*.php / setup*.php) — DB stays empty; pass --install to seed it"
+	fi
+fi
+
 # Build hook: run the repo's build (static-site generators) before
 # publishing. Runs as the unjailed build user; the published tree is the
 # DIST folder when given, otherwise the repo root (post-build).
@@ -293,6 +311,7 @@ DB_USER='$db_user'
 DB_PASS='$db_pass'
 DB_PREFIX='$db_prefix'
 INSTALL='$install_cmd'
+INSTALL_AUTO='$install_auto'
 BUILD='$build_cmd'
 DIST='$dist_dir'
 CREATED='$(date '+%F %T')'

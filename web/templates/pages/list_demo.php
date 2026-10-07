@@ -241,9 +241,9 @@ usort($v_rows, fn($a, $b) => strcmp($b["UPDATED"] ?? "", $a["UPDATED"] ?? ""));
 					</div>
 					<div>
 						<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("Kurulum komutu (opsiyonel)", "Kurulum komutu (opsiyonel)")) ?></label>
-						<input type="text" name="demo_install" placeholder="php bin/install.php" class="form-control" style="width:100%;">
+						<input type="text" name="demo_install" placeholder="otomatik bulunur — örn. php bin/install.php" class="form-control" style="width:100%;">
 						<small class="u-text-muted" style="display:block; margin-top:4px;">
-							<?= tohtml(__tr("Repo kökünde çalışır; şema/seed yüklemek için kullanın. Her güncellemede yeniden çalışır (demo verileri geçicidir).", "Repo kökünde çalışır; şema/seed yüklemek için kullanın. Her güncellemede yeniden çalışır (demo verileri geçicidir).")) ?>
+							<?= tohtml(__tr("Repo kökünde çalışır; şema/seed yüklemek için kullanın. Her güncellemede yeniden çalışır (demo verileri geçicidir). BOŞ BIRAKIRSANIZ kurulum dosyası repoda otomatik aranır ve bulunursa çalıştırılır: bin/install.php, install.php, installer.php, setup.php, install/index.php… (install*/setup*.php deseni).", "Repo kökünde çalışır; şema/seed yüklemek için kullanın. Her güncellemede yeniden çalışır (demo verileri geçicidir). BOŞ BIRAKIRSANIZ kurulum dosyası repoda otomatik aranır ve bulunursa çalıştırılır: bin/install.php, install.php, installer.php, setup.php, install/index.php… (install*/setup*.php deseni).")) ?>
 						</small>
 					</div>
 				</div>

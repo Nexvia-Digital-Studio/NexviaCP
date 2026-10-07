@@ -53,6 +53,7 @@ r_db_name=$(demo_reg_key "$reg" "DB_NAME")
 r_db_user=$(demo_reg_key "$reg" "DB_USER")
 r_db_pass=$(demo_reg_key "$reg" "DB_PASS")
 r_install=$(demo_reg_key "$reg" "INSTALL")
+r_install_auto=$(demo_reg_key "$reg" "INSTALL_AUTO")
 r_build=$(demo_reg_key "$reg" "BUILD")
 r_dist=$(demo_reg_key "$reg" "DIST")
 [ -n "$r_branch" ] || r_branch="main"
@@ -72,6 +73,22 @@ if ! demo_git -C "$r_dir/.src" fetch --depth 1 origin "$r_branch" 2>/dev/null; t
 fi
 demo_git -C "$r_dir/.src" reset --hard FETCH_HEAD >/dev/null 2>&1
 new_commit=$(demo_git -C "$r_dir/.src" rev-parse --short HEAD 2>/dev/null || echo "")
+
+# Auto-detected installers follow the repo: re-detect after the pull so a
+# moved/renamed installer keeps working without re-creating the demo.
+if [ "$r_install_auto" = "1" ]; then
+	if new_install=$(demo_install_detect "$r_dir/.src" "$r_subdir"); then
+		if [ "$new_install" != "$r_install" ]; then
+			echo "[*] Installer auto-detected: ${new_install} (was: ${r_install:-none})"
+			r_install="$new_install"
+			demo_reg_set_key "$reg" "INSTALL" "$r_install"
+		fi
+	elif [ -n "$r_install" ]; then
+		echo "[!] installer no longer found in the repo — skipping install hook (was: ${r_install})"
+		r_install=""
+		demo_reg_set_key "$reg" "INSTALL" ""
+	fi
+fi
 
 # Build hook: re-run the repo build before re-publishing (same command and
 # environment as v-add-demo-site — NEXVIA_DEMO_BASE included).
