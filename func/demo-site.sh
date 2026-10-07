@@ -9,15 +9,28 @@
 # Disk layout:
 #   /var/lib/hestia/demos/<slug>/        published tree (served by nginx)
 #   /var/lib/hestia/demos/<slug>/.src    git clone (pulled on every update)
+#   /var/lib/hestia/demos/.npm           shared npm cache (--build demos)
 # Registry (one file per demo, sourceable key='val'):
 #   $HESTIA/data/users/<user>/demo-sites/<slug>.conf
 # nginx: one location file per demo in /etc/nginx/demo-sites/<slug>.conf,
 # included from the panelproxy SSL template.
+#
+# Two demo kinds:
+#   plain  — repo (or SUBDIR of it) is published as-is (static HTML / PHP)
+#   build  --build=CMD [--dist=DIR]: CMD runs inside .src before publishing
+#            (e.g. "npm ci && npm run build" for Astro/Vite/Next-export);
+#            the built DIST folder (default: repo root) is published. Builds
+#            run as DEMO_BUILD_USER, NOT the jailed pool user — npm needs
+#            registry egress the nftables jail deliberately blocks.
 
 DEMO_DEMOS_DIR="/var/lib/hestia/demos"
 DEMO_NGINX_DIR="/etc/nginx/demo-sites"
 DEMO_POOL_USER="nexviademo"
 DEMO_POOL_GROUP="nexviademo"
+# Unprivileged user with normal network access for repo builds (npm/pip/…).
+# Created by v-ensure-demo-sites alongside the pool user.
+DEMO_BUILD_USER="nexviabuild"
+DEMO_BUILD_GROUP="nexviabuild"
 
 # Socket of the demo php-fpm pool: derived from where v-ensure-demo-sites
 # actually installed it (highest installed FPM when first created), so
@@ -46,10 +59,15 @@ demo_sanitize_name() {
 	printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^[-]+|[-]+$//g' | cut -c1-30
 }
 
-# Run git as the demo pool user (files it creates must be owned by it so
-# PHP can write caches/uploads inside its own demo tree). The GitHub token
+# Run git as the demo's git user (files it creates must be owned by it so
+# PHP/build can write inside its own demo tree). Plain demos use the jailed
+# pool user; --build demos use the build user (it owns .src after the first
+# build). Set DEMO_GIT_USER before calling to override. The GitHub token
 # is fed via GIT_ASKPASS, never in the URL or on the command line.
 demo_git() {
+	local run_user="${DEMO_GIT_USER:-$DEMO_POOL_USER}"
+	local run_group="$DEMO_POOL_GROUP"
+	[ "$run_user" = "$DEMO_BUILD_USER" ] && run_group="$DEMO_BUILD_GROUP"
 	local use_token=0 a askpass="" rc dir_next=0 repo_dir=""
 	for a in "$@"; do
 		[[ "$a" =~ ^https://github\.com/ ]] && use_token=1
@@ -71,14 +89,14 @@ demo_git() {
 		askpass=$(mktemp /tmp/nexvia-demo-askpass.XXXXXX)
 		printf '#!/bin/sh\nprintf "%%s\\n" "$NEXVIA_GIT_TOKEN"\n' > "$askpass"
 		chmod 700 "$askpass"
-		chown "$DEMO_POOL_USER:$DEMO_POOL_GROUP" "$askpass"
-		runuser -u "$DEMO_POOL_USER" -- env HOME="$DEMO_DEMOS_DIR" \
+		chown "$run_user:$run_group" "$askpass"
+		runuser -u "$run_user" -- env HOME="$DEMO_DEMOS_DIR" \
 			NEXVIA_GIT_TOKEN="$GITHUB_TOKEN" GIT_ASKPASS="$askpass" \
 			GIT_TERMINAL_PROMPT=0 git -c credential.helper= "$@"
 		rc=$?
 		rm -f "$askpass"
 	else
-		runuser -u "$DEMO_POOL_USER" -- env HOME="$DEMO_DEMOS_DIR" \
+		runuser -u "$run_user" -- env HOME="$DEMO_DEMOS_DIR" \
 			GIT_TERMINAL_PROMPT=0 git -c credential.helper= "$@"
 		rc=$?
 	fi
@@ -88,25 +106,56 @@ demo_git() {
 # Publish the clone (.src[/subdir]) into the served tree, then normalize
 # permissions: dirs 755 / files 644 owned by the pool user (nginx reads
 # statics, PHP may write inside its own tree). .src is locked to 700 so
-# nginx can never traverse into the git clone.
+# nginx can never traverse into the git clone. node_modules is never
+# published (build demos carry it inside .src; the served tree gets only
+# the built output).
 demo_publish_tree() {
 	local slug="$1" subdir="$2"
 	local src="$DEMO_DEMOS_DIR/$slug/.src"
 	[ -n "$subdir" ] && src="$src/$subdir"
 	[ -d "$src" ] || return 1
 	rsync -a --delete \
-		--exclude='.git*' --exclude='.src' \
+		--exclude='.git*' --exclude='.src' --exclude='node_modules' \
 		"$src"/ "$DEMO_DEMOS_DIR/$slug"/ || return 1
 	demo_fix_perms "$slug"
 }
 
 demo_fix_perms() {
 	local slug="$1" base="$DEMO_DEMOS_DIR/$slug"
-	chown -R "$DEMO_POOL_USER:$DEMO_POOL_GROUP" "$base"
-	find "$base" -type d -exec chmod 755 {} +
-	find "$base" -type f -exec chmod 644 {} +
+	# Published tree only — .src is pruned: its ownership depends on the
+	# demo kind (pool user for plain demos, build user for --build demos)
+	# and must survive republishes, since git fetch on update runs as that
+	# user. It stays mode 700 so nginx can never traverse into the clone.
+	( cd "$base" && find . -name .src -prune -o -print0 | xargs -0 -r chown "$DEMO_POOL_USER:$DEMO_POOL_GROUP" )
+	( cd "$base" && find . -name .src -prune -o -type d -exec chmod 755 {} + )
+	( cd "$base" && find . -name .src -prune -o -type f -exec chmod 644 {} + )
 	chmod 700 "$base/.src" 2>/dev/null || true
-	chmod 755 "$DEMO_DEMOS_DIR/$slug"
+	chmod 755 "$base"
+}
+
+# Run a repo build command (e.g. "npm ci && npm run build") inside .src as
+# the unjailed build user. The pool user's nftables jail blocks the npm
+# registry, so builds must not run as it. NEXVIA_DEMO_BASE carries the
+# demo's URL base path ('/<slug>/') so frameworks can bake it in (Astro
+# --base, Vite base, Next basePath) — root-absolute links would otherwise
+# escape the demo location and 404 against the panel root.
+demo_build_run() {
+	# $1 slug, $2 build_cmd
+	local dir="$DEMO_DEMOS_DIR/$1"
+	[ -d "$dir/.src" ] || return 1
+	id "$DEMO_BUILD_USER" >/dev/null 2>&1 || {
+		echo " [!] build user $DEMO_BUILD_USER missing — run: v-ensure-demo-sites" >&2
+		return 1
+	}
+	chown -R "$DEMO_BUILD_USER:$DEMO_BUILD_GROUP" "$dir/.src"
+	install -d -m 700 -o "$DEMO_BUILD_USER" -g "$DEMO_BUILD_GROUP" \
+		"$DEMO_DEMOS_DIR/.npm" 2>/dev/null || true
+	runuser -u "$DEMO_BUILD_USER" -- \
+		env HOME="$DEMO_DEMOS_DIR" \
+		PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+		NEXVIA_DEMO="1" NEXVIA_DEMO_BASE="/$1/" \
+		npm_config_cache="$DEMO_DEMOS_DIR/.npm" \
+		bash -c "cd '$dir/.src' && $2"
 }
 
 # One nginx location file per demo. `root` (not alias!) so the URI path
@@ -294,13 +343,16 @@ demo_db_fastcgi_params() {
 }
 
 demo_install_run() {
-	# $1 slug, $2 install_cmd, $3 db, $4 dbuser, $5 dbpass
+	# $1 slug, $2 install_cmd, $3 db, $4 dbuser, $5 dbpass, $6 run_user (opt)
 	# Runs the command as the demo pool user inside the demo's .src clone
 	# (repo code — same trust level as the demo's PHP itself) with the
 	# demo's DB credentials in the environment. db args may be empty.
+	# --build demos pass the build user instead: their .src is 700
+	# build-owned, the pool user cannot enter it.
 	local dir="$DEMO_DEMOS_DIR/$1/.src"
+	local run_user="${6:-$DEMO_POOL_USER}"
 	[ -d "$dir" ] || return 1
-	runuser -u "$DEMO_POOL_USER" -- env HOME="$DEMO_DEMOS_DIR" \
+	runuser -u "$run_user" -- env HOME="$DEMO_DEMOS_DIR" \
 		PATH="/usr/local/bin:/usr/bin:/bin" NEXVIA_DEMO=1 \
 		DB_HOST="$(demo_db_host)" DB_NAME="$3" DB_USER="$4" DB_PASS="$5" \
 		bash -c "cd '$dir' && $2"

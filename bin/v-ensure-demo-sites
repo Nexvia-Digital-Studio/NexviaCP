@@ -6,7 +6,9 @@
 # v-update-sys-nexvia after every core update; safe to run any time.
 #
 #   - system user/group nexviademo (runs demo PHP, owns demo files)
+#   - system user/group nexviabuild (runs --build repo builds, unjailed)
 #   - /var/lib/hestia/demos            published demo trees
+#   - /var/lib/hestia/demos/.npm       shared npm cache for builds
 #   - /etc/nginx/demo-sites            per-demo nginx location files
 #   - php-fpm pool 'nexvia-demo'       isolated backend for demo PHP
 #   - include line in live panelproxy SSL confs (panel domain) so the
@@ -55,6 +57,25 @@ if ! id "$DEMO_POOL_USER" >/dev/null 2>&1; then
 	useradd -r -g "$DEMO_POOL_GROUP" -d "$DEMO_DEMOS_DIR" -s /usr/sbin/nologin \
 		-M "$DEMO_POOL_USER"
 	echo "[+] Created system user $DEMO_POOL_USER."
+fi
+
+# --- build user (--build demos: npm & friends need registry egress the
+# PHP-pool nftables jail blocks, so builds run unjailed but still
+# unprivileged) ---------------------------------------------------------
+if ! getent group "$DEMO_BUILD_GROUP" >/dev/null 2>&1; then
+	groupadd -r "$DEMO_BUILD_GROUP"
+fi
+if ! id "$DEMO_BUILD_USER" >/dev/null 2>&1; then
+	useradd -r -g "$DEMO_BUILD_GROUP" -d "$DEMO_DEMOS_DIR" -s /usr/sbin/nologin \
+		-M "$DEMO_BUILD_USER"
+	echo "[+] Created system user $DEMO_BUILD_USER (demo repo builds)."
+fi
+install -d -m 700 -o "$DEMO_BUILD_USER" -g "$DEMO_BUILD_GROUP" "$DEMO_DEMOS_DIR/.npm"
+
+# Warn (not fail) when node/npm are missing: --build demos need them,
+# plain HTML/PHP demos do not.
+if ! command -v node >/dev/null 2>&1; then
+	echo "[!] node not found — --build demos will fail until Node.js is installed (e.g. NodeSource 24.x)."
 fi
 
 # --- php-fpm pool -----------------------------------------------------

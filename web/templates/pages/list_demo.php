@@ -80,6 +80,9 @@ usort($v_rows, fn($a, $b) => strcmp($b["UPDATED"] ?? "", $a["UPDATED"] ?? ""));
 						<?php if (!empty($r["SUBDIR"])) { ?>
 							<span class="label label-default">/<?= tohtml($r["SUBDIR"]) ?></span>
 						<?php } ?>
+						<?php if (!empty($r["BUILD"]) && $r["BUILD"] !== "-") { ?>
+							<span class="label label-success" title="<?= tohtml(($r["BUILD"] ?? "") . " → " . ($r["DIST"] ?? "")) ?>"><?= tohtml(__tr("build", "build")) ?></span>
+						<?php } ?>
 						<?php if (!empty($r["DB_NAME"])) { ?>
 							<span class="label label-info" title="<?= tohtml($r["DB_NAME"]) ?>">DB</span>
 						<?php } ?>
@@ -147,12 +150,12 @@ usort($v_rows, fn($a, $b) => strcmp($b["UPDATED"] ?? "", $a["UPDATED"] ?? ""));
 <div id="demo-add-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.65); z-index:9999; justify-content:center; align-items:center;" onclick="if(event.target===this) this.style.display='none';">
 	<div class="form-container" style="background:var(--color-background, #fff); max-width:580px; width:92%; max-height:92vh; overflow-y:auto; border-radius:8px; padding:25px 30px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
 		<h2 class="u-mb15"><i class="fas fa-flask icon-teal"></i> <?= tohtml(__tr("Yeni Demo Yayınla", "Yeni Demo Yayınla")) ?></h2>
-		<p class="u-text-muted u-mb20" style="font-size:0.9rem; line-height:1.4;">
-			<?= tohtml(__tr(
-				"Düz HTML veya PHP siteler (kurulum gerektirmeyen) saniyeler içinde gizli bir demo URL'sinde yayınlanır. PHP demoları veritabanısız çalışır — sayfalar arası gezinti ve statik işlevler yeterlidir.",
-				"Düz HTML veya PHP siteler (kurulum gerektirmeyen) saniyeler içinde gizli bir demo URL'sinde yayınlanır. PHP demoları veritabanısız çalışır — sayfalar arası gezinti ve statik işlevler yeterlidir.",
-			)) ?>
-		</p>
+			<p class="u-text-muted u-mb20" style="font-size:0.9rem; line-height:1.4;">
+				<?= tohtml(__tr(
+					"Düz HTML veya PHP siteleri saniyeler içinde yayınlayın; Astro/Vite gibi derlemeli projeler için «Derleme adımı»nı açın (sunucuda npm build çalışır). PHP demoları isterse veritabanı da alabilir.",
+					"Düz HTML veya PHP siteleri saniyeler içinde yayınlayın; Astro/Vite gibi derlemeli projeler için «Derleme adımı»nı açın (sunucuda npm build çalışır). PHP demoları isterse veritabanı da alabilir.",
+				)) ?>
+			</p>
 
 		<form method="post" action="/list/demo/" onsubmit="const b=this.querySelector('button[type=submit]'); b.disabled=true; b.innerHTML='<i class=\'fas fa-spinner fa-spin\'></i> <?= tohtml(__tr('Yayınlanıyor…', 'Yayınlanıyor…')) ?>';">
 			<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
@@ -196,8 +199,31 @@ usort($v_rows, fn($a, $b) => strcmp($b["UPDATED"] ?? "", $a["UPDATED"] ?? ""));
 				<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("Alt klasör (opsiyonel, gelişmiş)", "Alt klasör (opsiyonel, gelişmiş)")) ?></label>
 				<input type="text" name="demo_subdir" placeholder="web" class="form-control" style="width:100%;">
 				<small class="u-text-muted" style="display:block; margin-top:4px;">
-					<?= tohtml(__tr("Sitenin repo kökünde değil de bir klasörün içinde olduğu durumlarda o klasörü yazın (örn. web, dist).", "Sitenin repo kökünde değil de bir klasörün içinde olduğu durumlarda o klasörü yazın (örn. web, dist).")) ?>
+					<?= tohtml(__tr("Sitenin repo kökünde değil de bir klasörün içinde olduğu durumlarda o klasörü yazın (örn. web, dist). Derlemeli projelerde bunu değil, aşağıdaki Derleme adımını kullanın.", "Sitenin repo kökünde değil de bir klasörün içinde olduğu durumlarda o klasörü yazın (örn. web, dist). Derlemeli projelerde bunu değil, aşağıdaki Derleme adımını kullanın.")) ?>
 				</small>
+			</div>
+
+			<div class="u-mb15" style="border:1px solid var(--color-border, #ddd); border-radius:8px; padding:12px 14px;">
+				<label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+					<input type="checkbox" name="demo_build" value="1" id="demo-build-toggle" style="margin:0;">
+					<span class="u-text-bold"><?= tohtml(__tr("Derleme adımı (Astro / Vite / Next export)", "Derleme adımı (Astro / Vite / Next export)")) ?></span>
+				</label>
+				<div id="demo-build-opts" style="display:none; margin-top:10px;">
+					<div class="u-mb10">
+						<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("Derleme komutu", "Derleme komutu")) ?></label>
+						<input type="text" name="demo_build_cmd" value="npm ci && npm run build" class="form-control" style="width:100%;">
+						<small class="u-text-muted" style="display:block; margin-top:4px;">
+							<?= tohtml(__tr("Repo kökünde sunucuda çalışır (ilk kurulum ve her güncellemede). Komut ortamına NEXVIA_DEMO_BASE='/demo-URL-temeli/' verilir — Astro/Vite projeleri derlemeyi bu temele göre yapmalı (Astro: build script'inde --base \"$NEXVIA_DEMO_BASE\").", "Repo kökünde sunucuda çalışır (ilk kurulum ve her güncellemede). Komut ortamına NEXVIA_DEMO_BASE='/demo-URL-temeli/' verilir — Astro/Vite projeleri derlemeyi bu temele göre yapmalı (Astro: build script'inde --base \"$NEXVIA_DEMO_BASE\").")) ?>
+						</small>
+					</div>
+					<div>
+						<label class="form-label u-mb5 u-text-bold"><?= tohtml(__tr("Yayınlanacak çıktı klasörü", "Yayınlanacak çıktı klasörü")) ?></label>
+						<input type="text" name="demo_dist" value="dist" class="form-control" style="width:100%;">
+						<small class="u-text-muted" style="display:block; margin-top:4px;">
+							<?= tohtml(__tr("Derleme sonrası yayınlanacak klasör (Astro/Vite: dist, Next export: out, Hugo: public).", "Derleme sonrası yayınlanacak klasör (Astro/Vite: dist, Next export: out, Hugo: public).")) ?>
+						</small>
+					</div>
+				</div>
 			</div>
 
 			<div class="u-mb15" style="border:1px solid var(--color-border, #ddd); border-radius:8px; padding:12px 14px;">
@@ -248,6 +274,13 @@ document.addEventListener('keydown', function(e) {
 	if (t && o) {
 		const sync = function() { o.style.display = t.checked ? 'block' : 'none'; };
 		t.addEventListener('change', sync);
+		sync();
+	}
+	const bt = document.getElementById('demo-build-toggle');
+	const bo = document.getElementById('demo-build-opts');
+	if (bt && bo) {
+		const sync = function() { bo.style.display = bt.checked ? 'block' : 'none'; };
+		bt.addEventListener('change', sync);
 		sync();
 	}
 })();

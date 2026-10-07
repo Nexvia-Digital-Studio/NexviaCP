@@ -1,11 +1,12 @@
 #!/bin/bash
 # info: publish a git repository as a demo site under a secret panel URL
-# options: USER REPO [BRANCH] [NAME] [SUBDIR] [--db[=ENV_PREFIX]] [--install=CMD]
+# options: USER REPO [BRANCH] [NAME] [SUBDIR] [--db[=ENV_PREFIX]] [--install=CMD] [--build=CMD] [--dist=DIR]
 #
 # example: v-add-demo-site admin onlymutfak
 # example: v-add-demo-site admin Nexvia-Digital-Studio/onlymutfak main
 # example: v-add-demo-site admin https://github.com/user/site.git main "" web
 # example: v-add-demo-site admin org/blog main "" "" --db=BLOG --install "php bin/install.php"
+# example: v-add-demo-site admin org/astro-site main "" "" --build "npm ci && npm run build" --dist dist
 #
 # Publishes static HTML and plain PHP sites (no build steps) at
 # https://panel.example.com/<name>-<random16>/ — the random suffix is
@@ -22,17 +23,29 @@
 # the environment — e.g. "php bin/install.php" to load schema+seed.
 # Without --install the DB stays empty (app must self-provision or the
 # site must run without DB).
+# --build=CMD: run CMD inside the repo clone BEFORE publishing (and on
+# every update) as the unjailed build user — for static-site generators
+# (Astro, Vite, Next export, Hugo…): "npm ci && npm run build". The
+# command sees NEXVIA_DEMO_BASE='/<slug>/' (the demo's URL base path,
+# trailing slash) so frameworks can bake it in — Astro: astro build --base
+# "$NEXVIA_DEMO_BASE". Exclusive with SUBDIR (build always runs at the
+# repo root).
+# --dist=DIR: publish this folder of the clone after the build (e.g.
+# dist, out, build) instead of the repo root. Requires --build — a plain
+# subfolder of an unbuildable repo is what SUBDIR is for.
 
 #----------------------------------------------------------#
 #                Variables & Functions                     #
 #----------------------------------------------------------#
 
 # Positional args + flags. Flags are recognized anywhere (--db, --db=PFX,
-# --install=CMD); the rest are positional in order:
+# --install=CMD, --build=CMD, --dist=DIR); the rest are positional in order:
 #   USER REPO [BRANCH] [NAME] [SUBDIR]
 db_flag=0
 db_prefix=""
 install_cmd=""
+build_cmd=""
+dist_dir=""
 positionals=()
 for _a in "$@"; do
 	case "$_a" in
@@ -45,6 +58,12 @@ for _a in "$@"; do
 			;;
 		--install=*)
 			install_cmd="${_a#--install=}"
+			;;
+		--build=*)
+			build_cmd="${_a#--build=}"
+			;;
+		--dist=*)
+			dist_dir="${_a#--dist=}"
 			;;
 		--*)
 			bad_flag="$_a"
@@ -92,7 +111,7 @@ if [ -n "$install_cmd" ]; then
 	[ "${#install_cmd}" -le 300 ] || check_result "$E_INVALID" "--install command too long (max 300 chars)"
 fi
 
-check_args '2' "$#" 'USER REPO [BRANCH] [NAME] [SUBDIR] [--db[=ENV_PREFIX]] [--install=CMD]'
+check_args '2' "$#" 'USER REPO [BRANCH] [NAME] [SUBDIR] [--db[=ENV_PREFIX]] [--install=CMD] [--build=CMD] [--dist=DIR]'
 is_format_valid 'user'
 is_object_valid 'user' 'USER' "$user"
 if [ -n "$branch" ] && [[ ! "$branch" =~ ^[A-Za-z0-9._/-]{1,100}$ ]]; then
@@ -106,6 +125,28 @@ if [ -n "$subdir" ]; then
 	esac
 	[[ "$subdir" =~ ^[A-Za-z0-9._/-]{1,200}$ ]] || check_result "$E_INVALID" "invalid SUBDIR"
 fi
+for _cmd_name in install_cmd build_cmd; do
+	declare -n _cmd_value="$_cmd_name"
+	# The registry stores single-quoted values — keep quotes/newlines out.
+	case "$_cmd_value" in
+		*"'"*|*$'\n'*)
+			check_result "$E_INVALID" "invalid --${_cmd_name%_cmd} command (no quotes or newlines)"
+			;;
+	esac
+	[ "${#_cmd_value}" -le 300 ] \
+		|| check_result "$E_INVALID" "--${_cmd_name%_cmd} command too long (max 300 chars)"
+done
+if [ -n "$dist_dir" ]; then
+	case "$dist_dir" in
+		/*|*..*|*\ *)
+			check_result "$E_INVALID" "invalid DIST (relative folder inside the repo, e.g. 'dist')"
+			;;
+	esac
+	[[ "$dist_dir" =~ ^[A-Za-z0-9._/-]{1,200}$ ]] || check_result "$E_INVALID" "invalid DIST"
+	[ -n "$build_cmd" ] || check_result "$E_INVALID" "--dist requires --build (a plain subfolder is SUBDIR)"
+fi
+[ -z "$build_cmd" ] || [ -z "$subdir" ] \
+	|| check_result "$E_INVALID" "SUBDIR and --build are mutually exclusive (build runs at the repo root)"
 
 # Ensure root
 if [ "x$(id -u)" != 'x0' ]; then
@@ -191,7 +232,19 @@ if [ -n "$subdir" ] && [ ! -d "$demo_dir/.src/$subdir" ]; then
 	check_result "$E_NOTEXIST" "SUBDIR '$subdir' not found in ${repo_norm}"
 fi
 
-demo_publish_tree "$slug" "$subdir" || {
+# Build hook: run the repo's build (static-site generators) before
+# publishing. Runs as the unjailed build user; the published tree is the
+# DIST folder when given, otherwise the repo root (post-build).
+if [ -n "$build_cmd" ]; then
+	echo "[*] Building (${build_cmd})…"
+	if ! demo_build_run "$slug" "$build_cmd"; then
+		rm -rf "$demo_dir"
+		check_result "$E_INVALID" "build command failed — see output above (node/npm installed? correct build script?)"
+	fi
+fi
+publish_dir="$dist_dir"
+
+demo_publish_tree "$slug" "$publish_dir" || {
 	rm -rf "$demo_dir"
 	check_result "$E_INVALID" "failed to publish demo tree"
 }
@@ -240,6 +293,8 @@ DB_USER='$db_user'
 DB_PASS='$db_pass'
 DB_PREFIX='$db_prefix'
 INSTALL='$install_cmd'
+BUILD='$build_cmd'
+DIST='$dist_dir'
 CREATED='$(date '+%F %T')'
 UPDATED='$(date '+%F %T')'
 STATE='active'
@@ -247,10 +302,12 @@ NXV_REG_EOF
 chown root:root "$reg"
 chmod 640 "$reg"
 
-# Install hook: load schema/seed into the fresh DB (repo code, pool user).
+# Install hook: load schema/seed into the fresh DB (repo code, pool user —
+# or the build user for --build demos, whose .src the pool user can't read).
 if [ -n "$install_cmd" ]; then
 	echo "[*] Running install command…"
-	if ! demo_install_run "$slug" "$install_cmd" "$db_name" "$db_user" "$db_pass"; then
+	if ! demo_install_run "$slug" "$install_cmd" "$db_name" "$db_user" "$db_pass" \
+		"$([ -n "$build_cmd" ] && echo "$DEMO_BUILD_USER")"; then
 		echo " [!] install command failed — the demo is published but the DB may be empty"
 	fi
 fi

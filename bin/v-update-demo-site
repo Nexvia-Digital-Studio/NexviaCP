@@ -53,8 +53,15 @@ r_db_name=$(demo_reg_key "$reg" "DB_NAME")
 r_db_user=$(demo_reg_key "$reg" "DB_USER")
 r_db_pass=$(demo_reg_key "$reg" "DB_PASS")
 r_install=$(demo_reg_key "$reg" "INSTALL")
+r_build=$(demo_reg_key "$reg" "BUILD")
+r_dist=$(demo_reg_key "$reg" "DIST")
 [ -n "$r_branch" ] || r_branch="main"
 [ -d "$r_dir/.src" ] || check_result "$E_NOTEXIST" "demo clone missing for '$slug' (re-create the demo)"
+
+# Build demos keep .src owned by the build user — git must fetch as it too.
+if [ -n "$r_build" ]; then
+	DEMO_GIT_USER="$DEMO_BUILD_USER"
+fi
 
 #----------------------------------------------------------#
 #                       Action                             #
@@ -66,13 +73,22 @@ fi
 demo_git -C "$r_dir/.src" reset --hard FETCH_HEAD >/dev/null 2>&1
 new_commit=$(demo_git -C "$r_dir/.src" rev-parse --short HEAD 2>/dev/null || echo "")
 
-demo_publish_tree "$slug" "$r_subdir" || check_result "$E_INVALID" "failed to re-publish demo tree"
+# Build hook: re-run the repo build before re-publishing (same command and
+# environment as v-add-demo-site — NEXVIA_DEMO_BASE included).
+if [ -n "$r_build" ]; then
+	echo "[*] Building (${r_build})…"
+	demo_build_run "$slug" "$r_build" \
+		|| check_result "$E_INVALID" "build command failed — demo left at the previous publish"
+fi
+
+demo_publish_tree "$slug" "${r_dist:-$r_subdir}" || check_result "$E_INVALID" "failed to re-publish demo tree"
 
 # Install hook: demo data is ephemeral by design — the repo is the source
 # of truth, so every update re-seeds the database (panel edits made on the
 # demo are discarded on the next push).
 if [ -n "$r_install" ]; then
-	if ! demo_install_run "$slug" "$r_install" "$r_db_name" "$r_db_user" "$r_db_pass"; then
+	if ! demo_install_run "$slug" "$r_install" "$r_db_name" "$r_db_user" "$r_db_pass" \
+		"$([ -n "$r_build" ] && echo "$DEMO_BUILD_USER")"; then
 		echo " [!] install command failed — demo published but the DB may be stale"
 	fi
 fi

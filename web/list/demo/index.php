@@ -27,6 +27,9 @@ if (!empty($_POST["action"])) {
 			$v_db = !empty($_POST["demo_db"]);
 			$v_db_prefix = strtoupper(trim($_POST["demo_db_prefix"] ?? ""));
 			$v_install = trim($_POST["demo_install"] ?? "");
+			$v_build = !empty($_POST["demo_build"]);
+			$v_build_cmd = trim($_POST["demo_build_cmd"] ?? "");
+			$v_dist = trim($_POST["demo_dist"] ?? "");
 			$v_repo = "";
 
 			if ($v_repo_input === "__custom__") {
@@ -69,6 +72,29 @@ if (!empty($_POST["action"])) {
 				$_SESSION["error_msg"] = _("Geçersiz kurulum komutu (tırnak/satır sonu yok, en fazla 300 karakter).");
 				break;
 			}
+			if ($v_build && $v_build_cmd === "") {
+				$v_build_cmd = "npm ci && npm run build";
+			}
+			if ($v_build_cmd !== "" && (strpos($v_build_cmd, "'") !== false || strpbrk($v_build_cmd, "\r\n") !== false || strlen($v_build_cmd) > 300)) {
+				$_SESSION["error_msg"] = _("Geçersiz derleme komutu (tırnak/satır sonu yok, en fazla 300 karakter).");
+				break;
+			}
+			if (!$v_build) {
+				$v_build_cmd = "";
+				$v_dist = "";
+			}
+			if ($v_dist !== "" && (strpos($v_dist, "..") !== false || !preg_match("#^[A-Za-z0-9._/-]{1,200}$#", $v_dist))) {
+				$_SESSION["error_msg"] = _("Geçersiz çıktı klasörü (örn. dist, out, public).");
+				break;
+			}
+			if ($v_dist !== "" && $v_build_cmd === "") {
+				$_SESSION["error_msg"] = _("Çıktı klasörü yalnızca derleme adımı ile kullanılır.");
+				break;
+			}
+			if ($v_subdir !== "" && $v_build_cmd !== "") {
+				$_SESSION["error_msg"] = _("Alt klasör ve derleme adımı birlikte kullanılamaz (derleme repo kökünde çalışır).");
+				break;
+			}
 
 			$v_cmd = HESTIA_CMD . "v-add-demo-site " . $user . " " .
 				quoteshellarg($v_repo) . " " .
@@ -80,6 +106,12 @@ if (!empty($_POST["action"])) {
 			}
 			if ($v_install !== "") {
 				$v_cmd .= " --install=" . quoteshellarg($v_install);
+			}
+			if ($v_build_cmd !== "") {
+				$v_cmd .= " --build=" . quoteshellarg($v_build_cmd);
+			}
+			if ($v_dist !== "") {
+				$v_cmd .= " --dist=" . quoteshellarg($v_dist);
 			}
 			exec($v_cmd, $output, $return_var);
 			if ($return_var === 0) {

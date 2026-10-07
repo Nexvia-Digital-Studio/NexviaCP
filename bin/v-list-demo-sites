@@ -47,7 +47,7 @@ fi
 #----------------------------------------------------------#
 
 # Collect raw TSV rows: owner<TAB>slug<TAB>name<TAB>repo<TAB>branch<TAB>
-# subdir<TAB>commit<TAB>db<TAB>install<TAB>created<TAB>updated<TAB>state<TAB>size_mib
+# subdir<TAB>commit<TAB>db<TAB>install<TAB>created<TAB>updated<TAB>state<TAB>size_mib<TAB>build<TAB>dist
 rows=""
 for reg_dir in "$HESTIA"/data/users/*/demo-sites; do
 	[ -d "$reg_dir" ] || continue
@@ -66,13 +66,15 @@ for reg_dir in "$HESTIA"/data/users/*/demo-sites; do
 		r_commit=$(demo_reg_key "$reg" "COMMIT")
 		r_db=$(demo_reg_key "$reg" "DB_NAME")
 		r_install=$(demo_reg_key "$reg" "INSTALL")
+		r_build=$(demo_reg_key "$reg" "BUILD")
+		r_dist=$(demo_reg_key "$reg" "DIST")
 		r_created=$(demo_reg_key "$reg" "CREATED")
 		r_updated=$(demo_reg_key "$reg" "UPDATED")
 		r_state=$(demo_reg_key "$reg" "STATE")
 		r_dir=$(demo_reg_key "$reg" "DIR")
 		r_size=0
 		[ -n "$r_dir" ] && [ -d "$r_dir" ] && r_size=$(du -sm "$r_dir" 2>/dev/null | cut -f1)
-		rows="${rows}${owner}	${r_slug}	${r_name}	${r_repo}	${r_branch}	${r_subdir}	${r_commit}	${r_db}	$([ -n "$r_install" ] && echo yes || echo -)	${r_created}	${r_updated}	${r_state}	${r_size}
+		rows="${rows}${owner}	${r_slug}	${r_name}	${r_repo}	${r_branch}	${r_subdir}	${r_commit}	${r_db}	$([ -n "$r_install" ] && echo yes || echo -)	${r_created}	${r_updated}	${r_state}	${r_size}	$([ -n "$r_build" ] && echo yes || echo -)	${r_dist}
 "
 	done
 done
@@ -81,7 +83,7 @@ json_list() {
 	printf '%s' "$rows" | python3 -c '
 import json, sys
 cols = ["OWNER","SLUG","NAME","REPO","BRANCH","SUBDIR","COMMIT","DB_NAME",
-        "INSTALL","CREATED","UPDATED","STATE","SIZE_MB"]
+        "INSTALL","CREATED","UPDATED","STATE","SIZE_MB","BUILD","DIST"]
 out = {}
 for line in sys.stdin.read().splitlines():
     if not line.strip():
@@ -99,9 +101,9 @@ print(json.dumps(out, indent=2))
 shell_list() {
 	printf '%s' "$rows" | python3 -c '
 import sys
-cols = ["OWNER","SLUG","REPO","BRANCH","COMMIT","DB_NAME","UPDATED","SIZE_MB"]
+cols = ["OWNER","SLUG","REPO","BRANCH","COMMIT","DB_NAME","BUILD","UPDATED","SIZE_MB"]
 rows = [l.split("\t") for l in sys.stdin.read().splitlines() if l.strip()]
-idx = {c: i for i, c in enumerate(["OWNER","SLUG","NAME","REPO","BRANCH","SUBDIR","COMMIT","DB_NAME","INSTALL","CREATED","UPDATED","STATE","SIZE_MB"])}
+idx = {c: i for i, c in enumerate(["OWNER","SLUG","NAME","REPO","BRANCH","SUBDIR","COMMIT","DB_NAME","INSTALL","CREATED","UPDATED","STATE","SIZE_MB","BUILD","DIST"])}
 w = [max([len(c)]+[len(r[idx[c]]) for r in rows]) if rows else len(c) for c in cols]
 print("  ".join(c.ljust(w[i]) for i,c in enumerate(cols)))
 print("  ".join("-"*x for x in w))
