@@ -720,12 +720,25 @@ kutucusunu işaretleyin (CLI'de `--db`):
   şema + seed yüklemek için kullanın. Her **Güncelle**'de yeniden çalışır: demo verileri
   **geçicidir**, repo gerçek kaynaktır (demoda panelden yapılan değişiklikler bir sonraki
   push'ta sıfırlanır — müşteriye "deneme alanı" olarak böyle anlatın).
+- **Kurulum komutunu boş bırakın — otomatik bulunur:** `--db` verip `--install`'ı
+  yazmazsanız sistem repodaki kurulum dosyasını kendisi arar ve bulunca çalıştırır:
+  önce bilinen yollar (`bin/install.php`, `install.php`, `installer.php`, `setup.php`,
+  `install/index.php`, `scripts/install.php`, `public/install.php`; alt klasörlü
+  demolarda alt klasör varyantları), sonra sığ bir desen taraması (`install*.php` /
+  `setup*.php`; `node_modules`/`vendor` hariç, `uninstall*` atlanır). Bulunan değer
+  kayda yazılır ve her güncellemede **yeniden algılanır** — kurulum dosyası
+  taşınsa/adı değişse de demo kendine uyar. Elle `--install` her zaman önceliklidir
+  (argümanlı kurulumlar için onu kullanın, örn. `php bin/install.php admin Demo2026`).
 - Uygulama kodu tarafında tek şart: DB ayarını **ortam değişkeninden** okumak (ör.
   `getenv('DB_NAME') ?: 'urbana'`) ve DB yoksa ayar dosyasına düşmek.
 
 Örnek — Urbana (PHP+MySQL+admin panel) demoları:
 
 ```bash
+# kurulum dosyası (bin/install.php) OTOMATİK bulunur ve çalıştırılır:
+v-add-demo-site admin Nexvia-Digital-Studio/Nexvia-Urbana main urbana "" --db=URBANA
+
+# admin hesabı da açılacaksa elle argümlı kurulum verin:
 v-add-demo-site admin Nexvia-Digital-Studio/Nexvia-Urbana main urbana "" \
   --db=URBANA --install="php bin/install.php && php bin/install.php admin Demo2026"
 ```
@@ -821,7 +834,7 @@ sitesi) bu akışla yayınlanır — `--build="npm ci && npm run build" --dist=d
 | Derlemeli demo açılıyor ama linkler panele düşüyor | Üreteç demo temeliyle derlenmemiş | Build script'te `--base "$NEXVIA_DEMO_BASE"` (Astro/Vite) + iç linkleri BASE_URL'e göre üret (7.1 derlemeli demolar) |
 | Derlemeli demo kurulumu "build command failed" verdi | npm script adı farklı / Node sürümü yetmiyor / derleme ortamı hatası | Çıktının son satırlarına bak; `engines` alanını kontrol et; yerelde aynı komutu çalıştırıp doğrula |
 | Demo derleme sonrası hâlâ eski içerik | Build başarısız olmuş ama eski yayın korunmuş | `v-update-demo-site` çıktısındaki uyarıya bak; deploy hatası eski yayını bilerek korur |
-| PHP demo anasayfa `install.php`'ye yönleniyor / DB hatası basıyor | Site kodu veritabanı/kurulum şartlıyor | "Veritabanı oluştur" + kurulum komutuyla yeniden yayınla (`--db --install=…`, 7.1); DB'siz de açılacak şekilde repoya env-okuma + seed fallback ekle |
+| PHP demo anasayfa `install.php`'ye yönleniyor / DB hatası basıyor | Site kodu veritabanı/kurulum şartlıyor | "Veritabanı oluştur" ile yayınla — kurulum dosyası repodaysa **otomatik bulunup çalıştırılır** (`--install` yazmaya gerek yok); admin hesabı gibi argümanlı kurulum gerekiyorsa `--install=…` ile belirt (7.1). DB'siz de açılacak şekilde repoya env-okuma + seed fallback ekle |
 | Demo URL'si 404 | Demo silinmiş ya da slug yanlış yazılmış | Panel Demo Siteler sayfasından güncel URL'yi kopyala (URL'de sondaki `/` dahil) |
 | "no index.(html\|php)" uyarısı aldı | Repoda kökte giriş dosyası yok | Sitedeki klasörü "Alt klasör" alanına yaz (örn. `web`) veya repoya kök index ekle |
 

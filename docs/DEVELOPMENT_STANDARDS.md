@@ -138,6 +138,9 @@ atınca demo otomatik güncellenir. Bir reponun bu akışta düzgün çalışmas
 3. **DB şartlıysa env'den oku:** düz PHP DB'siz açılabilmeli; DB kullanan siteler
    "Veritabanı oluştur" (`--db`) ile yayınlanır — kimlik bilgileri PHP'ye
    `DB_HOST/DB_NAME/DB_USER/DB_PASS` env'leriyle gelir (host `localhost`'tur).
+   Kurulum dosyası (`bin/install.php`, `install.php`, `installer.php`, `setup.php`…)
+   repoda bilinen yerdeyse **`--install` yazmaya gerek yoktur** — otomatik bulunur
+   ve her güncellemede yeniden algılanır.
 4. **Derlemeli projeler (Astro/Vite/Next export):** "Derleme adımı" (`--build`/`--dist`)
    ile yayınlanır; derleme sunucuda her kurulum/güncellemede çalışır. Build script'i
    `NEXVIA_DEMO_BASE` env'ini `--base`'e çevirmeli ve iç linkler base-farkında
