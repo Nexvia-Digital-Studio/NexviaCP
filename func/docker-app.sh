@@ -608,8 +608,12 @@ docker_app_pull_nice() {
 }
 
 # Split services into stateful vs stateless from the resolved compose
-# config. A service is stateful (never blue-green'd) when it mounts a named
-# volume or its name matches the usual data-store suspects. Prints JSON:
+# config. A service is stateful (never blue-green'd) when its name matches
+# the usual data-store suspects, or when it mounts a named volume and is NOT
+# built from the repo (a third-party image such as a database). Services the
+# repo builds itself (`build:`) stay blue-green'able even with a named data
+# volume — blue and green briefly share it, which an app container tolerates.
+# Prints JSON:
 #   {"stateless": ["web","api"], "stateful": ["db"]}
 docker_app_classify_services() {
 	local app="$1"
@@ -633,7 +637,7 @@ for name, svc in sorted((cfg.get("services") or {}).items()):
         elif isinstance(vol, str) and not vol.startswith(("/", ".")) \
                 and not vol.startswith("~") and ":" in vol:
             has_volume = True
-    if has_volume or stateful_re.search(name):
+    if stateful_re.search(name) or (has_volume and not svc.get("build")):
         stateful.append(name)
     else:
         stateless.append(name)
@@ -724,9 +728,14 @@ for line in ps.stdout.splitlines():
     if len(parts) != 3:
         continue
     name, svc, _img = parts
-    want = (cfg.get("services") or {}).get(svc, {}).get("image")
-    if not want:
+    service = (cfg.get("services") or {}).get(svc)
+    if not service:
         continue  # service vanished from the compose file — not this helper's job
+    # Newer compose leaves "image" empty for locally built services; the
+    # built image is then named <project>-<service> (same fallback as
+    # docker_app_green_run).
+    want = service.get("image") or f"nexvia-{app}-{svc}"
+
     running = subprocess.run(["docker", "inspect", "-f", "{{.Image}}", name],
                              capture_output=True, text=True)
     if running.returncode != 0:
@@ -802,9 +811,15 @@ if isinstance(env, dict):
 for e in env:
     args += ["-e", e]
 
+# Named volumes resolve through the top-level "volumes" section: compose key
+# "app_data" is really "nexvia-<app>_app_data" — mounting the bare key would
+# silently create a fresh, empty volume.
+top_vols = cfg.get("volumes") or {}
 for vol in service.get("volumes") or []:
     if isinstance(vol, dict):
         src = vol.get("source") or vol.get("target")
+        if vol.get("type") == "volume" and src in top_vols:
+            src = (top_vols.get(src) or {}).get("name") or src
         dst = vol.get("target") or ""
         ro = ":ro" if vol.get("read_only") else ""
         if src and dst:
