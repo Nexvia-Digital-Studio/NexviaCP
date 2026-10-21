@@ -1,0 +1,30 @@
+name: PHP runtime security
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  php-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3.36'
+          tools: none
+      - name: Reject vulnerable CI runtime
+        run: python3 ops/php-security.py --binary "$(command -v php)"
+      - name: Validate tracked PHP syntax
+        shell: bash
+        run: |
+          failed=0
+          while IFS= read -r -d '' file; do
+            php -l "$file" >/dev/null || failed=1
+          done < <(git ls-files -z -- '*.php' ':!:vendor/**' ':!:node_modules/**')
+          exit "$failed"
+      - name: PHP runtime updater regression tests
+        run: python3 tests/test_php_runtime_security.py

@@ -160,7 +160,7 @@ if [ -n "$db_bin" ]; then
 fi
 
 php_bin=""
-for candidate in php php8.4 php8.3 php8.2 php8.1 php8.0 php7.4; do
+for candidate in php php8.5 php8.4 php8.3 php8.2 php8.1 php8.0 php7.4; do
 	if command -v "$candidate" >/dev/null 2>&1; then
 		php_bin="$candidate"
 		break
@@ -191,6 +191,7 @@ import json
 import os
 import re
 import sys
+import subprocess
 from datetime import datetime
 
 notes_f, aptcheck_f, sim_f, upgradable_f, services_f, report_f, out_format, apt_update_ran = sys.argv[1:9]
@@ -283,6 +284,19 @@ for line in read_lines(services_f):
 
 notes.extend(read_lines(notes_f))
 
+# A zero pending-update count does not prove that the PHP core is patched.
+# Audit all host PHP runtimes, including the panel's separate bundled engine.
+php_security = {"status": "unknown"}
+checker = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(report_f))),
+                       "ops", "php-security.py")
+try:
+    result = subprocess.run([sys.executable, checker], capture_output=True,
+                            text=True, timeout=60)
+    php_security = json.loads(result.stdout)
+    php_security["status"] = "patched_on_disk" if result.returncode == 0 else "requires_attention"
+except (OSError, ValueError, subprocess.SubprocessError):
+    notes.append("PHP2Shell runtime audit unavailable; patch status is unknown")
+
 report = {
     "generated_at": datetime.now().astimezone().strftime("%Y-%m-%dT%H:%M:%S%z"),
     "apt_update_ran": apt_update_ran == "true",
@@ -291,6 +305,7 @@ report = {
     "security_packages": security_packages,
     "upgradable": upgradable,
     "services": services,
+    "php_security": php_security,
     "error_notes": notes,
 }
 
@@ -343,6 +358,11 @@ fi
 if [ "$py_rc" -eq 0 ] && [ -f "$REPORT_FILE" ] && [ -x "$HESTIA/bin/v-notify-sys-channel" ]; then
 	security_updates="$(sed -n 's/.*"security_updates": \([0-9]\+\).*/\1/p' "$REPORT_FILE" | head -n1)"
 	total_updates="$(sed -n 's/.*"total_updates": \([0-9]\+\).*/\1/p' "$REPORT_FILE" | head -n1)"
+	if grep -q '"status": "requires_attention"' "$REPORT_FILE"; then
+		"$HESTIA/bin/v-notify-sys-channel" \
+			"$(hostname): PHP2Shell runtime audit requires attention (CVE-2026-109618 / CVE-2026-109619). Upgrade PHP and restart all workers. See v-check-sys-cves." \
+			"all" "Critical PHP Security" >/dev/null 2>&1 || true
+	fi
 	if [ -n "$security_updates" ] && [ "$security_updates" -gt 0 ] 2>/dev/null; then
 		"$HESTIA/bin/v-notify-sys-channel" \
 			"$(hostname): ${security_updates} security updates pending (of ${total_updates:-unknown} total packages). See v-check-sys-cves." \
