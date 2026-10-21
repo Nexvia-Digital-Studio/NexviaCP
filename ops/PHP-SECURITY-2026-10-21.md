@@ -23,9 +23,15 @@ eklenti ve `hestia-php` paketlerini depodan günceller. Dal değiştirmez, paket
 kaldırmaz. Önceden aktif PHP-FPM, Apache ve panel servislerini yeniden başlatır;
 kısa bağlantı kesintisi olabilir. Depoda yama yoksa işlem sonundaki denetim
 başarısız kalır. Özel derleme ve konteynerler otomatik güncellenmez.
+Belgelenmiş Ubuntu geri taşıma paketleri (ör. Jammy `8.1.2-1ubuntu2.28`) ve
+Debian 13 Sury PHP 8.1 `8.1.34-9` paketi, çalıştırılan dosyanın paket sahibi
+ve sürümü doğrulanarak kabul edilir. Her iki CVE de bu paketlerde giderilmiştir.
+Ubuntu kanıtları: https://ubuntu.com/security/CVE-2026-109618 ve
+https://ubuntu.com/security/CVE-2026-109619
+
 Denetim salt okunurdur; 0 gözlenen disk sürümleri yamalı, 1 eski/bilinmeyen
-sürüm veya motor bulunamadı, 2 çalıştırma hatasıdır. Geri taşınmış üretici
-paketlerini sürümden kanıtlayamaz, bunları ihtiyatla başarısız sayar.
+sürüm veya motor bulunamadı, 2 çalıştırma hatasıdır. Açıkça tanımlanmamış üretici geri taşıma
+paketlerini ihtiyatla başarısız sayar.
 
 ## Yayın doğrulaması
 

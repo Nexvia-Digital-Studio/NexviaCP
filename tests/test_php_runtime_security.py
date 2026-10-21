@@ -12,6 +12,43 @@ SPEC.loader.exec_module(security)
 
 
 class RuntimeSecurityTests(unittest.TestCase):
+    @patch.object(security.shutil, "which", return_value="/usr/bin/dpkg")
+    @patch.object(security.Path, "read_text", return_value='ID=ubuntu\nVERSION_CODENAME=jammy\n')
+    @patch.object(security, "run")
+    def test_documented_ubuntu_backport(self, run, release, which):
+        run.side_effect = [subprocess.CompletedProcess([], 0, "php8.1-fpm: /usr/sbin/php-fpm8.1\n", ""),
+                           subprocess.CompletedProcess([], 0, "installed\t8.1.2-1ubuntu2.28", ""),
+                           subprocess.CompletedProcess([], 0, "", "")]
+        evidence = security.vendor_patch("/usr/sbin/php-fpm8.1", "8.1.2-1ubuntu2.28")
+        self.assertEqual(evidence["package"], "php8.1-fpm")
+
+    @patch.object(security.shutil, "which", return_value="/usr/bin/dpkg")
+    @patch.object(security.Path, "read_text", return_value='ID=ubuntu\nVERSION_CODENAME=jammy\n')
+    @patch.object(security, "run")
+    def test_old_ubuntu_package_rejected(self, run, release, which):
+        run.side_effect = [subprocess.CompletedProcess([], 0, "php8.1-fpm: /usr/sbin/php-fpm8.1\n", ""),
+                           subprocess.CompletedProcess([], 0, "installed\t8.1.2-1ubuntu2.27", ""),
+                           subprocess.CompletedProcess([], 1, "", "")]
+        self.assertIsNone(security.vendor_patch("/usr/sbin/php-fpm8.1", "8.1.2-1ubuntu2.27"))
+
+    @patch.object(security.shutil, "which", return_value="/usr/bin/dpkg")
+    @patch.object(security.Path, "read_text", return_value='ID=debian\nVERSION_CODENAME=trixie\n')
+    @patch.object(security, "run")
+    def test_documented_sury_backport_with_short_banner(self, run, release, which):
+        run.side_effect = [subprocess.CompletedProcess([], 0, "php8.1-cli: /usr/bin/php8.1\n", ""),
+                           subprocess.CompletedProcess([], 0,
+                               "installed\t8.1.34-9+0~20261021.82+debian13~1.gbp4e430a", ""),
+                           subprocess.CompletedProcess([], 0, "", "")]
+        self.assertIsNotNone(security.vendor_patch("/usr/bin/php8.1", "8.1.34"))
+
+    @patch.object(security.shutil, "which", return_value="/usr/bin/dpkg")
+    @patch.object(security.Path, "read_text", return_value='ID=ubuntu\nVERSION_CODENAME=jammy\n')
+    @patch.object(security, "run")
+    def test_package_must_match_binary_banner(self, run, release, which):
+        run.side_effect = [subprocess.CompletedProcess([], 0, "php8.1-cli: /usr/bin/php8.1\n", ""),
+                           subprocess.CompletedProcess([], 0, "installed\t8.1.2-1ubuntu2.28", "")]
+        self.assertIsNone(security.vendor_patch("/usr/bin/php8.1", "8.1.2-1ubuntu2.27"))
+
     def test_release_boundaries(self):
         for branch, minimum in security.MINIMUM.items():
             with self.subTest(branch=branch):
