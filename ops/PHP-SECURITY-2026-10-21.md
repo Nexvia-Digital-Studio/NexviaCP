@@ -50,3 +50,13 @@ restart edilirse bilinen bir saldırı yolunu azaltır; iki açığın yaması d
 Bellek limitini sınırsız yapma veya dosya yüklemeyi kapatma otomatik uygulanmaz.
 CI yamalı PHP ile sürüm ve sözdizimi kontrol eder; **main pushu veya yeşil CI,
 canlı sunucunun PHP paketinin güncellendiğini kanıtlamaz**.
+
+
+## Panel motorunu yeniden derleme
+
+Hestia deposunda yamalı `hestia-php` bulunmadığında Debian 13 amd64 için
+`sudo bash ops/build-panel-php-security.sh` resmî kaynağı indirir, sabitlenmiş
+SHA-256 değerini doğrular, mevcut motoru yedekler ve paketi üretir.
+Canlı PHP modülleriyle eşitlik ve FPM yapılandırma testi başarısız olursa durur.
+Kurulum otomatik değildir. Üretilen paketi inceleyip `dpkg -i` ile kurduktan
+sonra `systemctl restart hestia` ve panel giriş kontrolü gerekir.
