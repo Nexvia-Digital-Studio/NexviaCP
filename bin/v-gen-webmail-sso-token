@@ -38,8 +38,9 @@ if ! grep -q "^DOMAIN='$domain'" "$USER_DATA/mail.conf" 2>/dev/null; then
 	# admin overview: resolve the real owner of the domain
 	found=""
 	if [ "$user" = "admin" ]; then
-		for u in $(ls $HESTIA/data/users/ 2>/dev/null); do
-			if [ -f "$HESTIA/data/users/$u/mail.conf" ] && grep -q "^DOMAIN='$domain'" "$HESTIA/data/users/$u/mail.conf"; then
+		for u_dir in "$HESTIA"/data/users/*/; do
+			u=$(basename "$u_dir")
+			if [ -f "$u_dir/mail.conf" ] && grep -q "^DOMAIN='$domain'" "$u_dir/mail.conf"; then
 				found=$u
 				break
 			fi
