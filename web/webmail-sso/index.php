@@ -4,6 +4,14 @@
 // owns (admins may open any domain — owner is resolved server-side).
 require_once dirname(__DIR__) . '/inc/main.php';
 
+// The redirect target carries a one-time login token: never cache it and
+// never leak the panel URL (with its CSRF token) to the webmail host.
+header('Cache-Control: no-store, max-age=0');
+header('Referrer-Policy: no-referrer');
+
+// Only links rendered by the panel may start an SSO login (CSRF guard).
+verify_csrf($_GET);
+
 $domain = isset($_GET['domain']) ? strtolower(trim($_GET['domain'])) : '';
 $account = isset($_GET['account']) ? trim($_GET['account']) : '';
 
@@ -29,8 +37,15 @@ if ($user_plain === '') {
 	exit;
 }
 
+// Mailbox local-part: reject anything unexpected instead of silently
+// dropping it (dropping would fall back to another mailbox).
+if ($account !== '' && (strlen($account) > 64 || !preg_match('/^[a-z0-9_.-]+$/i', $account))) {
+	header('Location: ' . $fallback);
+	exit;
+}
+
 $cmd = HESTIA_CMD . 'v-gen-webmail-sso-token ' . escapeshellarg($user_plain) . ' ' . escapeshellarg($domain);
-if ($account !== '' && preg_match('/^[a-z0-9_.-]+$/i', $account)) {
+if ($account !== '') {
 	$cmd .= ' ' . escapeshellarg($account);
 }
 

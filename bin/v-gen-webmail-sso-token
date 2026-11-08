@@ -53,14 +53,27 @@ if ! grep -q "^DOMAIN='$domain'" "$USER_DATA/mail.conf" 2>/dev/null; then
 	fi
 fi
 
-# Resolve account: explicit or first of the domain
+# Resolve account. Without an explicit account the token is only issued
+# when the domain has exactly one mailbox — never silently pick the "first"
+# one, otherwise users with several mailboxes always land in the same inbox.
 acc_file="$HOMEDIR/$user/conf/mail/$domain/accounts"
 if [ -z "$account" ]; then
+	acc_count=$(cut -d: -f1 "$acc_file" 2>/dev/null | grep -c .)
+	if [ "$acc_count" -ne 1 ]; then
+		check_result "$E_INVALID" "mail domain $domain has $acc_count accounts, an explicit account is required"
+	fi
 	account=$(head -n1 "$acc_file" 2>/dev/null | cut -d: -f1)
 fi
-if [ -z "$account" ] || ! grep -q "^$account:" "$acc_file" 2>/dev/null; then
+is_format_valid 'account'
+# Exact (non-regex) match against the domain's mailbox list
+if [ -z "$account" ] || ! cut -d: -f1 "$acc_file" 2>/dev/null | grep -Fxq -- "$account"; then
 	check_result "$E_NOTEXIST" "mail account $account does not exist"
 fi
+# Suspended user / domain / mailbox must not get a webmail session
+is_object_unsuspended 'user' 'USER' "$user"
+is_object_unsuspended 'mail' 'DOMAIN' "$domain"
+is_object_valid "mail/$domain" 'ACCOUNT' "$account"
+is_object_unsuspended "mail/$domain" 'ACCOUNT' "$account"
 
 #----------------------------------------------------------#
 #                       Action                             #

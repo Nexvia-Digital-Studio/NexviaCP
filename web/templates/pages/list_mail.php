@@ -100,6 +100,14 @@
 			if (!empty($_SESSION['WEBMAIL_ALIAS'])) $webmail = $_SESSION['WEBMAIL_ALIAS'];
 			foreach ($data as $key => $value) {
 				++$i;
+				// Webmail: a single account opens directly via SSO; with several
+				// accounts the user picks one from the account list (no implicit
+				// "first account" login).
+				$webmail_multi = (int) ($value["ACCOUNTS"] ?? 0) > 1;
+				$webmail_href = $webmail_multi
+					? "?" . http_build_query(["domain" => $key, "user" => ($value["_owner"] ?? ""), "token" => $_SESSION["token"]])
+					: "/webmail-sso/?" . http_build_query(["domain" => $key, "token" => $_SESSION["token"]]);
+				$webmail_title = $webmail_multi ? _("Open Webmail") . " — " . _("Hesap seçin") : _("Open Webmail");
 				if ($data[$key]['SUSPENDED'] == 'yes') {
 					$status = 'suspended';
 					$spnd_action = 'unsuspend';
@@ -220,9 +228,9 @@
 									<li class="units-table-row-action" data-key-action="href">
 										<a
 											class="units-table-row-action-link"
-											href="/webmail-sso/?domain=<?= tohtml($key) ?>"
-											target="_blank"
-											title="<?= tohtml( _("Open Webmail")) ?>"
+											href="<?= tohtml($webmail_href) ?>"
+											<?php if (!$webmail_multi) { ?>target="_blank" rel="noopener noreferrer"<?php } ?>
+											title="<?= tohtml($webmail_title) ?>"
 										>
 										<i class="fas fa-paper-plane icon-lightblue"></i>
 										<span class="u-hide-desktop"><?= tohtml( _("Open Webmail")) ?></span>
@@ -246,9 +254,9 @@
 											<li class="units-table-row-action" data-key-action="href">
 												<a
 													class="units-table-row-action-link"
-													href="/webmail-sso/?domain=<?= tohtml($key) ?>"
-													target="_blank"
-													title="<?= tohtml( _("Open Webmail")) ?>"
+													href="<?= tohtml($webmail_href) ?>"
+													<?php if (!$webmail_multi) { ?>target="_blank" rel="noopener noreferrer"<?php } ?>
+													title="<?= tohtml($webmail_title) ?>"
 												>
 												<i class="fas fa-paper-plane icon-lightblue"></i>
 												<span class="u-hide-desktop"><?= tohtml( _("Open Webmail")) ?></span>

@@ -210,7 +210,8 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 								<li class="units-table-row-action" data-key-action="href">
 									<a
 										class="units-table-row-action-link"
-										href="https://<?= tohtml($v_webmail_alias) ?>.<?= tohtml($_GET["domain"]) ?>/?<?= tohtml(http_build_query(["_user" => $key . '@' . $_GET["domain"], "email" => $key . '@' . $_GET["domain"]])) ?>"
+										href="/webmail-sso/?<?= tohtml(http_build_query(["domain" => $_GET["domain"], "account" => $key, "token" => $_SESSION["token"]])) ?>"
+										rel="noopener noreferrer"
 										target="_blank"
 										title="<?= tohtml( _("Open Webmail")) ?>"
 									>
@@ -226,9 +227,10 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 										<li class="units-table-row-action" data-key-action="href">
 											<a
 												class="units-table-row-action-link"
-												href="https://<?= tohtml($v_webmail_alias) ?>.<?= tohtml($_GET["domain"]) ?>/?<?= tohtml(http_build_query(["_user" => $key . '@' . $_GET["domain"], "email" => $key . '@' . $_GET["domain"]])) ?>"
+												href="/webmail-sso/?<?= tohtml(http_build_query(["domain" => $_GET["domain"], "account" => $key, "token" => $_SESSION["token"]])) ?>"
+										rel="noopener noreferrer"
 												target="_blank"
-												title="<?= tohtml( _("Open Webmail (Otomatik Giriş / Doldurulmuş)")) ?>"
+												title="<?= tohtml( _("Open Webmail")) ?>: <?= tohtml($key . '@' . $_GET["domain"]) ?>"
 											>
 												<i class="fas fa-envelope-open-text icon-maroon"></i>
 												<span class="u-hide-desktop"><?= tohtml( _("Open Webmail")) ?></span>
@@ -465,7 +467,8 @@ if (!empty($_SESSION["WEBMAIL_ALIAS"])) {
 			<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);">
 				<a
 					class="button button-secondary"
-					:href="'https://' + (webmailAlias || 'webmail') + '.' + selectedDomain + '/?_user=' + encodeURIComponent(selectedAccount + '@' + selectedDomain) + '&email=' + encodeURIComponent(selectedAccount + '@' + selectedDomain)"
+					:href="'/webmail-sso/?domain=' + encodeURIComponent(selectedDomain) + '&account=' + encodeURIComponent(selectedAccount) + '&token=' + encodeURIComponent(token)"
+					rel="noopener noreferrer"
 					target="_blank"
 				>
 					<i class="fas fa-envelope-open-text icon-maroon"></i> <?= _("Open Webmail") ?>
