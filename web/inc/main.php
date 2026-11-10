@@ -96,8 +96,46 @@ if (isset($_SESSION["user"])) {
 	exec(HESTIA_CMD . "v-list-user " . quoteshellarg($username) . " json", $output, $return_var);
 	$data = json_decode(implode("", $output), true);
 	unset($output, $return_var);
+
+	// Re-validate the session against the live account on every request,
+	// not only when a page template is rendered: action endpoints (add/,
+	// edit/, delete/, bulk/ ...) never call top_panel(), so a deleted user,
+	// a demoted administrator or a suspended customer kept their old rights
+	// there until they logged out.
+	if (!defined("NO_AUTH_REQUIRED")) {
+		if (!is_array($data) || !isset($data[$username]) || !is_array($data[$username])) {
+			destroy_sessions();
+			header("Location: /login/");
+			exit();
+		}
+		if (empty($_SESSION["look"])) {
+			$live_role = $data[$username]["ROLE"] ?? "user";
+			if (($_SESSION["userContext"] ?? "") === "admin" && $live_role !== "admin") {
+				// Administrator rights were revoked while logged in.
+				destroy_sessions();
+				header("Location: /login/");
+				exit();
+			}
+			if (
+				($data[$username]["SUSPENDED"] ?? "no") === "yes" &&
+				($_SESSION["POLICY_USER_VIEW_SUSPENDED"] ?? "") !== "yes"
+			) {
+				destroy_sessions();
+				$_SESSION["error_msg"] = _("You are logged out, please log in again.");
+				header("Location: /login/");
+				exit();
+			}
+		}
+	}
+
 	$_SESSION["login_shell"] = $data[$username]["SHELL"];
 	$_SESSION["role"] = $data[$username]["ROLE"];
+	// Suspended customers that may still log in (POLICY_USER_VIEW_SUSPENDED)
+	// get a read-only session: see nexvia_enforce_read_only() below.
+	$_SESSION["NEXVIA_READ_ONLY"] =
+		empty($_SESSION["look"]) &&
+		($_SESSION["userContext"] ?? "") === "user" &&
+		($data[$username]["SUSPENDED"] ?? "no") === "yes";
 	// Keep session language in sync with the user's configured language so
 	// changes apply immediately, without requiring a logout and login.
 	if (!empty($data[$username]["LANGUAGE"])) {
@@ -116,6 +154,7 @@ if (!defined("NO_AUTH_REQUIRED")) {
 	if (empty($_SESSION["LAST_ACTIVITY"]) || empty($_SESSION["INACTIVE_SESSION_TIMEOUT"])) {
 		destroy_sessions();
 		header("Location: /login/");
+		exit();
 	} elseif ($_SESSION["INACTIVE_SESSION_TIMEOUT"] * 60 + $_SESSION["LAST_ACTIVITY"] < time()) {
 		$v_user = quoteshellarg($_SESSION["user"]);
 		$v_session_id = quoteshellarg($_SESSION["token"]);
@@ -169,6 +208,13 @@ function list_records_for_all_users($script, $prefix_keys = false) {
 	return $merged;
 }
 
+/**
+ * Web/proxy templates that only administrators may assign to a domain.
+ */
+function nexvia_admin_only_web_templates() {
+	return ["docker-ui", "docker-app", "panelproxy"];
+}
+
 function ipUsed() {
 	[$http_host, $port] = explode(":", $_SERVER["HTTP_HOST"] . ":");
 	if (filter_var($http_host, FILTER_VALIDATE_IP)) {
@@ -195,6 +241,49 @@ if (!isset($_SESSION["look"])) {
 }
 
 require_once dirname(__FILE__) . "/i18n.php";
+
+/**
+ * Suspended customers that are still allowed to log in
+ * (POLICY_USER_VIEW_SUSPENDED=yes) must only be able to look around.
+ * Templates already grey out buttons via $read_only, but the action
+ * endpoints themselves did not check it, so a forged request still went
+ * through. Block every state-changing entry point centrally.
+ */
+function nexvia_enforce_read_only() {
+	if (defined("NO_AUTH_REQUIRED") || empty($_SESSION["NEXVIA_READ_ONLY"])) {
+		return;
+	}
+	$script = (string) ($_SERVER["SCRIPT_NAME"] ?? ($_SERVER["DOCUMENT_URI"] ?? ""));
+	$method = strtoupper((string) ($_SERVER["REQUEST_METHOD"] ?? "GET"));
+	$always_allowed = ["/logout/index.php", "/login/index.php"];
+	if (in_array($script, $always_allowed, true)) {
+		return;
+	}
+	$blocked = false;
+	if ($method !== "GET" && $method !== "HEAD") {
+		$blocked = true;
+	} elseif (
+		preg_match(
+			"#^/(add|bulk|copy|delete|move|suspend|unsuspend|update|restart|schedule|generate)/#",
+			$script,
+		)
+	) {
+		$blocked = true;
+	} else {
+		foreach (["git_pull", "delete_env", "restart", "delete", "toggle"] as $action_param) {
+			if (!empty($_GET[$action_param])) {
+				$blocked = true;
+				break;
+			}
+		}
+	}
+	if ($blocked) {
+		$_SESSION["error_msg"] = _("Your account is suspended: the panel is read-only.");
+		header("Location: /list/web/");
+		exit();
+	}
+}
+nexvia_enforce_read_only();
 
 function check_error($return_var) {
 	if ($return_var > 0) {
@@ -226,6 +315,10 @@ function check_return_code_redirect($return_var, $output, $location) {
 		}
 		$_SESSION["error_msg"] = $error;
 		header("Location:" . $location);
+		// Stop here: callers use this as an ownership/existence gate (e.g.
+		// "domain not found in this account"); continuing would run the
+		// rest of the page against an object the user does not own.
+		exit();
 	}
 }
 

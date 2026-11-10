@@ -97,7 +97,8 @@ if ($first_pgsql_db && !empty($v_pga_sso_key) && !ipUsed()) {
 						<i class="fas fa-database icon-orange"></i>phpPgAdmin
 					</a>
 				<?php } ?>
-				<!-- Auto-Sync & Discover Databases Button -->
+				<!-- Auto-Sync & Discover Databases Button (admin only, like its endpoint) -->
+				<?php if (($_SESSION["userContext"] ?? "") === "admin") { ?>
 				<form method="post" action="/list/db/" style="display:inline;" onsubmit="const b = this.querySelector('button'); b.disabled=true; b.innerHTML='<i class=\'fas fa-spinner fa-spin\'></i> ' + ('<?= (($_SESSION['language'] ?? '') === 'tr') ? "Taranıyor..." : "Scanning..." ?>');">
 					<input type="hidden" name="token" value="<?= tohtml($_SESSION["token"]) ?>">
 					<input type="hidden" name="action_sync_db" value="1">
@@ -105,6 +106,7 @@ if ($first_pgsql_db && !empty($v_pga_sso_key) && !ipUsed()) {
 						<i class="fas fa-arrows-rotate icon-blue"></i> <?= tohtml(__tr("Auto-Sync DBs", "Veritabanlarını Tara")) ?>
 					</button>
 				</form>
+				<?php } ?>
 				<?php if (ipUsed()) { ?>
 					<a target="_blank" href="https://hestiacp.com/docs/server-administration/databases.html#why-i-can-t-use-http-ip-phpmyadmin">
 						<i class="fas fa-circle-question"></i>

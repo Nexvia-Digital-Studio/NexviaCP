@@ -9,6 +9,16 @@ include $_SERVER["DOCUMENT_ROOT"] . "/inc/main.php";
 $is_tr = (($_SESSION['language'] ?? '') === 'tr' || ($_SESSION['LANGUAGE'] ?? '') === 'tr');
 $is_admin = (($_SESSION["userContext"] ?? "") === "admin");
 
+// Security Guard: this page shows server-wide data (Redis keyspaces of every
+// tenant, MySQL slow-query samples from every database, FastCGI totals) and
+// drives root-side tools (v-apply-mysql-index, Redis DB binding). The menu
+// entry is admin-only; enforce the same rule on the endpoint itself so a
+// customer cannot reach it by typing the URL.
+if (!$is_admin) {
+	header("Location: /list/web/");
+	exit();
+}
+
 /**
  * Ownership guard for the domain-scoped cache actions (1, 2 and 5).
  *
@@ -165,10 +175,10 @@ if (!empty($_POST["enable_slow_log"])) {
 if (!empty($_POST["apply_sql_index"])) {
 	verify_csrf($_POST);
 	$target_db = trim($_POST["target_db"] ?? "");
-	$target_user = trim($_POST["target_user"] ?? $user);
+	$target_user = trim($_POST["target_user"] ?? ($_SESSION["look"] ?: $_SESSION["user"]));
 	$index_sql = trim($_POST["index_sql"] ?? "");
 
-	if ($is_admin || $target_user === $user) {
+	if ($is_admin) {
 		if (!empty($target_db) && !empty($index_sql)) {
 			$cmd = HESTIA_CMD . "v-apply-mysql-index " . quoteshellarg($target_user) . " " . quoteshellarg($target_db) . " " . quoteshellarg($index_sql);
 			exec($cmd, $a_out, $a_code);

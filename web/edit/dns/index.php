@@ -355,6 +355,7 @@ if (empty($_GET["record_id"])) {
 	if (empty($data[$_GET["record_id"]])) {
 		header("Location: /list/dns/");
 		$_SESSION["error_msg"] = _("Error: unknown record ID.");
+		exit();
 	}
 	// Display body for dns record
 	render_page($user, $TAB, "edit_dns_rec");

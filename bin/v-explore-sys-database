@@ -77,6 +77,40 @@ def run_mysql_with_headers(query, target_db=""):
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
         return res.stdout.strip(), res.stderr.strip()
 
+def run_mysql_sandboxed(query, target_db):
+    """Run query as a temporary MySQL user limited to SELECT on target_db."""
+    import os, secrets, tempfile
+    if not re.match(r'^[A-Za-z0-9_-]+$', target_db or ""):
+        return "", "Invalid database name."
+    temp_user = "nxstudio_" + secrets.token_hex(6)
+    temp_pass = secrets.token_hex(24)
+    acct = f"'{temp_user}'@'localhost'"
+    _, err = run_mysql(
+        f"CREATE USER {acct} IDENTIFIED BY '{temp_pass}'; "
+        f"GRANT SELECT, SHOW VIEW ON `{target_db}`.* TO {acct};"
+    )
+    cnf_path = None
+    try:
+        if err and "ERROR" in err.upper():
+            return "", "DB Studio could not create a restricted query session."
+        fd, cnf_path = tempfile.mkstemp(prefix="nxstudio_", suffix=".cnf")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(f"[client]\nuser={temp_user}\npassword={temp_pass}\nhost=localhost\n")
+        os.chmod(cnf_path, 0o600)
+        cmd = ["mysql", f"--defaults-file={cnf_path}", "--batch", "--raw", "-e", query, target_db]
+        try:
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+            return res.stdout.strip(), res.stderr.strip()
+        except Exception as exc:
+            return "", "Query failed: " + str(exc)[:200]
+    finally:
+        if cnf_path:
+            try:
+                os.unlink(cnf_path)
+            except OSError:
+                pass
+        run_mysql(f"DROP USER IF EXISTS {acct};")
+
 result = {
     "status": "ok",
     "database": db,
@@ -159,8 +193,13 @@ if custom_sql:
         if not re.search(r'\bLIMIT\b', sql_clean, re.IGNORECASE):
             sql_clean += " LIMIT 50"
 
-        # Read-only session: even a parser slip cannot write under this guard
-        sql_out, sql_err = run_mysql_with_headers("SET SESSION TRANSACTION READ ONLY; " + sql_clean, db)
+        # The query is customer-supplied, so it must NOT run as MySQL root:
+        # as root a plain SELECT could read every other tenant's database
+        # (SELECT * FROM other_db.users), mysql.user password hashes or, via
+        # LOAD_FILE(), files on the server. Run it under a throw-away account
+        # that only holds SELECT/SHOW VIEW on this one database (no FILE, no
+        # PROCESS), and drop that account again right after.
+        sql_out, sql_err = run_mysql_sandboxed("SET SESSION TRANSACTION READ ONLY; " + sql_clean, db)
         if sql_err and not sql_out:
             result["status"] = "error"
             result["error"] = sql_err

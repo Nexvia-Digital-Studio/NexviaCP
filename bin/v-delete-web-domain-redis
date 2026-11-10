@@ -60,28 +60,22 @@ if [ "$flush_db" = "yes" ] && [ -n "$current_db" ] && [ "$current_db" != "null" 
 	redis_run -n "$current_db" flushdb async 2>/dev/null || redis_run -n "$current_db" flushdb 2>/dev/null || true
 fi
 
-# Locate project document root and target .env paths
+# Locate project document root and target .env paths (customer-owned:
+# all access runs as the customer, see user_env_edit)
 docroot="$HOMEDIR/$user/web/$domain/public_html"
+is_user_path_nosymlink "$docroot"
 env_targets=("$docroot/.env")
-if [ -d "$HOMEDIR/$user/web/$domain/private" ]; then
+if user_exec test -d "$HOMEDIR/$user/web/$domain/private"; then
 	env_targets+=("$HOMEDIR/$user/web/$domain/private/.env")
 fi
-if [ -f "$HOMEDIR/$user/web/$domain/.env" ]; then
+if user_exec test -f "$HOMEDIR/$user/web/$domain/.env"; then
 	env_targets+=("$HOMEDIR/$user/web/$domain/.env")
 fi
 
-# Function to remove key from .env safely
+# Remove key from .env safely (as the domain owner)
 remove_env_var() {
-	local file="$1"
-	local key="$2"
-	if [ -f "$file" ]; then
-		local tmp_env
-		tmp_env=$(mktemp /tmp/nexvia_env_rm_XXXXXX)
-		chmod 600 "$tmp_env"
-		grep -v "^${key}=" "$file" > "$tmp_env" 2>/dev/null || true
-		mv -f "$tmp_env" "$file"
-		chmod 600 "$file"
-		chown "$user:$user" "$file"
+	if user_exec test -f "$1"; then
+		user_env_edit "$1" "$2"
 	fi
 }
 

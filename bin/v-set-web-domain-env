@@ -5,6 +5,11 @@
 # example: v-set-web-domain-env admin neredeyasanir.localhost GEMINI_API_KEY AIzaSy...
 #
 # This script stores keys inside /home/user/web/domain/public_html/.env with strict permissions (600)
+#
+# Security: the .env file lives in a directory the customer controls, so all
+# file access runs with the customer's own privileges (user_env_edit). A
+# root-side touch/chmod/chown here used to follow a planted symlink and hand
+# ownership of an arbitrary system file to the customer.
 
 # Includes
 # shellcheck source=/etc/hestiacp/hestia.conf
@@ -23,35 +28,24 @@ value=$4
 
 is_format_valid 'user' 'domain'
 is_object_valid 'user' 'USER' "$user"
+USER_DATA=$HESTIA/data/users/$user
+is_object_valid 'web' 'DOMAIN' "$domain"
 
 if [ -z "$key" ]; then
 	check_result "$E_INVALID" "invalid secret KEY name"
+fi
+if [[ "$value" == *$'\n'* ]] || [[ "$value" == *$'\r'* ]]; then
+	check_result "$E_INVALID" "secret VALUE must be a single line"
 fi
 
 docroot="$HOMEDIR/$user/web/$domain/public_html"
 env_file="$docroot/.env"
 
+is_user_path_nosymlink "$docroot"
 [ ! -d "$docroot" ] && exit 1
 
-touch "$env_file"
-chmod 600 "$env_file"
-chown "$user:$user" "$env_file"
+user_env_edit "$env_file" "$key" "$value"
+check_result $? "unable to update $env_file" > /dev/null
 
-# Escape backslashes and double quotes in value safely
-escaped_value=$(printf '%s' "$value" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
-
-tmp_env=$(mktemp /tmp/nexvia_env_XXXXXX)
-chmod 600 "$tmp_env"
-
-if [ -f "$env_file" ]; then
-	grep -v "^${key}=" "$env_file" > "$tmp_env" 2>/dev/null || true
-fi
-echo "${key}=\"${escaped_value}\"" >> "$tmp_env"
-
-mv -f "$tmp_env" "$env_file"
-chmod 600 "$env_file"
-chown "$user:$user" "$env_file"
-
-# Log event
 log_event "$OK" "$user $domain $key [SECRET_MASKED]"
 exit 0

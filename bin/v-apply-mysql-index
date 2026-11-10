@@ -34,6 +34,21 @@ case "$(echo "$database" | tr '[:upper:]' '[:lower:]')" in
 		;;
 esac
 
+# Ownership: only the root admin may target databases outside the account
+# (the index is created with server-wide credentials, so without this check
+# any account could alter another tenant's or a docker app's database).
+if ! [[ "$database" =~ ^[A-Za-z0-9_-]+$ ]]; then
+	echo "ERROR: Invalid database name." >&2
+	exit 1
+fi
+if [ "${ROOT_USER:-admin}" != "$user" ]; then
+	if [ ! -f "$HESTIA/data/users/$user/db.conf" ] \
+		|| ! grep -qF "DB='$database'" "$HESTIA/data/users/$user/db.conf"; then
+		echo "ERROR: Database '$database' does not belong to user '$user'." >&2
+		exit 1
+	fi
+fi
+
 # Clean SQL string
 clean_sql=$(echo "$index_sql" | tr -d '\r\n' | sed -e 's/[[:space:]]\+/ /g' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 

@@ -2,7 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased][NexviaCP] - End-to-end install & isolation fixes
+## [Unreleased][NexviaCP] - Customer panel authorization audit
+
+### Security
+
+- **DB Studio no longer runs customer SQL as MySQL root.** A customer could
+  read every other tenant's database (`SELECT * FROM other_db.table`),
+  `mysql.user` hashes and files via `LOAD_FILE()`. Custom queries now run
+  under a throw-away account with `SELECT, SHOW VIEW` on the own database only.
+- **Root-side `.env`, git, Redis and log helpers are symlink-safe.**
+  `v-set/delete/list-web-domain-env`, `v-add/delete-web-domain-redis`,
+  `v-add/update-web-domain-git` and `v-stream-domain-logs` followed symlinks
+  planted in the customer's home as root (chown of arbitrary system files =
+  local root; reading `/etc/shadow`). File access now runs as the customer
+  (`user_exec`, new `user_env_edit` / `is_user_path_nosymlink` helpers).
+- **Demo Sites and the Cache/Redis/SQL page are admin-only on the server**,
+  not only hidden in the menu (private repo clone with the panel GitHub token,
+  shared build user, server-wide slow-query and Redis data).
+- Customers can no longer lift their RAM/CPU limits, switch a domain to the
+  `docker-ui`/`docker-app`/`panelproxy` templates, or use the `.env` secret
+  manager by forging requests; saving the web domain form no longer resets
+  the admin-set cgroup limits or drops the statistics login.
+- `v-apply-mysql-index` checks database ownership; `v-stream-domain-logs` no
+  longer falls back to the server-wide PHP-FPM logs.
+- Sessions are re-validated on every request (deleted account, demoted admin,
+  suspended user); suspended view-only sessions are read-only server-side;
+  `check_return_code_redirect` and the session timeout now stop the request.
+- New regression suite `tests/test_customer_panel_authz.py` (CI).
+
+## [NexviaCP] - End-to-end install & isolation fixes
 
 Findings from a full E2E installation test (Ubuntu 24.04, privileged systemd
 container, nginx + PHP-FPM stack with multi-PHP, MariaDB, PostgreSQL, mail,

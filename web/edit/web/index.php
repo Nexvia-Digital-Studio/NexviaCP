@@ -59,9 +59,17 @@ if (!empty($_GET["git_pull"]) || !empty($_POST["git_pull"])) {
 	}
 }
 
+// .env secret management is an administrator tool (the card is only rendered
+// for admins); customers edit their own .env through the file manager/SFTP.
+$v_can_manage_env = ($_SESSION["userContext"] ?? "") === "admin";
+
 // Action: Save Domain .env Secret (Write-Only)
 if (!empty($_POST["save_env_secret"])) {
 	verify_csrf($_POST);
+	if (!$v_can_manage_env) {
+		header("Location: /edit/web/?domain=" . urlencode($v_domain));
+		exit();
+	}
 	$env_k = quoteshellarg(trim($_POST["env_key"] ?? ""));
 	$env_v = quoteshellarg(trim($_POST["env_value"] ?? ""));
 	if (!empty($_POST["env_key"]) && !empty($_POST["env_value"])) {
@@ -78,7 +86,7 @@ if (!empty($_POST["save_env_secret"])) {
 
 // Action: Delete Domain .env Secret
 if (!empty($_GET["delete_env"]) && !empty($_GET["key"])) {
-	if (verify_csrf($_GET)) {
+	if (verify_csrf($_GET) && $v_can_manage_env) {
 		$env_k = quoteshellarg(trim($_GET["key"]));
 		exec(HESTIA_CMD . "v-delete-web-domain-env " . $user . " " . quoteshellarg($v_domain) . " " . $env_k, $output, $return_var);
 		$_SESSION["ok_msg"] = $is_tr ? "Ortam değişkeni (.env) başarıyla silindi." : _("Environment secret deleted.");
@@ -88,7 +96,9 @@ if (!empty($_GET["delete_env"]) && !empty($_GET["key"])) {
 }
 
 // Fetch masked domain .env secrets
-$domain_env_secrets = json_decode(shell_exec(HESTIA_CMD . "v-list-web-domain-env " . $user . " " . quoteshellarg($v_domain) . " json"), true) ?: [];
+$domain_env_secrets = $v_can_manage_env
+	? (json_decode(shell_exec(HESTIA_CMD . "v-list-web-domain-env " . $user . " " . quoteshellarg($v_domain) . " json"), true) ?: [])
+	: [];
 
 // Check Cloudflare DNS & Zone Status
 $cf_dns_enabled = (($_SESSION["DNS_API_PROVIDER"] ?? "") === "cloudflare");
@@ -273,6 +283,22 @@ if (!empty($_SESSION["PROXY_SYSTEM"])) {
 	unset($output);
 }
 
+// Customers never see the admin-only templates in the drop-downs.
+if (($_SESSION["userContext"] ?? "") !== "admin") {
+	// ...except the one already assigned by an admin, so saving the form
+	// does not silently switch the domain to another template.
+	$templates = array_values(array_diff(
+		(array) $templates,
+		array_diff(nexvia_admin_only_web_templates(), [trim((string) $v_template, "'")]),
+	));
+	if (isset($proxy_templates)) {
+		$proxy_templates = array_values(array_diff(
+			(array) $proxy_templates,
+			array_diff(nexvia_admin_only_web_templates(), [trim((string) $v_proxy_template, "'")]),
+		));
+	}
+}
+
 // List web stat engines
 exec(HESTIA_CMD . "v-list-web-stats json", $output, $return_var);
 $stats = json_decode(implode("", $output), true);
@@ -286,6 +312,26 @@ if (!empty($_POST["save"])) {
 	}
 	// Check token
 	verify_csrf($_POST);
+
+	// Admin-only templates: docker-ui exposes the Portainer console,
+	// docker-app proxies to an admin-managed compose service and panelproxy
+	// fronts the control panel itself. Customers may still pick any other
+	// template (POLICY_USER_EDIT_WEB_TEMPLATES), but never these.
+	if (($_SESSION["userContext"] ?? "") !== "admin") {
+		foreach (["v_template", "v_proxy_template"] as $tpl_field) {
+			$tpl_value = (string) ($_POST[$tpl_field] ?? "");
+			$tpl_current = trim((string) ($tpl_field === "v_template" ? $v_template : $v_proxy_template), "'");
+			if (
+				$tpl_value !== "" &&
+				$tpl_value !== $tpl_current &&
+				in_array($tpl_value, nexvia_admin_only_web_templates(), true)
+			) {
+				$_SESSION["error_msg"] = __tr("This template is reserved for administrators.", "Bu şablon yalnızca yöneticiler içindir.");
+				header("Location: /edit/web/?domain=" . urlencode($v_domain));
+				exit();
+			}
+		}
+	}
 
 	// Change web domain IP
 	$v_newip = "";
@@ -815,10 +861,18 @@ if (!empty($_POST["save"])) {
 		}
 
 		// NexviaCP per-domain cgroup limits (baseline + peak + cpu).
-		if (empty($_SESSION["error_msg"])) {
-			$post_high = trim($_POST["v_web_cgroup_high"] ?? "");
-			$post_max = trim($_POST["v_web_cgroup_max"] ?? "");
-			$post_cpu = trim($_POST["v_web_cpu_quota"] ?? "");
+		// Resource limits are set by the administrator (they enforce the
+		// customer's package), so only an admin may change them, and only
+		// when the form really carried the fields: a form without them must
+		// never be read as "set everything to unlimited".
+		if (
+			empty($_SESSION["error_msg"]) &&
+			($_SESSION["userContext"] ?? "") === "admin" &&
+			(isset($_POST["v_web_cgroup_high"]) || isset($_POST["v_web_cgroup_max"]) || isset($_POST["v_web_cpu_quota"]))
+		) {
+			$post_high = trim($_POST["v_web_cgroup_high"] ?? trim((string) $v_web_cgroup_high, "'"));
+			$post_max = trim($_POST["v_web_cgroup_max"] ?? trim((string) $v_web_cgroup_max, "'"));
+			$post_cpu = trim($_POST["v_web_cpu_quota"] ?? trim((string) $v_web_cpu_quota, "'"));
 			// Treat "unlimited" sentinel consistently.
 			if ($post_high === "unlimited") $post_high = "";
 			if ($post_max === "unlimited") $post_max = "";
@@ -1254,7 +1308,10 @@ if (!empty($_POST["save"])) {
 	}
 
 	// Delete web stats authorization
-	if (!empty($v_stats_user) && empty($_POST["v_stats_auth"]) && empty($_SESSION["error_msg"])) {
+	// The statistics-authorization fields are only rendered for administrators;
+	// a customer saving the form must not silently drop an existing stats login.
+	$v_stats_auth_editable = ($_SESSION["userContext"] ?? "") === "admin";
+	if (!empty($v_stats_user) && empty($_POST["v_stats_auth"]) && empty($_SESSION["error_msg"]) && $v_stats_auth_editable) {
 		exec(
 			HESTIA_CMD . "v-delete-web-domain-stats-user " . $user . " " . quoteshellarg($v_domain),
 			$output,
@@ -1267,7 +1324,7 @@ if (!empty($_POST["save"])) {
 	}
 
 	// Change web stats user or password
-	if (empty($v_stats_user) && !empty($_POST["v_stats_auth"]) && empty($_SESSION["error_msg"])) {
+	if (empty($v_stats_user) && !empty($_POST["v_stats_auth"]) && empty($_SESSION["error_msg"]) && $v_stats_auth_editable) {
 		if (empty($_POST["v_stats_user"])) {
 			$errors[] = _("Username");
 		}
@@ -1307,7 +1364,7 @@ if (!empty($_POST["save"])) {
 	}
 
 	// Add web stats authorization
-	if (!empty($v_stats_user) && !empty($_POST["v_stats_auth"]) && empty($_SESSION["error_msg"])) {
+	if (!empty($v_stats_user) && !empty($_POST["v_stats_auth"]) && empty($_SESSION["error_msg"]) && $v_stats_auth_editable) {
 		if (empty($_POST["v_stats_user"])) {
 			$errors[] = _("Username");
 		}

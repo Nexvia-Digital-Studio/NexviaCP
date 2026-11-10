@@ -60,6 +60,13 @@ check_hestia_demo_mode
 docroot="$HOMEDIR/$user/web/$domain/public_html"
 domain_home="$HOMEDIR/$user/web/$domain"
 
+# Everything below lives in the customer's home and the checked-out repo is
+# customer-controlled (it may ship deploy.php/deploy.sh as symlinks). File
+# operations therefore run as the customer (user_exec); the only root-side
+# change left (deploy.php group) uses chown -h, which never follows links.
+is_user_path_nosymlink "$domain_home"
+is_user_path_nosymlink "$docroot"
+
 # Validate repository URL (allow http(s), git, ssh forms).
 case "$repo_url" in
 	http://*|https://*|git://*|git@*|ssh://*) : ;;
@@ -70,8 +77,8 @@ esac
 
 # Preserve the deploy.php webhook receiver before cloning (skel ships it).
 preserve_deploy_php=""
-if [ -f "$docroot/deploy.php" ]; then
-	preserve_deploy_php=$(cat "$docroot/deploy.php")
+if user_exec test -f "$docroot/deploy.php"; then
+	preserve_deploy_php=$(user_exec cat -- "$docroot/deploy.php")
 fi
 
 # Initialize the working tree as a git repo and fetch the requested branch.
@@ -104,19 +111,21 @@ user_exec git -C "$docroot" checkout -B "${branch:-main}" "origin/${branch:-main
 # Restore the webhook receiver if it was clobbered by the clone; install it
 # from the skeleton when missing (domains provisioned before this feature, or
 # wiped by v-deploy-github-repo, have no deploy.php at all).
-if [ -n "$preserve_deploy_php" ] && [ ! -f "$docroot/deploy.php" ]; then
-	printf '%s' "$preserve_deploy_php" > "$docroot/deploy.php"
-elif [ ! -f "$docroot/deploy.php" ] && [ -f "$WEBTPL/skel/public_html/deploy.php" ]; then
-	cp -f "$WEBTPL/skel/public_html/deploy.php" "$docroot/deploy.php"
+if [ -n "$preserve_deploy_php" ] && ! user_exec test -f "$docroot/deploy.php"; then
+	printf '%s' "$preserve_deploy_php" | user_exec tee -- "$docroot/deploy.php" > /dev/null
+elif ! user_exec test -f "$docroot/deploy.php" && [ -f "$WEBTPL/skel/public_html/deploy.php" ]; then
+	user_exec rm -f -- "$docroot/deploy.php"
+	user_exec tee -- "$docroot/deploy.php" < "$WEBTPL/skel/public_html/deploy.php" > /dev/null
 fi
 
 # (Re)generate deploy.sh with the correct branch baked in.
 deploy_sh="$domain_home/deploy.sh"
+user_exec rm -f -- "$deploy_sh"
 if [ -f "$WEBTPL/skel/deploy.sh" ]; then
-	cp -f "$WEBTPL/skel/deploy.sh" "$deploy_sh"
+	user_exec tee -- "$deploy_sh" < "$WEBTPL/skel/deploy.sh" > /dev/null
 else
 	# Minimal fallback if the skel template is unavailable.
-	cat > "$deploy_sh" <<EOF
+	user_exec tee -- "$deploy_sh" > /dev/null <<EOF
 #!/bin/bash
 set -e
 cd "$docroot"
@@ -127,9 +136,8 @@ git reset --hard "origin/${branch:-main}"
 command -v pm2 >/dev/null && pm2 reload all --silent || true
 EOF
 fi
-sed -i "s|%branch%|${branch:-main}|g" "$deploy_sh"
-chown "$user:$user" "$deploy_sh"
-chmod 700 "$deploy_sh"
+user_exec sed -i "s|%branch%|${branch:-main}|g" "$deploy_sh"
+user_exec chmod 700 -- "$deploy_sh"
 
 # Make sure the deploy secret exists (older domains created before this
 # feature may not have one yet).
@@ -145,10 +153,10 @@ fi
 
 # Re-inject the secret into deploy.php (it may have been overwritten by clone).
 deploy_php="$docroot/deploy.php"
-if [ -f "$deploy_php" ]; then
+if user_exec test -f "$deploy_php"; then
 	# If deploy.php still has the placeholder, fill it; otherwise leave as-is.
-	if grep -q '%deploy_secret%' "$deploy_php" 2>/dev/null; then
-		sed -i "s/%deploy_secret%/$secret/g" "$deploy_php"
+	if user_exec grep -q '%deploy_secret%' "$deploy_php" 2>/dev/null; then
+		user_exec sed -i "s/%deploy_secret%/$secret/g" "$deploy_php"
 	fi
 fi
 
@@ -161,28 +169,28 @@ update_object_value 'web' 'DOMAIN' "$domain" '$GIT_REPO' "$git_repo_clean"
 add_object_key 'web' 'DOMAIN' "$domain" 'GIT_BRANCH' 'TIME'
 update_object_value 'web' 'DOMAIN' "$domain" '$GIT_BRANCH' "${branch:-main}"
 
-# Fix ownership of docroot after git operations.
-chown -R "$user:$user" "$docroot"
-find "$docroot" -type d -exec chmod 755 {} \;
-find "$docroot" -type f -exec chmod 644 {} \; 2>/dev/null || true
+# Normalise permissions after git operations (as the owner: every file here
+# was created by user_exec, and find -P never follows symlinks).
+user_exec find "$docroot" -type d -exec chmod 755 {} + 2>/dev/null || true
+user_exec find "$docroot" -type f -exec chmod 644 {} + 2>/dev/null || true
 
 # Secret-bearing files must not stay world-readable after the blanket 644
 # (parity with the hardening in v-update-web-domain-git). .env carries DB
 # credentials / APP_KEY; .git/config may embed the pull credentials.
 for secret in "$docroot"/.env "$docroot"/.env.bak-*; do
 	if [ -f "$secret" ] && [ ! -L "$secret" ]; then
-		chmod 600 "$secret"
+		user_exec chmod 600 -- "$secret"
 	fi
 done
-[ -d "$docroot/.git" ] && [ ! -L "$docroot/.git" ] && chmod -R 700 "$docroot/.git"
+[ -d "$docroot/.git" ] && [ ! -L "$docroot/.git" ] && user_exec chmod -R 700 -- "$docroot/.git"
 
 # Harden the webhook receiver: deploy.php contains the HMAC secret that can
 # trigger code deployment, so it must NOT be world-readable. 644 would let any
 # other tenant (or any local process) read the secret. Restrict to owner + the
 # web server group only (WEB_RGROUPS, e.g. www-data).
-if [ -f "$deploy_php" ]; then
-	chown "$user:${WEB_RGROUPS:-www-data}" "$deploy_php"
-	chmod 640 "$deploy_php"
+if [ -f "$deploy_php" ] && [ ! -L "$deploy_php" ]; then
+	chown -h "$user:${WEB_RGROUPS:-www-data}" "$deploy_php"
+	user_exec chmod 640 -- "$deploy_php"
 fi
 
 #----------------------------------------------------------#

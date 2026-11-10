@@ -88,12 +88,9 @@ case "$log_type" in
 		;;
 	php|php-error)
 		for candidate in \
-			"$HOMEDIR/${user}/web/${clean_domain}/logs/php-error.log" \
-			"/var/log/php/php-error.log" \
-			"/var/log/php8.3-fpm.log" \
-			"/var/log/php8.2-fpm.log" \
-			"/var/log/php8.1-fpm.log" \
-			"/var/log/php7.4-fpm.log"; do
+			"$HOMEDIR/${user}/web/${clean_domain}/logs/php-error.log"; do
+			# No fallback to the server-wide PHP/FPM logs: they mix every
+			# tenant's errors (paths, queries, stack traces).
 			if [ -f "$candidate" ]; then
 				log_file="$candidate"
 				break
@@ -115,12 +112,20 @@ case "$log_type" in
 		;;
 esac
 
+# Files inside the customer's home are customer-controlled (a planted symlink
+# could point at /etc/shadow or another tenant's log): read them with the
+# customer's privileges. Root-owned /var/log paths are read directly.
+log_tail=(tail)
+if [ -n "$log_file" ] && [[ "$log_file" == "$HOMEDIR/"* ]]; then
+	log_tail=(user_exec tail)
+fi
+
 # 1. Follow / Live Stream Mode (Raw / Text Stream)
 if [ "$follow" = "yes" ]; then
 	if [ "$log_type" = "app" ] || [ "$log_type" = "unit" ]; then
 		journalctl -u "${systemd_unit}.service" -f -n "$lines" --no-pager 2>/dev/null
 	elif [ -n "$log_file" ] && [ -f "$log_file" ]; then
-		tail -n "$lines" -f "$log_file"
+		"${log_tail[@]}" -n "$lines" -f -- "$log_file"
 	else
 		echo "[!] No log stream found for $clean_domain ($log_type)"
 	fi
@@ -173,7 +178,7 @@ if [ "$format" = "json" ]; then
 			done <<< "$raw_lines"
 		fi
 	elif [ -n "$log_file" ] && [ -f "$log_file" ]; then
-		raw_lines=$(tail -n "$lines" "$log_file" 2>/dev/null || true)
+		raw_lines=$("${log_tail[@]}" -n "$lines" -- "$log_file" 2>/dev/null || true)
 		if [ -n "$raw_lines" ]; then
 			idx=0
 			while IFS= read -r line || [ -n "$line" ]; do
@@ -262,7 +267,7 @@ else
 	if [ "$log_type" = "app" ] || [ "$log_type" = "unit" ]; then
 		journalctl -u "${systemd_unit}.service" -n "$lines" --no-pager 2>/dev/null || echo "No logs found for $systemd_unit"
 	elif [ -n "$log_file" ] && [ -f "$log_file" ]; then
-		tail -n "$lines" "$log_file"
+		"${log_tail[@]}" -n "$lines" -- "$log_file"
 	else
 		echo "Log file for $clean_domain ($log_type) is empty or does not exist."
 	fi
