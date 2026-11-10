@@ -1877,6 +1877,50 @@ user_exec() {
 	setpriv --groups "$user_groups" --reuid "$user" --regid "$user" -- "${@}"
 }
 
+# Fail unless PATH resolves to itself inside the current $user's home.
+# Root-run scripts must call this before touching anything in a customer's
+# home: the customer owns those directories and can swap any component for
+# a symlink (to /etc, or into another customer's home) between runs.
+# (Symlinks above the user's home, e.g. /home -> /data/home, set up by the
+# administrator are fine: only the part the user controls is checked.)
+is_user_path_nosymlink() {
+	local path="$1" home="$HOMEDIR/$user" home_real resolved
+	home_real=$(realpath -m -- "$home" 2>/dev/null)
+	resolved=$(realpath -m -- "$path" 2>/dev/null)
+	if [ -z "$home_real" ] || [ -z "$resolved" ] || [[ "$path" != "$home/"* ]] \
+		|| [ "$resolved" != "$home_real/${path#"$home"/}" ]; then
+		check_result "$E_FORBIDEN" "unsafe path (symlink or outside the user's home): $path"
+	fi
+}
+
+# Set (3 args) or remove (2 args) KEY in a dotenv FILE that lives in the
+# user's home. Every read and write runs with the user's own privileges
+# (user_exec), so a symlinked .env can never make root read, chmod or chown
+# a system file or another tenant's file. KEY must be [A-Za-z0-9_]+.
+user_env_edit() {
+	local file="$1" key="$2" set_value=0 value="" dir tmp
+	if [ "$#" -ge 3 ]; then
+		set_value=1
+		value="$3"
+	fi
+	if ! [[ "$key" =~ ^[A-Za-z0-9_]+$ ]]; then
+		return 1
+	fi
+	dir=$(dirname -- "$file")
+	tmp=$(user_exec mktemp -- "$dir/.env.nexvia.XXXXXX") || return 1
+	{
+		user_exec cat -- "$file" 2>/dev/null | grep -v -- "^${key}="
+		if [ "$set_value" = "1" ]; then
+			printf '%s="%s"\n' "$key" "$(printf '%s' "$value" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+		fi
+	} | user_exec tee -- "$tmp" > /dev/null || {
+		user_exec rm -f -- "$tmp"
+		return 1
+	}
+	user_exec chmod 600 -- "$tmp"
+	user_exec mv -f -- "$tmp" "$file"
+}
+
 # Simple chmod wrapper that skips symlink files after glob expand
 no_symlink_chmod() {
 	local filemode=$1

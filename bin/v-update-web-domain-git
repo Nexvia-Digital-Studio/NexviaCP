@@ -16,6 +16,7 @@ source_conf "$HESTIA/conf/hestia.conf"
 check_args '2' "$#" 'USER DOMAIN'
 is_format_valid 'user' 'domain'
 is_object_valid 'user' 'USER' "$user"
+is_object_valid 'web' 'DOMAIN' "$domain"
 
 # Ensure root
 if [ "x$(id -u)" != 'x0' ]; then
@@ -24,6 +25,12 @@ if [ "x$(id -u)" != 'x0' ]; then
 fi
 
 docroot="$HOMEDIR/$user/web/$domain/public_html"
+
+# The docroot is customer-controlled: refuse a symlinked path (it could point
+# at /etc or another tenant's site and make the root-side permission fix-up
+# below hand those files to this user).
+is_user_path_nosymlink "$HOMEDIR/$user/web/$domain"
+is_user_path_nosymlink "$docroot"
 
 if [ ! -d "$docroot/.git" ]; then
 	check_result "$E_NOTEXIST" "Domain $domain is not a git repository."
@@ -111,24 +118,25 @@ if ls "$docroot"/*.csproj &>/dev/null && command -v dotnet &>/dev/null; then
 	su - "$user" -s /bin/bash -c "cd '$docroot' && dotnet publish -c Release -o '$docroot/publish'" 2>&1 || true
 fi
 
-# Permissions Hardening
-chown -R "$user:$user" "$docroot"
-find "$docroot" -type d -exec chmod 755 {} + 2>/dev/null || true
-find "$docroot" -type f -exec chmod 644 {} + 2>/dev/null || true
+# Permissions Hardening. Ownership is fixed with -h/-P (never follow a
+# symlink the repo or the customer planted); modes are set as the owner.
+chown -R -h -P "$user:$user" "$docroot"
+user_exec find "$docroot" -type d -exec chmod 755 {} + 2>/dev/null || true
+user_exec find "$docroot" -type f -exec chmod 644 {} + 2>/dev/null || true
 # Secret-bearing files must NOT stay world-readable after the blanket 644:
 # - .env and scanner backups (.env.bak-*) carry DB credentials / APP_KEY
 # - deploy.php embeds the per-domain HMAC deploy secret
 for secret in "$docroot"/.env "$docroot"/.env.bak-* "$docroot"/deploy.php; do
 	if [ -f "$secret" ] && [ ! -L "$secret" ]; then
-		chmod 600 "$secret"
+		user_exec chmod 600 -- "$secret"
 	fi
 done
 # deploy.php must additionally stay readable by the web server group.
 if [ -f "$docroot/deploy.php" ] && [ ! -L "$docroot/deploy.php" ]; then
-	chown "$user:${WEB_RGROUPS:-www-data}" "$docroot/deploy.php"
-	chmod 640 "$docroot/deploy.php"
+	chown -h "$user:${WEB_RGROUPS:-www-data}" "$docroot/deploy.php"
+	user_exec chmod 640 -- "$docroot/deploy.php"
 fi
-[ -d "$docroot/.git" ] && [ ! -L "$docroot/.git" ] && chmod -R 700 "$docroot/.git"
+[ -d "$docroot/.git" ] && [ ! -L "$docroot/.git" ] && user_exec chmod -R 700 -- "$docroot/.git"
 
 # Restart isolated app service if configured
 unit_name="hestia-app-${user}-${domain}"

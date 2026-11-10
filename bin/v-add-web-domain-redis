@@ -101,41 +101,28 @@ else
 	fi
 fi
 
-# Locate project document root and target .env paths
+# Locate project document root and target .env paths. These live in the
+# customer's home: every access below runs as the customer (user_exec /
+# user_env_edit) so a planted symlink cannot redirect a root read or write.
 docroot="$HOMEDIR/$user/web/$domain/public_html"
-if [ ! -d "$docroot" ]; then
-	mkdir -p "$docroot"
-	chown "$user:$user" "$docroot"
+is_user_path_nosymlink "$docroot"
+if ! user_exec test -d "$docroot"; then
+	user_exec mkdir -p -- "$docroot"
 fi
 
 env_targets=("$docroot/.env")
 
 # Also check private/.env or domain root .env if they exist
-if [ -d "$HOMEDIR/$user/web/$domain/private" ]; then
+if user_exec test -d "$HOMEDIR/$user/web/$domain/private"; then
 	env_targets+=("$HOMEDIR/$user/web/$domain/private/.env")
 fi
-if [ -f "$HOMEDIR/$user/web/$domain/.env" ]; then
+if user_exec test -f "$HOMEDIR/$user/web/$domain/.env"; then
 	env_targets+=("$HOMEDIR/$user/web/$domain/.env")
 fi
 
-# Function to inject or update key in .env file safely
+# Inject or update key in .env file safely (as the domain owner)
 inject_env_var() {
-	local file="$1"
-	local key="$2"
-	local val="$3"
-
-	touch "$file"
-	local tmp_env
-	tmp_env=$(mktemp /tmp/nexvia_env_XXXXXX)
-	chmod 600 "$tmp_env"
-
-	if [ -f "$file" ]; then
-		grep -v "^${key}=" "$file" > "$tmp_env" 2>/dev/null || true
-	fi
-	echo "${key}=\"${val}\"" >> "$tmp_env"
-	mv -f "$tmp_env" "$file"
-	chmod 600 "$file"
-	chown "$user:$user" "$file"
+	user_env_edit "$1" "$2" "$3"
 }
 
 for env_file in "${env_targets[@]}"; do

@@ -18,38 +18,41 @@ format=${3:-json}
 
 is_format_valid 'user' 'domain'
 is_object_valid 'user' 'USER' "$user"
+USER_DATA=$HESTIA/data/users/$user
+is_object_valid 'web' 'DOMAIN' "$domain"
 
-env_file="$HOMEDIR/$user/web/$domain/public_html/.env"
+docroot="$HOMEDIR/$user/web/$domain/public_html"
+env_file="$docroot/.env"
+is_user_path_nosymlink "$docroot"
 
-if [ ! -f "$env_file" ]; then
+# Read the file as the domain owner: a symlinked .env must not let root
+# disclose (even only the key names of) a file the user cannot read.
+if ! env_content=$(user_exec cat -- "$env_file" 2>/dev/null); then
 	if [ "$format" = "json" ]; then
 		echo "{}"
 	fi
 	exit 0
 fi
 
-python3 - "$env_file" "$format" << 'PYEOF'
-import sys, json, os
+NEXVIA_ENV_CONTENT="$env_content" python3 - "$format" << 'PYEOF'
+import json, os, sys
 
-env_path = sys.argv[1]
-format_type = sys.argv[2] if len(sys.argv) > 2 else "json"
+format_type = sys.argv[1] if len(sys.argv) > 1 else "json"
 
 res = {}
-if os.path.exists(env_path):
-    with open(env_path, 'r', errors='ignore') as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            if '=' in line:
-                key, _ = line.split('=', 1)
-                key = key.strip()
-                if key:
-                    res[key] = {
-                        "KEY": key,
-                        "MASKED": "••••••••••••••••",
-                        "EXISTS": "yes"
-                    }
+for line in os.environ.get("NEXVIA_ENV_CONTENT", "").splitlines():
+    line = line.strip()
+    if not line or line.startswith('#'):
+        continue
+    if '=' in line:
+        key, _ = line.split('=', 1)
+        key = key.strip()
+        if key:
+            res[key] = {
+                "KEY": key,
+                "MASKED": "••••••••••••••••",
+                "EXISTS": "yes"
+            }
 
 if format_type == "json":
     print(json.dumps(res, indent=4))

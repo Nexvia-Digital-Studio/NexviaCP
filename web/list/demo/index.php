@@ -11,6 +11,16 @@ $TAB = "DEMO";
 include $_SERVER["DOCUMENT_ROOT"] . "/inc/main.php";
 
 $v_is_admin = ($_SESSION["userContext"] ?? "") === "admin";
+
+// Demo sites are an agency tool (publish a repo for a client to preview).
+// Publishing clones with the panel's GitHub token, runs repo build/install
+// commands on the server under a build user shared by every demo and serves
+// PHP from one shared demo pool, so a customer account must never reach it:
+// it would grant private-repo access and cross-tenant code execution.
+if (!$v_is_admin) {
+	header("Location: /list/web/");
+	exit();
+}
 $v_host = $_SERVER["HTTP_HOST"] ?? "";
 
 // Check POST requests

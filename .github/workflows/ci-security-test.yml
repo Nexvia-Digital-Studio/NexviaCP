@@ -33,3 +33,7 @@ jobs:
       - name: Run NexviaCP Security & Syntax Test Suite
         run: |
           python3 tests/ci_security_audit.py
+
+      - name: Run Customer Panel Authorization Tests
+        run: |
+          python3 tests/test_customer_panel_authz.py
